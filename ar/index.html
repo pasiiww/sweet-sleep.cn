@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>AR</title>
+  <link rel="icon" href="data:,">
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: #050505;
+      color: #fff;
+      font-family: Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    #ar-container {
+      position: fixed;
+      inset: 0;
+      overflow: hidden;
+      background: #000;
+    }
+
+    .hud {
+      position: fixed;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: radial-gradient(circle at center, rgba(255, 255, 255, 0.08), rgba(0, 0, 0, 0.92));
+      z-index: 5;
+    }
+
+    .panel {
+      width: min(360px, calc(100vw - 40px));
+      display: grid;
+      gap: 14px;
+      justify-items: center;
+      text-align: center;
+    }
+
+    .title {
+      font-size: 22px;
+      font-weight: 700;
+    }
+
+    .status {
+      min-height: 22px;
+      color: rgba(255, 255, 255, 0.72);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    button,
+    a {
+      min-height: 40px;
+      padding: 0 16px;
+      border: 1px solid rgba(255, 255, 255, 0.28);
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.12);
+      color: #fff;
+      font-size: 15px;
+      line-height: 38px;
+      text-decoration: none;
+      cursor: pointer;
+      backdrop-filter: blur(8px);
+    }
+
+    button.primary {
+      background: #fff;
+      color: #000;
+      border-color: #fff;
+    }
+
+    .topbar {
+      position: fixed;
+      top: max(12px, env(safe-area-inset-top));
+      left: max(12px, env(safe-area-inset-left));
+      right: max(12px, env(safe-area-inset-right));
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      z-index: 4;
+      pointer-events: none;
+    }
+
+    .topbar a,
+    .topbar button {
+      pointer-events: auto;
+      min-height: 36px;
+      padding: 0 12px;
+      font-size: 14px;
+      line-height: 34px;
+      background: rgba(0, 0, 0, 0.58);
+    }
+
+    .topbar .right-actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .capture-button {
+      position: fixed;
+      left: 50%;
+      bottom: max(28px, calc(env(safe-area-inset-bottom) + 24px));
+      width: 76px;
+      height: 76px;
+      min-height: 76px;
+      padding: 0;
+      border: 2px solid rgba(185, 185, 190, 0.82);
+      border-radius: 50%;
+      background: rgba(18, 18, 20, 0.86);
+      box-shadow:
+        0 0 0 4px rgba(58, 58, 62, 0.88),
+        0 0 0 7px rgba(3, 3, 4, 0.92),
+        0 10px 28px rgba(0, 0, 0, 0.42);
+      color: transparent;
+      font-size: 0;
+      line-height: 1;
+      z-index: 4;
+      opacity: 0;
+      pointer-events: none;
+      transform: translate(-50%, 18px) scale(0.74);
+      transition:
+        opacity 220ms ease,
+        transform 280ms cubic-bezier(0.2, 0.9, 0.24, 1.22);
+    }
+
+    .capture-button.is-visible {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translate(-50%, 0) scale(1);
+      animation: capture-pop 520ms cubic-bezier(0.17, 0.84, 0.34, 1.28);
+    }
+
+    .capture-button::before {
+      content: "";
+      position: absolute;
+      inset: 10px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow:
+        inset 0 0 0 1px rgba(0, 0, 0, 0.08),
+        0 0 0 2px rgba(255, 255, 255, 0.58);
+    }
+
+    .capture-button:active {
+      transform: translate(-50%, 0) scale(0.92);
+    }
+
+    .capture-button:disabled {
+      opacity: 0.62;
+    }
+
+    .tracking {
+      position: fixed;
+      left: 50%;
+      bottom: max(16px, env(safe-area-inset-bottom));
+      transform: translateX(-50%);
+      max-width: calc(100vw - 32px);
+      padding: 10px 12px;
+      border-radius: 6px;
+      background: rgba(0, 0, 0, 0.58);
+      color: rgba(255, 255, 255, 0.82);
+      font-size: 13px;
+      text-align: center;
+      z-index: 4;
+      transition: opacity 160ms ease;
+    }
+
+    body.photo-ready .tracking {
+      bottom: max(118px, calc(env(safe-area-inset-bottom) + 112px));
+    }
+
+    .hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    @keyframes capture-pop {
+      0% {
+        opacity: 0;
+        transform: translate(-50%, 18px) scale(0.68);
+      }
+
+      62% {
+        opacity: 1;
+        transform: translate(-50%, -4px) scale(1.08);
+      }
+
+      100% {
+        opacity: 1;
+        transform: translate(-50%, 0) scale(1);
+      }
+    }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "./vendor/three/build/three.module.js",
+        "three/addons/": "./vendor/three/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <main id="ar-container"></main>
+
+  <nav class="topbar">
+    <a href="/">首页</a>
+    <div class="right-actions">
+      <button type="button" id="stopButton">停止</button>
+    </div>
+  </nav>
+
+  <section class="hud" id="hud">
+    <div class="panel">
+      <div class="title">AR</div>
+      <div class="status" id="status">准备启动摄像头</div>
+      <div class="actions">
+        <button type="button" class="primary" id="startButton">启动 AR</button>
+        <a href="/">返回首页</a>
+      </div>
+    </div>
+  </section>
+
+  <div class="tracking" id="tracking">对准识别图案</div>
+  <button type="button" class="capture-button" id="captureButton" aria-label="拍照"></button>
+
+  <video id="overlayVideo" src="./assets/overlay.mp4" loop muted playsinline webkit-playsinline preload="auto" style="display:none"></video>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { MindARThree } from './vendor/mindar-image-three.prod.js';
+
+    const container = document.getElementById('ar-container');
+    const hud = document.getElementById('hud');
+    const status = document.getElementById('status');
+    const startButton = document.getElementById('startButton');
+    const stopButton = document.getElementById('stopButton');
+    const captureButton = document.getElementById('captureButton');
+    const tracking = document.getElementById('tracking');
+    const overlayVideo = document.getElementById('overlayVideo');
+    const targetAspect = 2471 / 1598;
+
+    let mindarThree;
+    let started = false;
+    let anchor;
+    let contentGroup;
+    let hasSeenTarget = false;
+    let lastCameraSettings = null;
+
+    async function init() {
+      status.textContent = '加载 AR 引擎...';
+
+      mindarThree = new MindARThree({
+        container,
+        imageTargetSrc: './assets/targets.mind',
+        maxTrack: 1,
+        filterMinCF: 0.0001,
+        filterBeta: 0.001,
+      });
+
+      const { renderer, scene, camera } = mindarThree;
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+      const ambient = new THREE.HemisphereLight(0xffffff, 0x222222, 2.2);
+      scene.add(ambient);
+
+      anchor = mindarThree.addAnchor(0);
+      anchor.group.visible = false;
+      contentGroup = new THREE.Group();
+      contentGroup.visible = false;
+      contentGroup.matrixAutoUpdate = false;
+      scene.add(contentGroup);
+
+      const imageTexture = await new THREE.TextureLoader().loadAsync('./assets/target.png');
+      imageTexture.colorSpace = THREE.SRGBColorSpace;
+
+      const imageMaterial = new THREE.MeshBasicMaterial({
+        map: imageTexture,
+        transparent: true,
+        opacity: 0.96,
+        side: THREE.DoubleSide,
+      });
+      const imagePlaneHeight = 0.72;
+      const imagePlaneWidth = targetAspect * imagePlaneHeight;
+      const imagePlane = new THREE.Mesh(new THREE.PlaneGeometry(imagePlaneWidth, imagePlaneHeight), imageMaterial);
+      imagePlane.rotation.x = Math.PI / 2;
+      imagePlane.position.set(-0.32, 0.08, imagePlaneHeight / 2);
+      contentGroup.add(imagePlane);
+
+      const videoTexture = new THREE.VideoTexture(overlayVideo);
+      videoTexture.colorSpace = THREE.SRGBColorSpace;
+      const videoMaterial = new THREE.MeshBasicMaterial({
+        map: videoTexture,
+        side: THREE.DoubleSide,
+      });
+      const videoPlaneHeight = 0.46;
+      const videoPlaneWidth = 0.72;
+      const videoPlane = new THREE.Mesh(new THREE.PlaneGeometry(videoPlaneWidth, videoPlaneHeight), videoMaterial);
+      videoPlane.rotation.x = Math.PI / 2;
+      videoPlane.position.set(0.44, -0.2, videoPlaneHeight / 2);
+      contentGroup.add(videoPlane);
+
+      const frame = new THREE.Mesh(
+        new THREE.PlaneGeometry(videoPlaneWidth + 0.04, videoPlaneHeight + 0.04),
+        new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.18, side: THREE.DoubleSide })
+      );
+      frame.rotation.x = Math.PI / 2;
+      frame.position.set(0.44, -0.2, videoPlaneHeight / 2 - 0.01);
+      contentGroup.add(frame);
+
+      anchor.onTargetFound = () => {
+        hasSeenTarget = true;
+        contentGroup.visible = true;
+        syncContentToAnchor();
+        showCaptureButton();
+        tracking.textContent = '已识别';
+        tracking.classList.add('hidden');
+        overlayVideo.play().catch(() => {});
+      };
+
+      anchor.onTargetLost = () => {
+        contentGroup.visible = hasSeenTarget;
+        tracking.textContent = '保持上次位置，重新对准可继续跟踪';
+        tracking.classList.remove('hidden');
+      };
+
+      renderer.setAnimationLoop(() => {
+        if (hasSeenTarget && anchor.group.visible) {
+          syncContentToAnchor();
+        }
+        renderer.render(scene, camera);
+      });
+
+      status.textContent = '准备启动摄像头';
+    }
+
+    startButton.addEventListener('click', async () => {
+      try {
+        startButton.disabled = true;
+        if (!mindarThree) {
+          await init();
+        }
+        status.textContent = '启动摄像头...';
+        await overlayVideo.play().catch(() => {});
+        overlayVideo.pause();
+        overlayVideo.currentTime = 0;
+        await startMindARWithHighResolutionCamera();
+        started = true;
+        hud.classList.add('hidden');
+        hideCaptureButton();
+        tracking.classList.remove('hidden');
+      } catch (error) {
+        console.error(error);
+        status.textContent = '启动失败，请检查摄像头权限';
+        startButton.disabled = false;
+      }
+    });
+
+    stopButton.addEventListener('click', async () => {
+      if (!started || !mindarThree) {
+        hud.classList.remove('hidden');
+        return;
+      }
+      await mindarThree.stop();
+      overlayVideo.pause();
+      started = false;
+      hasSeenTarget = false;
+      hideCaptureButton();
+      if (anchor) {
+        anchor.group.visible = false;
+      }
+      if (contentGroup) {
+        contentGroup.visible = false;
+      }
+      hud.classList.remove('hidden');
+      tracking.classList.remove('hidden');
+      tracking.textContent = '对准识别图案';
+      startButton.disabled = false;
+      status.textContent = '已停止';
+    });
+
+    captureButton.addEventListener('click', async () => {
+      if (!started || !mindarThree) {
+        showTrackingMessage('请先启动 AR');
+        return;
+      }
+
+      try {
+        captureButton.disabled = true;
+        showTrackingMessage('正在保存照片...');
+        const blob = await captureCurrentFrame();
+        await savePhoto(blob);
+        showTrackingMessage('照片已生成，可保存到相册');
+      } catch (error) {
+        console.error(error);
+        showTrackingMessage('保存失败，请再试一次');
+      } finally {
+        captureButton.disabled = false;
+      }
+    });
+
+    function syncContentToAnchor() {
+      if (!anchor || !contentGroup) {
+        return;
+      }
+
+      anchor.group.updateMatrixWorld(true);
+      contentGroup.matrix.copy(anchor.group.matrixWorld);
+      contentGroup.matrix.decompose(contentGroup.position, contentGroup.quaternion, contentGroup.scale);
+      contentGroup.updateMatrixWorld(true);
+    }
+
+    async function captureCurrentFrame() {
+      const cameraVideo = getCameraVideo();
+      if (!cameraVideo || cameraVideo.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+        throw new Error('Camera video is not ready');
+      }
+
+      const dpr = getCaptureScale(cameraVideo);
+      const width = Math.max(1, Math.round(window.innerWidth * dpr));
+      const height = Math.max(1, Math.round(window.innerHeight * dpr));
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext('2d');
+      context.fillStyle = '#000';
+      context.fillRect(0, 0, width, height);
+
+      drawVideoCover(context, cameraVideo, getElementRect(cameraVideo), dpr);
+
+      const { renderer, scene, camera } = mindarThree;
+      const renderRect = getElementRect(renderer.domElement);
+      const snapshotRenderer = new THREE.WebGLRenderer({
+        antialias: true,
+        alpha: true,
+        preserveDrawingBuffer: true,
+      });
+      snapshotRenderer.outputColorSpace = THREE.SRGBColorSpace;
+      snapshotRenderer.setPixelRatio(1);
+      snapshotRenderer.setSize(
+        Math.max(1, Math.round(renderRect.width * dpr)),
+        Math.max(1, Math.round(renderRect.height * dpr)),
+        false
+      );
+      snapshotRenderer.render(scene, camera);
+      context.drawImage(
+        snapshotRenderer.domElement,
+        Math.round(renderRect.left * dpr),
+        Math.round(renderRect.top * dpr),
+        Math.round(renderRect.width * dpr),
+        Math.round(renderRect.height * dpr)
+      );
+      snapshotRenderer.dispose();
+      snapshotRenderer.forceContextLoss();
+
+      return new Promise((resolve, reject) => {
+        canvas.toBlob((blob) => {
+          if (blob) {
+            resolve(blob);
+          } else {
+            reject(new Error('Could not create image'));
+          }
+        }, 'image/png', 0.96);
+      });
+    }
+
+    function getCameraVideo() {
+      if (mindarThree?.video && mindarThree.video !== overlayVideo) {
+        return mindarThree.video;
+      }
+      return Array.from(container.querySelectorAll('video')).find((video) => video !== overlayVideo) || null;
+    }
+
+    function getElementRect(element) {
+      const rect = element.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        return rect;
+      }
+      return {
+        left: 0,
+        top: 0,
+        width: window.innerWidth,
+        height: window.innerHeight,
+      };
+    }
+
+    function drawVideoCover(context, video, rect, dpr) {
+      const destination = {
+        x: Math.round(rect.left * dpr),
+        y: Math.round(rect.top * dpr),
+        width: Math.round(rect.width * dpr),
+        height: Math.round(rect.height * dpr),
+      };
+      const sourceRatio = video.videoWidth / video.videoHeight;
+      const destinationRatio = destination.width / destination.height;
+      let sourceX = 0;
+      let sourceY = 0;
+      let sourceWidth = video.videoWidth;
+      let sourceHeight = video.videoHeight;
+
+      if (sourceRatio > destinationRatio) {
+        sourceWidth = video.videoHeight * destinationRatio;
+        sourceX = (video.videoWidth - sourceWidth) / 2;
+      } else {
+        sourceHeight = video.videoWidth / destinationRatio;
+        sourceY = (video.videoHeight - sourceHeight) / 2;
+      }
+
+      context.drawImage(
+        video,
+        sourceX,
+        sourceY,
+        sourceWidth,
+        sourceHeight,
+        destination.x,
+        destination.y,
+        destination.width,
+        destination.height
+      );
+    }
+
+    async function startMindARWithHighResolutionCamera() {
+      const mediaDevices = navigator.mediaDevices;
+      const originalGetUserMedia = mediaDevices?.getUserMedia?.bind(mediaDevices);
+      if (!mediaDevices || !originalGetUserMedia) {
+        await mindarThree.start();
+        return;
+      }
+
+      const originalMethod = mediaDevices.getUserMedia;
+      let patched = false;
+      try {
+        const highResolutionGetUserMedia = async (constraints) => {
+          const upgradedConstraints = upgradeCameraConstraints(constraints);
+          try {
+            const stream = await originalGetUserMedia(upgradedConstraints);
+            rememberCameraSettings(stream);
+            return stream;
+          } catch (error) {
+            const stream = await originalGetUserMedia(constraints);
+            rememberCameraSettings(stream);
+            return stream;
+          }
+        };
+        mediaDevices.getUserMedia = highResolutionGetUserMedia;
+        patched = true;
+        await mindarThree.start();
+      } catch (error) {
+        if (patched) {
+          throw error;
+        }
+        await mindarThree.start();
+      } finally {
+        if (patched) {
+          mediaDevices.getUserMedia = originalMethod;
+        }
+      }
+    }
+
+    function upgradeCameraConstraints(constraints) {
+      const nextConstraints = {
+        ...constraints,
+        video: {
+          ...(typeof constraints?.video === 'object' ? constraints.video : {}),
+        },
+      };
+
+      if (nextConstraints.video.facingMode === 'environment') {
+        nextConstraints.video.facingMode = { ideal: 'environment' };
+      }
+
+      nextConstraints.video.width = { ideal: 1920 };
+      nextConstraints.video.height = { ideal: 1080 };
+      nextConstraints.video.frameRate = { ideal: 30, max: 30 };
+      nextConstraints.video.aspectRatio = { ideal: 16 / 9 };
+      return nextConstraints;
+    }
+
+    function rememberCameraSettings(stream) {
+      const [track] = stream.getVideoTracks();
+      lastCameraSettings = track?.getSettings?.() || null;
+      if (lastCameraSettings?.width && lastCameraSettings?.height) {
+        console.info(`Camera ${lastCameraSettings.width}x${lastCameraSettings.height}`);
+      }
+    }
+
+    function getCaptureScale(video) {
+      const deviceScale = window.devicePixelRatio || 1;
+      const videoScale = Math.max(
+        video.videoWidth / Math.max(window.innerWidth, 1),
+        video.videoHeight / Math.max(window.innerHeight, 1)
+      );
+      return Math.min(3, Math.max(deviceScale, videoScale, 1));
+    }
+
+    async function savePhoto(blob) {
+      const fileName = `sweet-sleep-ar-${Date.now()}.png`;
+      const file = new File([blob], fileName, { type: 'image/png' });
+
+      if (navigator.canShare?.({ files: [file] }) && navigator.share) {
+        await navigator.share({
+          files: [file],
+          title: 'Sweet Sleep AR',
+        });
+        return;
+      }
+
+      const link = document.createElement('a');
+      const objectUrl = URL.createObjectURL(blob);
+      link.href = objectUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    }
+
+    function showTrackingMessage(message) {
+      tracking.textContent = message;
+      tracking.classList.remove('hidden');
+      window.clearTimeout(showTrackingMessage.timer);
+      showTrackingMessage.timer = window.setTimeout(() => {
+        if (hasSeenTarget) {
+          tracking.classList.add('hidden');
+        }
+      }, 1800);
+    }
+
+    function showCaptureButton() {
+      if (captureButton.classList.contains('is-visible')) {
+        return;
+      }
+
+      document.body.classList.add('photo-ready');
+      captureButton.classList.remove('is-visible');
+      void captureButton.offsetWidth;
+      captureButton.classList.add('is-visible');
+    }
+
+    function hideCaptureButton() {
+      captureButton.classList.remove('is-visible');
+      document.body.classList.remove('photo-ready');
+    }
+  </script>
+</body>
+</html>
