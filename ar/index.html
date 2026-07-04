@@ -290,8 +290,6 @@
   </div>
   <button type="button" class="capture-button" id="captureButton" aria-label="拍照"></button>
 
-  <video id="overlayVideo" src="./assets/overlay.mp4" loop muted playsinline webkit-playsinline preload="auto" style="display:none"></video>
-
   <script type="module">
     import * as THREE from 'three';
     import { MindARThree } from './vendor/mindar-image-three.prod.js';
@@ -305,8 +303,7 @@
     const compatToast = document.getElementById('compatToast');
     const compatToastClose = document.getElementById('compatToastClose');
     const tracking = document.getElementById('tracking');
-    const overlayVideo = document.getElementById('overlayVideo');
-    const targetAspect = 2471 / 1598;
+    const imageAspect = 1086 / 1400;
 
     let mindarThree;
     let started = false;
@@ -344,7 +341,7 @@
       contentGroup.matrixAutoUpdate = false;
       scene.add(contentGroup);
 
-      const imageTexture = await new THREE.TextureLoader().loadAsync('./assets/target.png');
+      const imageTexture = await new THREE.TextureLoader().loadAsync('./assets/kei.png');
       imageTexture.colorSpace = THREE.SRGBColorSpace;
 
       const imageMaterial = new THREE.MeshBasicMaterial({
@@ -353,33 +350,12 @@
         opacity: 0.96,
         side: THREE.DoubleSide,
       });
-      const imagePlaneHeight = 0.72;
-      const imagePlaneWidth = targetAspect * imagePlaneHeight;
+      const imagePlaneHeight = 0.86;
+      const imagePlaneWidth = imageAspect * imagePlaneHeight;
       const imagePlane = new THREE.Mesh(new THREE.PlaneGeometry(imagePlaneWidth, imagePlaneHeight), imageMaterial);
       imagePlane.rotation.x = Math.PI / 2;
-      imagePlane.position.set(-0.32, 0.08, imagePlaneHeight / 2);
+      imagePlane.position.set(0, 0, imagePlaneHeight / 2 + 0.02);
       contentGroup.add(imagePlane);
-
-      const videoTexture = new THREE.VideoTexture(overlayVideo);
-      videoTexture.colorSpace = THREE.SRGBColorSpace;
-      const videoMaterial = new THREE.MeshBasicMaterial({
-        map: videoTexture,
-        side: THREE.DoubleSide,
-      });
-      const videoPlaneHeight = 0.46;
-      const videoPlaneWidth = 0.72;
-      const videoPlane = new THREE.Mesh(new THREE.PlaneGeometry(videoPlaneWidth, videoPlaneHeight), videoMaterial);
-      videoPlane.rotation.x = Math.PI / 2;
-      videoPlane.position.set(0.44, -0.2, videoPlaneHeight / 2);
-      contentGroup.add(videoPlane);
-
-      const frame = new THREE.Mesh(
-        new THREE.PlaneGeometry(videoPlaneWidth + 0.04, videoPlaneHeight + 0.04),
-        new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.18, side: THREE.DoubleSide })
-      );
-      frame.rotation.x = Math.PI / 2;
-      frame.position.set(0.44, -0.2, videoPlaneHeight / 2 - 0.01);
-      contentGroup.add(frame);
 
       anchor.onTargetFound = () => {
         hasSeenTarget = true;
@@ -388,7 +364,6 @@
         showCaptureButton();
         tracking.textContent = '已识别';
         tracking.classList.add('hidden');
-        overlayVideo.play().catch(() => {});
       };
 
       anchor.onTargetLost = () => {
@@ -417,9 +392,6 @@
           await init();
         }
         status.textContent = '启动摄像头...';
-        await overlayVideo.play().catch(() => {});
-        overlayVideo.pause();
-        overlayVideo.currentTime = 0;
         const startPromise = startMindARWithHighResolutionCamera();
         startPromise.catch((error) => {
           if (sequence !== startSequence) {
@@ -462,7 +434,6 @@
         return;
       }
       await mindarThree.stop();
-      overlayVideo.pause();
       startSequence += 1;
       started = false;
       hasSeenTarget = false;
@@ -566,10 +537,10 @@
     }
 
     function getCameraVideo() {
-      if (mindarThree?.video && mindarThree.video !== overlayVideo) {
+      if (mindarThree?.video) {
         return mindarThree.video;
       }
-      return Array.from(container.querySelectorAll('video')).find((video) => video !== overlayVideo) || null;
+      return container.querySelector('video');
     }
 
     function getElementRect(element) {
