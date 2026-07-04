@@ -265,6 +265,7 @@
     let contentGroup;
     let hasSeenTarget = false;
     let lastCameraSettings = null;
+    let startSequence = 0;
 
     async function init() {
       status.textContent = '加载 AR 引擎...';
@@ -279,6 +280,7 @@
 
       const { renderer, scene, camera } = mindarThree;
       renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.setPixelRatio(getRenderPixelRatio());
 
       const ambient = new THREE.HemisphereLight(0xffffff, 0x222222, 2.2);
       scene.add(ambient);
@@ -354,6 +356,9 @@
     }
 
     startButton.addEventListener('click', async () => {
+      const sequence = startSequence + 1;
+      startSequence = sequence;
+
       try {
         startButton.disabled = true;
         if (!mindarThree) {
@@ -363,11 +368,35 @@
         await overlayVideo.play().catch(() => {});
         overlayVideo.pause();
         overlayVideo.currentTime = 0;
-        await startMindARWithHighResolutionCamera();
-        started = true;
-        hud.classList.add('hidden');
-        hideCaptureButton();
-        tracking.classList.remove('hidden');
+        const startPromise = startMindARWithHighResolutionCamera();
+        startPromise.catch((error) => {
+          if (sequence !== startSequence) {
+            return;
+          }
+
+          console.error(error);
+          if (!started) {
+            status.textContent = '启动失败，请检查摄像头权限';
+            startButton.disabled = false;
+          } else {
+            showTrackingMessage('AR 初始化异常，请停止后重试');
+          }
+        });
+
+        const canEnterAR = await Promise.race([
+          startPromise.then(() => true),
+          waitForCameraReady(5000),
+        ]);
+
+        if (!canEnterAR) {
+          throw new Error('Camera did not become ready');
+        }
+
+        if (sequence !== startSequence) {
+          return;
+        }
+
+        markARStarted();
       } catch (error) {
         console.error(error);
         status.textContent = '启动失败，请检查摄像头权限';
@@ -382,6 +411,7 @@
       }
       await mindarThree.stop();
       overlayVideo.pause();
+      startSequence += 1;
       started = false;
       hasSeenTarget = false;
       hideCaptureButton();
@@ -577,6 +607,7 @@
     }
 
     function upgradeCameraConstraints(constraints) {
+      const profile = getCameraProfile();
       const nextConstraints = {
         ...constraints,
         video: {
@@ -588,11 +619,28 @@
         nextConstraints.video.facingMode = { ideal: 'environment' };
       }
 
-      nextConstraints.video.width = { ideal: 1920 };
-      nextConstraints.video.height = { ideal: 1080 };
-      nextConstraints.video.frameRate = { ideal: 30, max: 30 };
+      nextConstraints.video.width = { ideal: profile.width };
+      nextConstraints.video.height = { ideal: profile.height };
+      nextConstraints.video.frameRate = { ideal: profile.frameRate, max: 30 };
       nextConstraints.video.aspectRatio = { ideal: 16 / 9 };
       return nextConstraints;
+    }
+
+    function getCameraProfile() {
+      if (isAndroid()) {
+        return { width: 1280, height: 720, frameRate: 24 };
+      }
+
+      return { width: 1920, height: 1080, frameRate: 30 };
+    }
+
+    function getRenderPixelRatio() {
+      const ratio = window.devicePixelRatio || 1;
+      return isAndroid() ? Math.min(ratio, 1.5) : Math.min(ratio, 2);
+    }
+
+    function isAndroid() {
+      return /Android/i.test(navigator.userAgent);
     }
 
     function rememberCameraSettings(stream) {
@@ -610,6 +658,42 @@
         video.videoHeight / Math.max(window.innerHeight, 1)
       );
       return Math.min(3, Math.max(deviceScale, videoScale, 1));
+    }
+
+    function waitForCameraReady(timeoutMs) {
+      return new Promise((resolve) => {
+        const startedAt = Date.now();
+
+        function check() {
+          const video = getCameraVideo();
+          if (
+            video &&
+            video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
+            video.videoWidth > 0 &&
+            video.videoHeight > 0
+          ) {
+            resolve(true);
+            return;
+          }
+
+          if (Date.now() - startedAt >= timeoutMs) {
+            resolve(false);
+            return;
+          }
+
+          window.requestAnimationFrame(check);
+        }
+
+        check();
+      });
+    }
+
+    function markARStarted() {
+      started = true;
+      hud.classList.add('hidden');
+      hideCaptureButton();
+      tracking.classList.remove('hidden');
+      tracking.textContent = '对准识别图案';
     }
 
     async function savePhoto(blob) {
