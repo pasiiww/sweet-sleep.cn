@@ -312,6 +312,10 @@
     let hasSeenTarget = false;
     let lastCameraSettings = null;
     let startSequence = 0;
+    let renderedImagePlane;
+    let renderedImageMaterial;
+    let imageRevealStart = 0;
+    const imageRevealDuration = 650;
 
     compatToastClose.addEventListener('click', hideCompatibilityToast);
     showCompatibilityToastIfNeeded();
@@ -344,7 +348,7 @@
       const imageTexture = await new THREE.TextureLoader().loadAsync('./assets/kei.png');
       imageTexture.colorSpace = THREE.SRGBColorSpace;
 
-      const imageMaterial = new THREE.MeshBasicMaterial({
+      renderedImageMaterial = new THREE.MeshBasicMaterial({
         map: imageTexture,
         transparent: true,
         opacity: 0.96,
@@ -352,14 +356,19 @@
       });
       const imagePlaneHeight = 0.86;
       const imagePlaneWidth = imageAspect * imagePlaneHeight;
-      const imagePlane = new THREE.Mesh(new THREE.PlaneGeometry(imagePlaneWidth, imagePlaneHeight), imageMaterial);
-      imagePlane.rotation.x = Math.PI / 2;
-      imagePlane.position.set(0, 0, imagePlaneHeight / 2 + 0.02);
-      contentGroup.add(imagePlane);
+      const imageTilt = THREE.MathUtils.degToRad(120);
+      renderedImagePlane = new THREE.Mesh(new THREE.PlaneGeometry(imagePlaneWidth, imagePlaneHeight), renderedImageMaterial);
+      renderedImagePlane.rotation.x = imageTilt;
+      renderedImagePlane.position.set(0, 0, Math.sin(imageTilt) * imagePlaneHeight / 2 + 0.02);
+      contentGroup.add(renderedImagePlane);
 
       anchor.onTargetFound = () => {
+        const shouldAnimate = !hasSeenTarget;
         hasSeenTarget = true;
         contentGroup.visible = true;
+        if (shouldAnimate) {
+          startImageReveal();
+        }
         syncContentToAnchor();
         showCaptureButton();
         tracking.textContent = '已识别';
@@ -376,6 +385,7 @@
         if (hasSeenTarget && anchor.group.visible) {
           syncContentToAnchor();
         }
+        updateImageReveal();
         renderer.render(scene, camera);
       });
 
@@ -437,6 +447,7 @@
       startSequence += 1;
       started = false;
       hasSeenTarget = false;
+      resetImageReveal();
       hideCaptureButton();
       if (anchor) {
         anchor.group.visible = false;
@@ -480,6 +491,43 @@
       contentGroup.matrix.copy(anchor.group.matrixWorld);
       contentGroup.matrix.decompose(contentGroup.position, contentGroup.quaternion, contentGroup.scale);
       contentGroup.updateMatrixWorld(true);
+    }
+
+    function startImageReveal() {
+      if (!renderedImagePlane || !renderedImageMaterial) {
+        return;
+      }
+
+      imageRevealStart = performance.now();
+      renderedImagePlane.scale.setScalar(0.82);
+      renderedImageMaterial.opacity = 0;
+    }
+
+    function updateImageReveal() {
+      if (!imageRevealStart || !renderedImagePlane || !renderedImageMaterial) {
+        return;
+      }
+
+      const progress = Math.min((performance.now() - imageRevealStart) / imageRevealDuration, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      renderedImagePlane.scale.setScalar(0.82 + 0.18 * eased);
+      renderedImageMaterial.opacity = 0.96 * eased;
+
+      if (progress >= 1) {
+        imageRevealStart = 0;
+        renderedImagePlane.scale.setScalar(1);
+        renderedImageMaterial.opacity = 0.96;
+      }
+    }
+
+    function resetImageReveal() {
+      imageRevealStart = 0;
+      if (renderedImagePlane) {
+        renderedImagePlane.scale.setScalar(1);
+      }
+      if (renderedImageMaterial) {
+        renderedImageMaterial.opacity = 0.96;
+      }
     }
 
     async function captureCurrentFrame() {
@@ -667,7 +715,17 @@
     }
 
     function isKnownCompatibilityBrowser() {
-      return /(QihooBrowser|QHBrowser|360Browser|360 Aphone Browser|360SE|360EE|QIHU)/i.test(navigator.userAgent);
+      const uaDataBrands = navigator.userAgentData?.brands
+        ?.map((brand) => `${brand.brand} ${brand.version}`)
+        .join(' ') || '';
+      const browserSignal = [
+        navigator.userAgent,
+        navigator.vendor,
+        uaDataBrands,
+      ].join(' ');
+      const manualCompat = new URLSearchParams(window.location.search).has('compat') || window.location.hash.includes('compat');
+
+      return manualCompat || /(Qihoo|Qihu|QIHU|QHBrowser|QihooBrowser|360\s?(?:Aphone|Mobile|Secure|Extreme)?\s?Browser|360Browser|360SE|360EE|360极速|360安全|Chromex|MseBrowser)/i.test(browserSignal);
     }
 
     function showCompatibilityToastIfNeeded() {
