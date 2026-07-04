@@ -188,6 +188,49 @@
       bottom: max(118px, calc(env(safe-area-inset-bottom) + 112px));
     }
 
+    .compat-toast {
+      position: fixed;
+      top: max(58px, calc(env(safe-area-inset-top) + 52px));
+      left: 50%;
+      width: min(420px, calc(100vw - 28px));
+      padding: 12px 12px 12px 14px;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 8px;
+      background: rgba(18, 18, 20, 0.86);
+      box-shadow: 0 12px 34px rgba(0, 0, 0, 0.34);
+      color: rgba(255, 255, 255, 0.9);
+      font-size: 13px;
+      line-height: 1.45;
+      z-index: 6;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      opacity: 0;
+      pointer-events: none;
+      transform: translate(-50%, -10px);
+      transition: opacity 180ms ease, transform 220ms ease;
+      backdrop-filter: blur(10px);
+    }
+
+    .compat-toast.is-visible {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translate(-50%, 0);
+    }
+
+    .compat-toast span {
+      flex: 1;
+    }
+
+    .compat-toast button {
+      flex: 0 0 auto;
+      min-height: 30px;
+      padding: 0 10px;
+      font-size: 12px;
+      line-height: 28px;
+      background: rgba(255, 255, 255, 0.14);
+    }
+
     .hidden {
       opacity: 0;
       pointer-events: none;
@@ -241,6 +284,10 @@
   </section>
 
   <div class="tracking" id="tracking">对准识别图案</div>
+  <div class="compat-toast" id="compatToast" role="status" aria-live="polite">
+    <span>当前浏览器 AR 兼容性可能不稳定，建议使用系统浏览器或 Chrome 打开。</span>
+    <button type="button" id="compatToastClose">知道了</button>
+  </div>
   <button type="button" class="capture-button" id="captureButton" aria-label="拍照"></button>
 
   <video id="overlayVideo" src="./assets/overlay.mp4" loop muted playsinline webkit-playsinline preload="auto" style="display:none"></video>
@@ -255,6 +302,8 @@
     const startButton = document.getElementById('startButton');
     const stopButton = document.getElementById('stopButton');
     const captureButton = document.getElementById('captureButton');
+    const compatToast = document.getElementById('compatToast');
+    const compatToastClose = document.getElementById('compatToastClose');
     const tracking = document.getElementById('tracking');
     const overlayVideo = document.getElementById('overlayVideo');
     const targetAspect = 2471 / 1598;
@@ -266,6 +315,9 @@
     let hasSeenTarget = false;
     let lastCameraSettings = null;
     let startSequence = 0;
+
+    compatToastClose.addEventListener('click', hideCompatibilityToast);
+    showCompatibilityToastIfNeeded();
 
     async function init() {
       status.textContent = '加载 AR 引擎...';
@@ -641,6 +693,25 @@
 
     function isAndroid() {
       return /Android/i.test(navigator.userAgent);
+    }
+
+    function isKnownCompatibilityBrowser() {
+      return /(QihooBrowser|QHBrowser|360Browser|360 Aphone Browser|360SE|360EE|QIHU)/i.test(navigator.userAgent);
+    }
+
+    function showCompatibilityToastIfNeeded() {
+      if (!isKnownCompatibilityBrowser()) {
+        return;
+      }
+
+      window.clearTimeout(showCompatibilityToastIfNeeded.timer);
+      compatToast.classList.add('is-visible');
+      showCompatibilityToastIfNeeded.timer = window.setTimeout(hideCompatibilityToast, 8000);
+    }
+
+    function hideCompatibilityToast() {
+      window.clearTimeout(showCompatibilityToastIfNeeded.timer);
+      compatToast.classList.remove('is-visible');
     }
 
     function rememberCameraSettings(stream) {
