@@ -356,10 +356,10 @@
       });
       const imagePlaneHeight = 0.86;
       const imagePlaneWidth = imageAspect * imagePlaneHeight;
-      const imageTilt = THREE.MathUtils.degToRad(120);
+      const imageTilt = THREE.MathUtils.degToRad(60);
       renderedImagePlane = new THREE.Mesh(new THREE.PlaneGeometry(imagePlaneWidth, imagePlaneHeight), renderedImageMaterial);
       renderedImagePlane.rotation.x = imageTilt;
-      renderedImagePlane.position.set(0, 0, Math.sin(imageTilt) * imagePlaneHeight / 2 + 0.02);
+      renderedImagePlane.position.set(0, Math.cos(imageTilt) * imagePlaneHeight / 2, Math.sin(imageTilt) * imagePlaneHeight / 2 + 0.02);
       contentGroup.add(renderedImagePlane);
 
       anchor.onTargetFound = () => {
