@@ -221,8 +221,9 @@
         height 520ms cubic-bezier(.2, .8, .2, 1);
       appearance: none;
       -webkit-tap-highlight-color: transparent;
-      --crop-scale: 1.62;
-      --crop-origin-y: 34%;
+      --crop-scale-x: 1.86;
+      --crop-scale-y: 1.44;
+      --crop-shift-y: 5%;
     }
 
     .character-card:hover,
@@ -232,9 +233,9 @@
 
     .character-card.is-active {
       z-index: 3;
-      height: calc(100% + clamp(34px, 5.8vw, 64px));
-      flex: 2.85 1 0;
-      grid-template-columns: minmax(0, 1fr) clamp(54px, 6.2vw, 72px);
+      height: calc(100% + clamp(70px, 9vw, 104px));
+      flex: 4.2 1 0;
+      grid-template-columns: minmax(0, 1fr) clamp(44px, 5vw, 58px);
     }
 
     .character-card::after {
@@ -263,22 +264,24 @@
       height: 100%;
       object-fit: cover;
       object-position: center bottom;
-      transform: scale(var(--crop-scale));
-      transform-origin: center var(--crop-origin-y);
+      transform: translateY(var(--crop-shift-y)) scale(var(--crop-scale-x), var(--crop-scale-y));
+      transform-origin: center center;
       user-select: none;
     }
 
     .character-card.is-active .character-image {
-      transform: scale(var(--crop-scale));
+      transform: translateY(var(--crop-shift-y)) scale(var(--crop-scale-x), var(--crop-scale-y));
     }
 
     .character-name {
       display: grid;
-      place-items: center;
+      align-items: end;
+      justify-items: center;
       min-width: 0;
       align-self: stretch;
       color: rgba(22, 18, 18, 0.92);
-      font-size: clamp(20px, 3.2vw, 34px);
+      padding-bottom: clamp(16px, 2.8vw, 26px);
+      font-size: clamp(17px, 2.4vw, 26px);
       font-weight: 700;
       letter-spacing: 0;
       line-height: 1.05;
@@ -286,6 +289,7 @@
       overflow: hidden;
       text-shadow: none;
       text-orientation: mixed;
+      transform: translate(4px, 10px);
       transition: opacity 220ms ease 180ms;
       visibility: hidden;
       writing-mode: vertical-rl;
@@ -436,31 +440,34 @@
 
       .menu-shell[data-active] .character-strip {
         margin-top: 8px;
-        margin-bottom: clamp(28px, 8vw, 42px);
+        margin-bottom: clamp(56px, 18vw, 82px);
       }
 
       .character-card {
         flex: 0.82 1 0;
-        --crop-scale: 1.9;
-        --crop-origin-y: 33%;
+        --crop-scale-x: 2.2;
+        --crop-scale-y: 1.56;
+        --crop-shift-y: 6%;
       }
 
       .character-card.is-active {
-        height: calc(100% + clamp(28px, 8vw, 42px));
-        flex: 2.25 1 0;
-        grid-template-columns: minmax(0, 1fr) 44px;
+        height: calc(100% + clamp(56px, 18vw, 82px));
+        flex: 4 1 0;
+        grid-template-columns: minmax(0, 1fr) 34px;
       }
 
       .character-image {
-        transform: scale(var(--crop-scale));
+        transform: translateY(var(--crop-shift-y)) scale(var(--crop-scale-x), var(--crop-scale-y));
       }
 
       .character-card.is-active .character-image {
-        transform: scale(var(--crop-scale));
+        transform: translateY(var(--crop-shift-y)) scale(var(--crop-scale-x), var(--crop-scale-y));
       }
 
       .character-name {
-        font-size: clamp(18px, 5.8vw, 24px);
+        padding-bottom: 14px;
+        font-size: clamp(14px, 4.4vw, 18px);
+        transform: translate(3px, 14px);
       }
 
       .poster-footer {
