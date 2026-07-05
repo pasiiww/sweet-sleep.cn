@@ -7,10 +7,11 @@
   <style>
     :root {
       color-scheme: dark;
-      --ink: #f7f3ea;
-      --line: rgba(255, 255, 255, 0.22);
-      --accent: #e7b9ce;
-      --reveal-width: min(45vw, 430px);
+      --ink: #f6f0e6;
+      --muted: rgba(246, 240, 230, 0.72);
+      --paper: #fffdf7;
+      --paper-soft: #f8e9ee;
+      --poster-width: min(94vw, calc(100svh - 28px), 920px);
     }
 
     * {
@@ -21,11 +22,11 @@
     body {
       min-height: 100%;
       margin: 0;
-      overflow: hidden;
       background:
-        radial-gradient(circle at 20% 18%, rgba(255, 255, 255, 0.18), transparent 4px),
-        radial-gradient(circle at 78% 10%, rgba(255, 255, 255, 0.14), transparent 3px),
-        linear-gradient(135deg, #161514 0%, #2c2926 42%, #111 100%);
+        radial-gradient(circle at 18% 20%, rgba(255, 255, 255, 0.18), transparent 4px),
+        radial-gradient(circle at 84% 16%, rgba(255, 255, 255, 0.18), transparent 3px),
+        radial-gradient(circle at 50% 82%, rgba(255, 255, 255, 0.12), transparent 6px),
+        linear-gradient(135deg, #151412 0%, #2b2926 45%, #0f0f0f 100%);
       color: var(--ink);
       font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
     }
@@ -35,202 +36,439 @@
       inset: 0;
       pointer-events: none;
       content: "";
-      opacity: 0.16;
+      opacity: 0.15;
       background-image:
-        linear-gradient(rgba(255, 255, 255, 0.16) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255, 255, 255, 0.12) 1px, transparent 1px);
+        linear-gradient(rgba(255, 255, 255, 0.15) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.11) 1px, transparent 1px);
       background-size: 34px 34px;
-      mask-image: linear-gradient(to bottom, transparent, #000 18%, #000 82%, transparent);
+      mask-image: linear-gradient(to bottom, transparent, #000 16%, #000 86%, transparent);
+    }
+
+    body::after {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      content: "";
+      opacity: 0.55;
+      background-image:
+        radial-gradient(circle, rgba(255, 255, 255, 0.45) 0 1px, transparent 1.5px),
+        radial-gradient(circle, rgba(255, 255, 255, 0.24) 0 1px, transparent 1.5px);
+      background-position: 0 0, 18px 22px;
+      background-size: 70px 70px, 96px 96px;
     }
 
     .menu-shell {
       position: relative;
+      z-index: 1;
       display: grid;
       min-height: 100svh;
-      padding: clamp(14px, 2vw, 30px);
-      place-items: center;
-    }
-
-    .poster-wrap {
-      position: relative;
-      width: min(100%, calc(100svh - 28px));
-      max-width: min(92vw, 920px);
-      aspect-ratio: 1798 / 1800;
-      overflow: visible;
-      filter: drop-shadow(0 24px 70px rgba(0, 0, 0, 0.48));
+      padding: clamp(14px, 2.2vw, 28px);
+      place-items: start center;
     }
 
     .poster {
-      display: block;
-      width: 100%;
-      height: 100%;
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      object-fit: cover;
-      user-select: none;
+      position: relative;
+      width: var(--poster-width);
+      aspect-ratio: 1 / 1;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.24);
+      background:
+        radial-gradient(circle at 62% 23%, rgba(255, 255, 255, 0.16), transparent 4px),
+        radial-gradient(circle at 18% 74%, rgba(255, 255, 255, 0.2), transparent 5px),
+        linear-gradient(180deg, rgba(55, 55, 55, 0.86), rgba(24, 24, 23, 0.96));
+      box-shadow: 0 24px 72px rgba(0, 0, 0, 0.45);
     }
 
-    .character-slot {
-      position: absolute;
-      top: 17%;
-      z-index: 2;
-      width: 15%;
-      height: 57%;
-      isolation: isolate;
-    }
-
-    .character-slot:hover,
-    .character-slot:focus-within,
-    .character-slot.is-active {
-      z-index: 12;
-    }
-
-    .slot-kazusa { left: 5.4%; }
-    .slot-reisa { left: 20.3%; }
-    .slot-alice { left: 35.4%; }
-    .slot-kei { left: 50.2%; }
-    .slot-hina { left: 65.2%; }
-    .slot-hoshino { left: 79.8%; }
-
-    .hotspot {
+    .poster::before {
       position: absolute;
       inset: 0;
-      z-index: 3;
-      padding: 0;
+      pointer-events: none;
+      content: "";
+      opacity: 0.28;
+      background-image:
+        radial-gradient(circle, rgba(255, 255, 255, 0.9) 0 1px, transparent 1.5px),
+        radial-gradient(circle, rgba(255, 255, 255, 0.44) 0 1px, transparent 1.5px);
+      background-position: 8px 12px, 34px 42px;
+      background-size: 58px 58px, 84px 84px;
+    }
+
+    .poster-content {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      height: 100%;
+      grid-template-rows: 23% 52% minmax(0, 1fr);
+      gap: clamp(10px, 1.65vw, 18px);
+      padding: clamp(20px, 3.2vw, 42px);
+    }
+
+    .poster-header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: clamp(12px, 2vw, 24px);
+      align-items: start;
+    }
+
+    .brand-title {
+      margin: 0;
+      font-family: "Songti SC", "STSong", serif;
+      font-size: clamp(38px, 5vw, 62px);
+      font-weight: 300;
+      letter-spacing: 0;
+      line-height: 0.9;
+      text-shadow: 0 0 18px rgba(255, 255, 255, 0.2);
+      white-space: nowrap;
+    }
+
+    .brand-script {
+      display: block;
+      margin-top: -0.04em;
+      margin-left: clamp(70px, 12vw, 150px);
+      color: rgba(255, 255, 255, 0.32);
+      font-family: "Snell Roundhand", "Brush Script MT", cursive;
+      font-size: clamp(30px, 5.4vw, 58px);
+      line-height: 0.8;
+    }
+
+    .archive {
+      display: inline-block;
+      margin-left: clamp(130px, 22vw, 270px);
+      color: rgba(255, 255, 255, 0.44);
+      font-family: "Snell Roundhand", "Brush Script MT", cursive;
+      font-size: clamp(34px, 6.2vw, 70px);
+      line-height: 0.72;
+    }
+
+    .booth {
+      display: grid;
+      gap: 10px;
+      justify-items: end;
+      color: rgba(255, 255, 255, 0.9);
+      text-align: right;
+      white-space: nowrap;
+    }
+
+    .booth-number {
+      font-family: "Songti SC", "STSong", serif;
+      font-size: clamp(28px, 3.9vw, 48px);
+      font-weight: 300;
+      line-height: 0.95;
+    }
+
+    .booth-number small {
+      font-size: 0.48em;
+    }
+
+    .market {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 16px;
+      border: 1px solid rgba(0, 0, 0, 0.18);
+      background: rgba(255, 255, 255, 0.93);
+      color: #161412;
+      font-size: clamp(22px, 2.5vw, 32px);
+      line-height: 1;
+    }
+
+    .heart {
+      font-size: 0.8em;
+      line-height: 1;
+    }
+
+    .character-strip {
+      position: relative;
+      display: flex;
+      width: 100%;
+      min-width: 0;
+      height: 100%;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.45);
+      background: var(--paper);
+    }
+
+    .character-card {
+      position: relative;
+      display: grid;
+      min-width: 0;
+      height: 100%;
+      flex: 1 1 0;
+      grid-template-columns: minmax(0, 1fr) 0;
+      overflow: hidden;
       border: 0;
-      border-radius: 0;
-      background: transparent;
+      border-right: 1px solid rgba(22, 20, 18, 0.18);
+      background: linear-gradient(90deg, var(--paper), var(--paper-soft));
+      color: #211c1f;
       cursor: pointer;
+      transition:
+        flex 520ms cubic-bezier(.2, .8, .2, 1),
+        filter 260ms ease;
       appearance: none;
     }
 
-    .hotspot::after {
+    .character-card:last-child {
+      border-right: 0;
+    }
+
+    .character-card:hover,
+    .character-card:focus-visible {
+      filter: brightness(1.02);
+    }
+
+    .character-card.is-active {
+      flex: 2.85 1 0;
+      grid-template-columns: minmax(0, 1fr) clamp(44px, 5.4vw, 62px);
+      filter: brightness(1.04);
+    }
+
+    .character-card::after {
       position: absolute;
       inset: 0;
+      pointer-events: none;
       content: "";
       opacity: 0;
-      background: linear-gradient(to bottom, rgba(255, 255, 255, 0.24), rgba(231, 185, 206, 0.14));
-      outline: 2px solid rgba(255, 255, 255, 0.34);
-      outline-offset: -2px;
-      transition: opacity 180ms ease;
+      box-shadow: inset 0 0 0 3px rgba(231, 185, 206, 0.72);
+      transition: opacity 220ms ease;
     }
 
-    .character-slot:hover .hotspot::after,
-    .character-slot:focus-within .hotspot::after,
-    .character-slot.is-active .hotspot::after {
+    .character-card.is-active::after,
+    .character-card:focus-visible::after {
       opacity: 1;
     }
 
-    .hotspot:focus-visible {
-      outline: 3px solid var(--accent);
-      outline-offset: 2px;
-    }
-
-    .character-reveal {
-      position: absolute;
-      top: -4%;
-      left: 0;
-      z-index: 4;
+    .character-figure {
       display: grid;
-      width: 100%;
-      height: 108%;
-      grid-template-columns: minmax(0, 1fr) 54px;
+      min-width: 0;
       overflow: hidden;
-      border: 1px solid rgba(255, 255, 255, 0.42);
-      background: linear-gradient(90deg, rgba(255, 250, 242, 0.96), rgba(244, 226, 233, 0.92));
-      box-shadow: 0 20px 54px rgba(0, 0, 0, 0.36);
-      opacity: 0;
-      pointer-events: none;
-      transform-origin: left center;
-      transition:
-        width 420ms cubic-bezier(.2, .8, .2, 1),
-        opacity 160ms ease,
-        box-shadow 260ms ease;
-    }
-
-    .character-slot:hover .character-reveal,
-    .character-slot:focus-within .character-reveal,
-    .character-slot.is-active .character-reveal {
-      width: var(--reveal-width);
-      opacity: 1;
-      pointer-events: auto;
-      box-shadow: 0 26px 68px rgba(0, 0, 0, 0.44);
+      place-items: end center;
     }
 
     .character-image {
-      align-self: end;
-      justify-self: center;
-      width: min(78%, 310px);
+      width: 100%;
       height: 100%;
-      object-fit: contain;
+      object-fit: cover;
       object-position: center bottom;
-      opacity: 0;
-      transform: translateX(-12px) scale(0.985);
+      transform: scale(1.02);
+      transform-origin: center bottom;
       transition:
-        opacity 220ms ease 90ms,
-        transform 380ms cubic-bezier(.2, .8, .2, 1) 60ms;
+        object-position 520ms cubic-bezier(.2, .8, .2, 1),
+        transform 520ms cubic-bezier(.2, .8, .2, 1);
+      user-select: none;
     }
 
-    .character-slot:hover .character-image,
-    .character-slot:focus-within .character-image,
-    .character-slot.is-active .character-image {
-      opacity: 1;
-      transform: translateX(0) scale(1);
+    .character-card.is-active .character-image {
+      object-fit: contain;
+      transform: scale(1);
     }
 
     .character-name {
       display: grid;
       place-items: center;
       min-width: 0;
-      margin: 0;
-      border-left: 1px solid rgba(32, 27, 29, 0.14);
-      color: #241e21;
-      font-size: clamp(22px, 3.1vw, 38px);
-      font-weight: 650;
+      border-left: 1px solid rgba(32, 27, 29, 0.16);
+      background: linear-gradient(180deg, rgba(255, 246, 250, 0.94), rgba(235, 219, 226, 0.88));
+      color: #221c20;
+      font-size: clamp(20px, 3.2vw, 34px);
+      font-weight: 700;
       letter-spacing: 0;
       line-height: 1.05;
+      opacity: 0;
       text-orientation: mixed;
+      transition: opacity 220ms ease 180ms;
       writing-mode: vertical-rl;
+    }
+
+    .character-card.is-active .character-name {
+      opacity: 1;
+    }
+
+    .poster-footer {
+      position: relative;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: clamp(12px, 3vw, 44px);
+      align-items: end;
+    }
+
+    .footer-block {
+      display: grid;
+      gap: 10px;
+      min-width: 0;
+      padding-bottom: clamp(28px, 3.8vw, 38px);
+    }
+
+    .footer-block.center {
+      position: absolute;
+      right: 50%;
+      bottom: 3px;
+      transform: translateX(50%);
+      justify-items: center;
+      text-align: center;
+      gap: 6px;
+      padding-bottom: 0;
+    }
+
+    .footer-block.center .pixel-bow {
+      display: none;
+    }
+
+    .footer-block.right {
+      justify-items: end;
+      text-align: right;
+    }
+
+    .pixel-bow {
+      width: clamp(52px, 8vw, 86px);
+      height: clamp(26px, 4vw, 42px);
+      background:
+        linear-gradient(90deg, transparent 0 18%, #fff 18% 32%, transparent 32% 42%, #fff 42% 58%, transparent 58% 68%, #fff 68% 82%, transparent 82%),
+        linear-gradient(#fff 0 100%);
+      clip-path: polygon(0 24%, 32% 24%, 32% 0, 44% 0, 44% 34%, 56% 34%, 56% 0, 68% 0, 68% 24%, 100% 24%, 100% 76%, 68% 76%, 68% 100%, 56% 100%, 56% 66%, 44% 66%, 44% 100%, 32% 100%, 32% 76%, 0 76%);
+    }
+
+    .event-title {
+      margin: 0;
+      font-family: Impact, "Arial Black", sans-serif;
+      font-size: clamp(30px, 4.4vw, 54px);
+      font-weight: 900;
+      letter-spacing: 0;
+      line-height: 0.9;
+      white-space: nowrap;
+    }
+
+    .event-date {
+      margin: 0;
+      font-family: Impact, "Arial Black", sans-serif;
+      font-size: clamp(30px, 4vw, 50px);
+      font-weight: 900;
+      letter-spacing: 0;
+      line-height: 0.95;
+      white-space: nowrap;
+    }
+
+    .subtext {
+      color: rgba(255, 255, 255, 0.84);
+      font-family: "Songti SC", "STSong", serif;
+      font-size: clamp(20px, 2.8vw, 34px);
+      letter-spacing: 0;
+      line-height: 1;
+      white-space: nowrap;
+    }
+
+    .sweet-sleep {
+      color: rgba(255, 255, 255, 0.62);
+      font-family: "Songti SC", "STSong", serif;
+      font-size: clamp(16px, 2vw, 24px);
+      line-height: 1;
     }
 
     @media (max-width: 760px) {
       :root {
-        --reveal-width: min(62vw, 280px);
-      }
-
-      body {
-        overflow-x: hidden;
-        overflow-y: auto;
+        --poster-width: min(96vw, calc(100svh - 20px), 520px);
       }
 
       .menu-shell {
         min-height: 100svh;
-        padding: 12px;
+        padding: 10px;
         place-items: start center;
       }
 
-      .poster-wrap {
-        width: min(100%, 92svh);
-        max-width: 100%;
+      .poster {
+        aspect-ratio: 1 / 1.3;
       }
 
-      .character-reveal {
-        grid-template-columns: minmax(0, 1fr) 46px;
+      .poster-content {
+        grid-template-rows: 33% 40% minmax(0, 1fr);
+        gap: 10px;
+        padding: 14px;
+      }
+
+      .poster-header {
+        grid-template-columns: 1fr;
+        gap: 8px;
+      }
+
+      .brand-title {
+        font-size: clamp(34px, 11vw, 54px);
+      }
+
+      .brand-script {
+        margin-left: 54px;
+        font-size: clamp(28px, 9vw, 44px);
+      }
+
+      .archive {
+        margin-left: 116px;
+        font-size: clamp(34px, 12vw, 58px);
+      }
+
+      .booth {
+        justify-items: start;
+        text-align: left;
+      }
+
+      .booth-number {
+        font-size: clamp(30px, 10vw, 48px);
+      }
+
+      .market {
+        padding: 7px 12px;
+        font-size: clamp(20px, 7vw, 30px);
+      }
+
+      .character-card {
+        flex: 0.82 1 0;
+      }
+
+      .character-card.is-active {
+        flex: 2.25 1 0;
+        grid-template-columns: minmax(0, 1fr) 40px;
       }
 
       .character-image {
-        width: 76%;
+        transform: scale(1.04);
+      }
+
+      .character-card.is-active .character-image {
+        object-fit: contain;
+        transform: scale(1);
       }
 
       .character-name {
-        font-size: clamp(20px, 6vw, 28px);
+        font-size: clamp(18px, 5.8vw, 24px);
       }
 
-      .slot-kei .character-reveal,
-      .slot-hina .character-reveal,
-      .slot-hoshino .character-reveal {
-        right: 0;
-        left: auto;
-        transform-origin: right center;
+      .poster-footer {
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: end;
+        gap: 8px;
+      }
+
+      .footer-block {
+        gap: 6px;
+        padding-bottom: 0;
+      }
+
+      .footer-block.center {
+        display: none;
+      }
+
+      .footer-block.right {
+        justify-items: end;
+        text-align: right;
+      }
+
+      .event-title {
+        font-size: clamp(25px, 8vw, 34px);
+        white-space: normal;
+      }
+
+      .event-date {
+        font-size: clamp(25px, 8vw, 34px);
+      }
+
+      .subtext {
+        font-size: clamp(16px, 4.8vw, 20px);
       }
     }
 
@@ -247,79 +485,104 @@
 </head>
 <body>
   <main class="menu-shell" id="menuShell">
-    <section class="poster-wrap" aria-label="午觉糖水铺角色主视觉">
-      <img class="poster" src="assets/menu-main.jpg" alt="午觉糖水铺主视觉" draggable="false">
+    <section class="poster" aria-label="午觉糖水铺菜单主视觉">
+      <div class="poster-content">
+        <header class="poster-header">
+          <div class="brand">
+            <h1 class="brand-title">午觉糖水铺</h1>
+            <span class="brand-script">kiraikei</span>
+            <span class="archive">Archive</span>
+          </div>
+          <div class="booth">
+            <div class="booth-number"><small>摊位号:</small> 1.11H·B20</div>
+            <div class="market"><span class="heart">❤</span><span>梦幻集市</span><span class="heart">❤</span></div>
+          </div>
+        </header>
 
-      <div class="character-slot slot-kazusa" data-character="kazusa">
-        <button class="hotspot" type="button" aria-label="杏山和纱"></button>
-        <article class="character-reveal" aria-hidden="true">
-          <img class="character-image" src="assets/kazusa.jpg" alt="杏山和纱" draggable="false">
-          <h1 class="character-name">杏山和纱</h1>
-        </article>
-      </div>
+        <div class="character-strip" aria-label="角色列表">
+          <button class="character-card" type="button" data-character="kazusa" aria-label="展开杏山和纱">
+            <span class="character-figure">
+              <img class="character-image" src="assets/kazusa.jpg" alt="杏山和纱" draggable="false">
+            </span>
+            <span class="character-name">杏山和纱</span>
+          </button>
 
-      <div class="character-slot slot-reisa" data-character="reisa">
-        <button class="hotspot" type="button" aria-label="宇泽玲纱"></button>
-        <article class="character-reveal" aria-hidden="true">
-          <img class="character-image" src="assets/reisa.jpg" alt="宇泽玲纱" draggable="false">
-          <h1 class="character-name">宇泽玲纱</h1>
-        </article>
-      </div>
+          <button class="character-card" type="button" data-character="reisa" aria-label="展开宇泽玲纱">
+            <span class="character-figure">
+              <img class="character-image" src="assets/reisa.jpg" alt="宇泽玲纱" draggable="false">
+            </span>
+            <span class="character-name">宇泽玲纱</span>
+          </button>
 
-      <div class="character-slot slot-alice" data-character="alice">
-        <button class="hotspot" type="button" aria-label="天童爱丽丝"></button>
-        <article class="character-reveal" aria-hidden="true">
-          <img class="character-image" src="assets/alice.jpg" alt="天童爱丽丝" draggable="false">
-          <h1 class="character-name">天童爱丽丝</h1>
-        </article>
-      </div>
+          <button class="character-card" type="button" data-character="alice" aria-label="展开天童爱丽丝">
+            <span class="character-figure">
+              <img class="character-image" src="assets/alice.jpg" alt="天童爱丽丝" draggable="false">
+            </span>
+            <span class="character-name">天童爱丽丝</span>
+          </button>
 
-      <div class="character-slot slot-kei" data-character="kei">
-        <button class="hotspot" type="button" aria-label="天童凯伊"></button>
-        <article class="character-reveal" aria-hidden="true">
-          <img class="character-image" src="assets/kei.jpg" alt="天童凯伊" draggable="false">
-          <h1 class="character-name">天童凯伊</h1>
-        </article>
-      </div>
+          <button class="character-card" type="button" data-character="kei" aria-label="展开天童凯伊">
+            <span class="character-figure">
+              <img class="character-image" src="assets/kei.jpg" alt="天童凯伊" draggable="false">
+            </span>
+            <span class="character-name">天童凯伊</span>
+          </button>
 
-      <div class="character-slot slot-hina" data-character="hina">
-        <button class="hotspot" type="button" aria-label="空崎日奈"></button>
-        <article class="character-reveal" aria-hidden="true">
-          <img class="character-image" src="assets/hina.jpg" alt="空崎日奈" draggable="false">
-          <h1 class="character-name">空崎日奈</h1>
-        </article>
-      </div>
+          <button class="character-card" type="button" data-character="hina" aria-label="展开空崎日奈">
+            <span class="character-figure">
+              <img class="character-image" src="assets/hina.jpg" alt="空崎日奈" draggable="false">
+            </span>
+            <span class="character-name">空崎日奈</span>
+          </button>
 
-      <div class="character-slot slot-hoshino" data-character="hoshino">
-        <button class="hotspot" type="button" aria-label="小鸟游星野"></button>
-        <article class="character-reveal" aria-hidden="true">
-          <img class="character-image" src="assets/hoshino.jpg" alt="小鸟游星野" draggable="false">
-          <h1 class="character-name">小鸟游星野</h1>
-        </article>
+          <button class="character-card" type="button" data-character="hoshino" aria-label="展开小鸟游星野">
+            <span class="character-figure">
+              <img class="character-image" src="assets/hoshino.jpg" alt="小鸟游星野" draggable="false">
+            </span>
+            <span class="character-name">小鸟游星野</span>
+          </button>
+        </div>
+
+        <footer class="poster-footer">
+          <div class="footer-block">
+            <span class="pixel-bow" aria-hidden="true"></span>
+            <p class="event-title">Bilibili World 2026</p>
+            <span class="subtext">Blue Archive</span>
+          </div>
+
+          <div class="footer-block center">
+            <span class="pixel-bow" aria-hidden="true"></span>
+            <span class="sweet-sleep">午觉糖水铺</span>
+          </div>
+
+          <div class="footer-block right">
+            <span class="pixel-bow" aria-hidden="true"></span>
+            <p class="event-date">7.10-12</p>
+            <span class="subtext">Bilibili World 2026</span>
+          </div>
+        </footer>
       </div>
     </section>
   </main>
 
   <script>
     const shell = document.getElementById('menuShell');
-    const slots = Array.from(document.querySelectorAll('.character-slot'));
+    const cards = Array.from(document.querySelectorAll('.character-card'));
 
-    function setActive(slot) {
-      slots.forEach((item) => item.classList.toggle('is-active', item === slot));
-      if (slot) {
-        shell.dataset.active = slot.dataset.character;
+    function setActive(card) {
+      cards.forEach((item) => item.classList.toggle('is-active', item === card));
+      if (card) {
+        shell.dataset.active = card.dataset.character;
       } else {
         delete shell.dataset.active;
       }
     }
 
-    slots.forEach((slot) => {
-      slot.addEventListener('click', (event) => {
+    cards.forEach((card) => {
+      card.addEventListener('click', (event) => {
         event.stopPropagation();
-        setActive(slot);
+        setActive(card.classList.contains('is-active') ? null : card);
       });
-
-      slot.addEventListener('focusin', () => setActive(slot));
     });
 
     document.addEventListener('click', () => setActive(null));
