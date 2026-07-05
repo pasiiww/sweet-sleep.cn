@@ -183,8 +183,6 @@
       min-width: 0;
       height: 100%;
       overflow: hidden;
-      border: 1px solid rgba(255, 255, 255, 0.45);
-      background: var(--paper);
     }
 
     .character-card {
@@ -196,29 +194,22 @@
       grid-template-columns: minmax(0, 1fr) 0;
       overflow: hidden;
       border: 0;
-      border-right: 1px solid rgba(22, 20, 18, 0.18);
-      background: linear-gradient(90deg, var(--paper), var(--paper-soft));
-      color: #211c1f;
+      background: transparent;
+      color: #fff;
       cursor: pointer;
       transition:
-        flex 520ms cubic-bezier(.2, .8, .2, 1),
-        filter 260ms ease;
+        flex 520ms cubic-bezier(.2, .8, .2, 1);
       appearance: none;
-    }
-
-    .character-card:last-child {
-      border-right: 0;
     }
 
     .character-card:hover,
     .character-card:focus-visible {
-      filter: brightness(1.02);
+      z-index: 2;
     }
 
     .character-card.is-active {
       flex: 2.85 1 0;
       grid-template-columns: minmax(0, 1fr) clamp(44px, 5.4vw, 62px);
-      filter: brightness(1.04);
     }
 
     .character-card::after {
@@ -227,11 +218,10 @@
       pointer-events: none;
       content: "";
       opacity: 0;
-      box-shadow: inset 0 0 0 3px rgba(231, 185, 206, 0.72);
+      box-shadow: inset 0 -2px 0 rgba(255, 255, 255, 0.42);
       transition: opacity 220ms ease;
     }
 
-    .character-card.is-active::after,
     .character-card:focus-visible::after {
       opacity: 1;
     }
@@ -248,16 +238,12 @@
       height: 100%;
       object-fit: cover;
       object-position: center bottom;
-      transform: scale(1.02);
+      transform: scale(1);
       transform-origin: center bottom;
-      transition:
-        object-position 520ms cubic-bezier(.2, .8, .2, 1),
-        transform 520ms cubic-bezier(.2, .8, .2, 1);
       user-select: none;
     }
 
     .character-card.is-active .character-image {
-      object-fit: contain;
       transform: scale(1);
     }
 
@@ -265,21 +251,23 @@
       display: grid;
       place-items: center;
       min-width: 0;
-      border-left: 1px solid rgba(32, 27, 29, 0.16);
-      background: linear-gradient(180deg, rgba(255, 246, 250, 0.94), rgba(235, 219, 226, 0.88));
-      color: #221c20;
+      color: rgba(255, 255, 255, 0.94);
       font-size: clamp(20px, 3.2vw, 34px);
       font-weight: 700;
       letter-spacing: 0;
       line-height: 1.05;
       opacity: 0;
+      overflow: hidden;
+      text-shadow: 0 2px 12px rgba(0, 0, 0, 0.48);
       text-orientation: mixed;
       transition: opacity 220ms ease 180ms;
+      visibility: hidden;
       writing-mode: vertical-rl;
     }
 
     .character-card.is-active .character-name {
       opacity: 1;
+      visibility: visible;
     }
 
     .poster-footer {
@@ -426,11 +414,10 @@
       }
 
       .character-image {
-        transform: scale(1.04);
+        transform: scale(1);
       }
 
       .character-card.is-active .character-image {
-        object-fit: contain;
         transform: scale(1);
       }
 
