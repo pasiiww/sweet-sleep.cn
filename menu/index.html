@@ -8,10 +8,9 @@
     :root {
       color-scheme: dark;
       --ink: #f7f3ea;
-      --paper: #fffaf2;
-      --shade: rgba(17, 16, 15, 0.72);
       --line: rgba(255, 255, 255, 0.22);
       --accent: #e7b9ce;
+      --reveal-width: min(45vw, 430px);
     }
 
     * {
@@ -57,13 +56,8 @@
       width: min(100%, calc(100svh - 28px));
       max-width: min(92vw, 920px);
       aspect-ratio: 1798 / 1800;
+      overflow: visible;
       filter: drop-shadow(0 24px 70px rgba(0, 0, 0, 0.48));
-      transition: transform 360ms ease, filter 360ms ease;
-    }
-
-    .menu-shell[data-active] .poster-wrap {
-      transform: translateX(clamp(-90px, -8vw, -40px)) scale(0.985);
-      filter: drop-shadow(0 16px 46px rgba(0, 0, 0, 0.44));
     }
 
     .poster {
@@ -72,12 +66,35 @@
       height: 100%;
       border: 1px solid rgba(255, 255, 255, 0.2);
       object-fit: cover;
+      user-select: none;
     }
+
+    .character-slot {
+      position: absolute;
+      top: 17%;
+      z-index: 2;
+      width: 15%;
+      height: 57%;
+      isolation: isolate;
+    }
+
+    .character-slot:hover,
+    .character-slot:focus-within,
+    .character-slot.is-active {
+      z-index: 12;
+    }
+
+    .slot-kazusa { left: 5.4%; }
+    .slot-reisa { left: 20.3%; }
+    .slot-alice { left: 35.4%; }
+    .slot-kei { left: 50.2%; }
+    .slot-hina { left: 65.2%; }
+    .slot-hoshino { left: 79.8%; }
 
     .hotspot {
       position: absolute;
-      top: 17%;
-      height: 57%;
+      inset: 0;
+      z-index: 3;
       padding: 0;
       border: 0;
       border-radius: 0;
@@ -92,13 +109,14 @@
       content: "";
       opacity: 0;
       background: linear-gradient(to bottom, rgba(255, 255, 255, 0.24), rgba(231, 185, 206, 0.14));
-      outline: 2px solid rgba(255, 255, 255, 0.3);
+      outline: 2px solid rgba(255, 255, 255, 0.34);
       outline-offset: -2px;
       transition: opacity 180ms ease;
     }
 
-    .hotspot:is(:hover, :focus-visible)::after,
-    .hotspot.is-active::after {
+    .character-slot:hover .hotspot::after,
+    .character-slot:focus-within .hotspot::after,
+    .character-slot.is-active .hotspot::after {
       opacity: 1;
     }
 
@@ -107,78 +125,66 @@
       outline-offset: 2px;
     }
 
-    .hotspot[data-character="kazusa"] { left: 5.4%; width: 14.9%; }
-    .hotspot[data-character="reisa"] { left: 20.3%; width: 15.1%; }
-    .hotspot[data-character="alice"] { left: 35.4%; width: 14.8%; }
-    .hotspot[data-character="kei"] { left: 50.2%; width: 15.0%; }
-    .hotspot[data-character="hina"] { left: 65.2%; width: 14.6%; }
-    .hotspot[data-character="hoshino"] { left: 79.8%; width: 15.0%; }
-
-    .character-panel {
-      position: fixed;
-      top: 0;
-      right: 0;
-      z-index: 5;
-      display: grid;
-      width: min(42vw, 520px);
-      min-width: 340px;
-      height: 100svh;
-      grid-template-columns: minmax(0, 1fr) 84px;
-      gap: 0;
-      padding: max(22px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) 22px;
-      border-left: 1px solid var(--line);
-      background: linear-gradient(112deg, rgba(255, 250, 242, 0.95), rgba(245, 226, 232, 0.91));
-      box-shadow: -28px 0 64px rgba(0, 0, 0, 0.42);
-      color: #201b1d;
-      transform: translateX(104%);
-      transition: transform 420ms cubic-bezier(.2, .8, .2, 1);
-    }
-
-    .menu-shell[data-active] .character-panel {
-      transform: translateX(0);
-    }
-
-    .character-stage {
-      position: relative;
-      display: grid;
-      min-width: 0;
-      place-items: end center;
-      overflow: hidden;
-    }
-
-    .character-stage::before {
+    .character-reveal {
       position: absolute;
-      inset: auto 8% 4% 8%;
-      height: 28%;
-      content: "";
-      background: radial-gradient(ellipse, rgba(60, 45, 52, 0.16), transparent 68%);
-      transform: translateY(22%);
+      top: -4%;
+      left: 0;
+      z-index: 4;
+      display: grid;
+      width: 100%;
+      height: 108%;
+      grid-template-columns: minmax(0, 1fr) 54px;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.42);
+      background: linear-gradient(90deg, rgba(255, 250, 242, 0.96), rgba(244, 226, 233, 0.92));
+      box-shadow: 0 20px 54px rgba(0, 0, 0, 0.36);
+      opacity: 0;
+      pointer-events: none;
+      transform-origin: left center;
+      transition:
+        width 420ms cubic-bezier(.2, .8, .2, 1),
+        opacity 160ms ease,
+        box-shadow 260ms ease;
+    }
+
+    .character-slot:hover .character-reveal,
+    .character-slot:focus-within .character-reveal,
+    .character-slot.is-active .character-reveal {
+      width: var(--reveal-width);
+      opacity: 1;
+      pointer-events: auto;
+      box-shadow: 0 26px 68px rgba(0, 0, 0, 0.44);
     }
 
     .character-image {
-      position: relative;
-      z-index: 1;
-      width: min(100%, 410px);
-      max-height: calc(100svh - 76px);
+      align-self: end;
+      justify-self: center;
+      width: min(78%, 310px);
+      height: 100%;
       object-fit: contain;
+      object-position: center bottom;
       opacity: 0;
-      transform: translateX(34px) scale(0.96);
-      transition: opacity 240ms ease, transform 360ms cubic-bezier(.2, .8, .2, 1);
+      transform: translateX(-12px) scale(0.985);
+      transition:
+        opacity 220ms ease 90ms,
+        transform 380ms cubic-bezier(.2, .8, .2, 1) 60ms;
     }
 
-    .menu-shell[data-active] .character-image.is-visible {
+    .character-slot:hover .character-image,
+    .character-slot:focus-within .character-image,
+    .character-slot.is-active .character-image {
       opacity: 1;
       transform: translateX(0) scale(1);
     }
 
     .character-name {
       display: grid;
-      min-width: 0;
       place-items: center;
+      min-width: 0;
       margin: 0;
       border-left: 1px solid rgba(32, 27, 29, 0.14);
       color: #241e21;
-      font-size: clamp(24px, 3.4vw, 42px);
+      font-size: clamp(22px, 3.1vw, 38px);
       font-weight: 650;
       letter-spacing: 0;
       line-height: 1.05;
@@ -186,47 +192,19 @@
       writing-mode: vertical-rl;
     }
 
-    .close-button {
-      position: fixed;
-      top: max(14px, env(safe-area-inset-top));
-      right: max(14px, env(safe-area-inset-right));
-      z-index: 6;
-      display: grid;
-      width: 42px;
-      height: 42px;
-      padding: 0;
-      border: 1px solid rgba(32, 27, 29, 0.18);
-      border-radius: 50%;
-      place-items: center;
-      background: rgba(255, 250, 242, 0.82);
-      color: #201b1d;
-      cursor: pointer;
-      font-size: 30px;
-      line-height: 1;
-      opacity: 0;
-      pointer-events: none;
-      transform: scale(0.9);
-      transition: opacity 180ms ease, transform 180ms ease;
-    }
-
-    .menu-shell[data-active] .close-button {
-      opacity: 1;
-      pointer-events: auto;
-      transform: scale(1);
-    }
-
     @media (max-width: 760px) {
       :root {
-        --drawer-height: min(48svh, 430px);
+        --reveal-width: min(62vw, 280px);
       }
 
       body {
-        overflow: auto;
+        overflow-x: hidden;
+        overflow-y: auto;
       }
 
       .menu-shell {
         min-height: 100svh;
-        padding: 12px 12px max(230px, calc(18px + env(safe-area-inset-bottom)));
+        padding: 12px;
         place-items: start center;
       }
 
@@ -235,42 +213,24 @@
         max-width: 100%;
       }
 
-      .menu-shell[data-active] .poster-wrap {
-        transform: none;
-      }
-
-      .hotspot {
-        top: 17%;
-        height: 57%;
-      }
-
-      .character-panel {
-        top: auto;
-        bottom: 0;
-        left: 0;
-        width: 100%;
-        min-width: 0;
-        height: var(--drawer-height);
-        grid-template-columns: minmax(0, 1fr) 64px;
-        padding: 14px 14px max(14px, env(safe-area-inset-bottom));
-        border-top: 1px solid var(--line);
-        border-left: 0;
-        transform: translateY(104%);
-      }
-
-      .close-button {
-        top: auto;
-        right: max(14px, env(safe-area-inset-right));
-        bottom: calc(var(--drawer-height) - 52px);
+      .character-reveal {
+        grid-template-columns: minmax(0, 1fr) 46px;
       }
 
       .character-image {
-        width: min(76vw, 320px);
-        max-height: calc(48svh - 34px);
+        width: 76%;
       }
 
       .character-name {
-        font-size: clamp(22px, 7vw, 34px);
+        font-size: clamp(20px, 6vw, 28px);
+      }
+
+      .slot-kei .character-reveal,
+      .slot-hina .character-reveal,
+      .slot-hoshino .character-reveal {
+        right: 0;
+        left: auto;
+        transform-origin: right center;
       }
     }
 
@@ -289,74 +249,82 @@
   <main class="menu-shell" id="menuShell">
     <section class="poster-wrap" aria-label="午觉糖水铺角色主视觉">
       <img class="poster" src="assets/menu-main.jpg" alt="午觉糖水铺主视觉" draggable="false">
-      <button class="hotspot" type="button" data-character="kazusa" aria-label="杏山和纱"></button>
-      <button class="hotspot" type="button" data-character="reisa" aria-label="宇泽玲纱"></button>
-      <button class="hotspot" type="button" data-character="alice" aria-label="天童爱丽丝"></button>
-      <button class="hotspot" type="button" data-character="kei" aria-label="天童凯伊"></button>
-      <button class="hotspot" type="button" data-character="hina" aria-label="空崎日奈"></button>
-      <button class="hotspot" type="button" data-character="hoshino" aria-label="小鸟游星野"></button>
-    </section>
 
-    <aside class="character-panel" aria-live="polite">
-      <div class="character-stage">
-        <img class="character-image" id="characterImage" src="assets/kazusa.jpg" alt="杏山和纱" draggable="false">
+      <div class="character-slot slot-kazusa" data-character="kazusa">
+        <button class="hotspot" type="button" aria-label="杏山和纱"></button>
+        <article class="character-reveal" aria-hidden="true">
+          <img class="character-image" src="assets/kazusa.jpg" alt="杏山和纱" draggable="false">
+          <h1 class="character-name">杏山和纱</h1>
+        </article>
       </div>
-      <h1 class="character-name" id="characterName">杏山和纱</h1>
-    </aside>
 
-    <button class="close-button" type="button" id="closeButton" aria-label="关闭">×</button>
+      <div class="character-slot slot-reisa" data-character="reisa">
+        <button class="hotspot" type="button" aria-label="宇泽玲纱"></button>
+        <article class="character-reveal" aria-hidden="true">
+          <img class="character-image" src="assets/reisa.jpg" alt="宇泽玲纱" draggable="false">
+          <h1 class="character-name">宇泽玲纱</h1>
+        </article>
+      </div>
+
+      <div class="character-slot slot-alice" data-character="alice">
+        <button class="hotspot" type="button" aria-label="天童爱丽丝"></button>
+        <article class="character-reveal" aria-hidden="true">
+          <img class="character-image" src="assets/alice.jpg" alt="天童爱丽丝" draggable="false">
+          <h1 class="character-name">天童爱丽丝</h1>
+        </article>
+      </div>
+
+      <div class="character-slot slot-kei" data-character="kei">
+        <button class="hotspot" type="button" aria-label="天童凯伊"></button>
+        <article class="character-reveal" aria-hidden="true">
+          <img class="character-image" src="assets/kei.jpg" alt="天童凯伊" draggable="false">
+          <h1 class="character-name">天童凯伊</h1>
+        </article>
+      </div>
+
+      <div class="character-slot slot-hina" data-character="hina">
+        <button class="hotspot" type="button" aria-label="空崎日奈"></button>
+        <article class="character-reveal" aria-hidden="true">
+          <img class="character-image" src="assets/hina.jpg" alt="空崎日奈" draggable="false">
+          <h1 class="character-name">空崎日奈</h1>
+        </article>
+      </div>
+
+      <div class="character-slot slot-hoshino" data-character="hoshino">
+        <button class="hotspot" type="button" aria-label="小鸟游星野"></button>
+        <article class="character-reveal" aria-hidden="true">
+          <img class="character-image" src="assets/hoshino.jpg" alt="小鸟游星野" draggable="false">
+          <h1 class="character-name">小鸟游星野</h1>
+        </article>
+      </div>
+    </section>
   </main>
 
   <script>
-    const characters = {
-      kazusa: { name: '杏山和纱', image: 'assets/kazusa.jpg' },
-      reisa: { name: '宇泽玲纱', image: 'assets/reisa.jpg' },
-      alice: { name: '天童爱丽丝', image: 'assets/alice.jpg' },
-      kei: { name: '天童凯伊', image: 'assets/kei.jpg' },
-      hina: { name: '空崎日奈', image: 'assets/hina.jpg' },
-      hoshino: { name: '小鸟游星野', image: 'assets/hoshino.jpg' },
-    };
-
     const shell = document.getElementById('menuShell');
-    const image = document.getElementById('characterImage');
-    const name = document.getElementById('characterName');
-    const closeButton = document.getElementById('closeButton');
-    const hotspots = Array.from(document.querySelectorAll('.hotspot'));
+    const slots = Array.from(document.querySelectorAll('.character-slot'));
 
-    function showCharacter(id) {
-      const character = characters[id];
-      if (!character) return;
-
-      hotspots.forEach((hotspot) => {
-        hotspot.classList.toggle('is-active', hotspot.dataset.character === id);
-      });
-
-      shell.dataset.active = id;
-      image.classList.remove('is-visible');
-
-      window.requestAnimationFrame(() => {
-        image.src = character.image;
-        image.alt = character.name;
-        name.textContent = character.name;
-        image.classList.add('is-visible');
-      });
+    function setActive(slot) {
+      slots.forEach((item) => item.classList.toggle('is-active', item === slot));
+      if (slot) {
+        shell.dataset.active = slot.dataset.character;
+      } else {
+        delete shell.dataset.active;
+      }
     }
 
-    function closeCharacter() {
-      delete shell.dataset.active;
-      image.classList.remove('is-visible');
-      hotspots.forEach((hotspot) => hotspot.classList.remove('is-active'));
-    }
+    slots.forEach((slot) => {
+      slot.addEventListener('click', (event) => {
+        event.stopPropagation();
+        setActive(slot);
+      });
 
-    hotspots.forEach((hotspot) => {
-      hotspot.addEventListener('mouseenter', () => showCharacter(hotspot.dataset.character));
-      hotspot.addEventListener('focus', () => showCharacter(hotspot.dataset.character));
-      hotspot.addEventListener('click', () => showCharacter(hotspot.dataset.character));
+      slot.addEventListener('focusin', () => setActive(slot));
     });
 
-    closeButton.addEventListener('click', closeCharacter);
+    document.addEventListener('click', () => setActive(null));
     document.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape') closeCharacter();
+      if (event.key === 'Escape') setActive(null);
     });
   </script>
 </body>
