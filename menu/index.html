@@ -208,7 +208,7 @@
       z-index: 1;
       min-width: 0;
       height: 100%;
-      flex: 1 1 0;
+      flex: 0 0 calc(100% / 6);
       grid-template-columns: minmax(0, 1fr) 0;
       overflow: hidden;
       border: 0;
@@ -233,7 +233,7 @@
     .character-card.is-active {
       z-index: 3;
       height: calc(100% + clamp(70px, 9vw, 104px));
-      flex: 4.2 1 0;
+      flex-basis: calc((100% / 6) + clamp(110px, 14vw, 170px));
       grid-template-columns: minmax(0, 1fr) clamp(44px, 5vw, 58px);
     }
 
@@ -439,18 +439,18 @@
 
       .menu-shell[data-active] .character-strip {
         margin-top: 8px;
-        margin-bottom: clamp(56px, 18vw, 82px);
+        margin-bottom: 0;
       }
 
       .character-card {
-        flex: 0.82 1 0;
-        --crop-scale: 1.9;
-        --crop-shift-y: 12%;
+        flex: 0 0 calc(100% / 6);
+        --crop-scale: 2;
+        --crop-shift-y: 13%;
       }
 
       .character-card.is-active {
         height: calc(100% + clamp(56px, 18vw, 82px));
-        flex: 4 1 0;
+        flex-basis: calc((100% / 6) + clamp(78px, 24vw, 104px));
         grid-template-columns: minmax(0, 1fr) 34px;
       }
 
@@ -460,9 +460,9 @@
 
       .character-card.is-active .character-image {
         align-self: start;
-        justify-self: end;
+        justify-self: start;
         transform: translateY(var(--crop-shift-y)) scale(var(--crop-scale));
-        width: 45%;
+        width: 43%;
         height: 69%;
       }
 
@@ -508,15 +508,15 @@
 
     @media (max-width: 380px) {
       .character-card {
-        --crop-scale: 1.94;
-        --crop-shift-y: 13%;
+        --crop-scale: 2.04;
+        --crop-shift-y: 14%;
       }
     }
 
     @media (min-width: 421px) and (max-width: 760px) {
       .character-card {
-        --crop-scale: 1.84;
-        --crop-shift-y: 11%;
+        --crop-scale: 1.92;
+        --crop-shift-y: 12%;
       }
     }
 
