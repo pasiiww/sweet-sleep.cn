@@ -221,9 +221,8 @@
         height 520ms cubic-bezier(.2, .8, .2, 1);
       appearance: none;
       -webkit-tap-highlight-color: transparent;
-      --crop-scale-x: 1.86;
-      --crop-scale-y: 1.44;
-      --crop-shift-y: 5%;
+      --crop-scale: 1.56;
+      --crop-shift-y: 7%;
     }
 
     .character-card:hover,
@@ -264,13 +263,13 @@
       height: 100%;
       object-fit: cover;
       object-position: center bottom;
-      transform: translateY(var(--crop-shift-y)) scale(var(--crop-scale-x), var(--crop-scale-y));
+      transform: translateY(var(--crop-shift-y)) scale(var(--crop-scale));
       transform-origin: center center;
       user-select: none;
     }
 
     .character-card.is-active .character-image {
-      transform: translateY(var(--crop-shift-y)) scale(var(--crop-scale-x), var(--crop-scale-y));
+      transform: translateY(var(--crop-shift-y)) scale(var(--crop-scale));
     }
 
     .character-name {
@@ -445,9 +444,8 @@
 
       .character-card {
         flex: 0.82 1 0;
-        --crop-scale-x: 2.2;
-        --crop-scale-y: 1.56;
-        --crop-shift-y: 6%;
+        --crop-scale: 1.9;
+        --crop-shift-y: 12%;
       }
 
       .character-card.is-active {
@@ -457,11 +455,11 @@
       }
 
       .character-image {
-        transform: translateY(var(--crop-shift-y)) scale(var(--crop-scale-x), var(--crop-scale-y));
+        transform: translateY(var(--crop-shift-y)) scale(var(--crop-scale));
       }
 
       .character-card.is-active .character-image {
-        transform: translateY(var(--crop-shift-y)) scale(var(--crop-scale-x), var(--crop-scale-y));
+        transform: translateY(var(--crop-shift-y)) scale(var(--crop-scale));
       }
 
       .character-name {
@@ -501,6 +499,20 @@
 
       .subtext {
         font-size: clamp(16px, 4.8vw, 20px);
+      }
+    }
+
+    @media (max-width: 380px) {
+      .character-card {
+        --crop-scale: 1.94;
+        --crop-shift-y: 13%;
+      }
+    }
+
+    @media (min-width: 421px) and (max-width: 760px) {
+      .character-card {
+        --crop-scale: 1.84;
+        --crop-shift-y: 11%;
       }
     }
 
