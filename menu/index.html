@@ -222,7 +222,32 @@
       appearance: none;
       -webkit-tap-highlight-color: transparent;
       --crop-scale: 1.56;
+      --crop-shift-x: 0%;
       --crop-shift-y: 7%;
+    }
+
+    .character-card[data-character="kazusa"] {
+      --crop-shift-x: -2%;
+    }
+
+    .character-card[data-character="reisa"] {
+      --crop-shift-x: -8%;
+    }
+
+    .character-card[data-character="alice"] {
+      --crop-shift-x: 3%;
+    }
+
+    .character-card[data-character="kei"] {
+      --crop-shift-x: -4%;
+    }
+
+    .character-card[data-character="hina"] {
+      --crop-shift-x: -2%;
+    }
+
+    .character-card[data-character="hoshino"] {
+      --crop-shift-x: -8%;
     }
 
     .character-card:hover,
@@ -263,13 +288,13 @@
       height: 100%;
       object-fit: cover;
       object-position: center bottom;
-      transform: translateY(var(--crop-shift-y)) scale(var(--crop-scale));
+      transform: translate(var(--crop-shift-x), var(--crop-shift-y)) scale(var(--crop-scale));
       transform-origin: center center;
       user-select: none;
     }
 
     .character-card.is-active .character-image {
-      transform: translateY(var(--crop-shift-y)) scale(var(--crop-scale));
+      transform: translate(var(--crop-shift-x), var(--crop-shift-y)) scale(var(--crop-scale));
     }
 
     .character-name {
@@ -444,8 +469,8 @@
 
       .character-card {
         flex: 0 0 calc(100% / 6);
-        --crop-scale: 2;
-        --crop-shift-y: 13%;
+        --crop-scale: 2.45;
+        --crop-shift-y: 56%;
       }
 
       .character-card.is-active {
@@ -455,13 +480,13 @@
       }
 
       .character-image {
-        transform: translateY(var(--crop-shift-y)) scale(var(--crop-scale));
+        transform: translate(var(--crop-shift-x), var(--crop-shift-y)) scale(var(--crop-scale));
       }
 
       .character-card.is-active .character-image {
         align-self: start;
         justify-self: start;
-        transform: translateY(var(--crop-shift-y)) scale(var(--crop-scale));
+        transform: translate(var(--crop-shift-x), var(--crop-shift-y)) scale(var(--crop-scale));
         width: 43%;
         height: 69%;
       }
@@ -506,17 +531,41 @@
       }
     }
 
-    @media (max-width: 380px) {
-      .character-card {
-        --crop-scale: 2.04;
-        --crop-shift-y: 14%;
+    @media (max-width: 760px) {
+      .character-card[data-character="kazusa"] {
+        --crop-scale: 2.34;
+        --crop-shift-x: 2%;
+        --crop-shift-y: 54%;
       }
-    }
 
-    @media (min-width: 421px) and (max-width: 760px) {
-      .character-card {
-        --crop-scale: 1.92;
-        --crop-shift-y: 12%;
+      .character-card[data-character="reisa"] {
+        --crop-scale: 2.4;
+        --crop-shift-x: -13%;
+        --crop-shift-y: 56%;
+      }
+
+      .character-card[data-character="alice"] {
+        --crop-scale: 2.58;
+        --crop-shift-x: -11%;
+        --crop-shift-y: 60%;
+      }
+
+      .character-card[data-character="kei"] {
+        --crop-scale: 2.5;
+        --crop-shift-x: -12%;
+        --crop-shift-y: 60%;
+      }
+
+      .character-card[data-character="hina"] {
+        --crop-scale: 2.72;
+        --crop-shift-x: -8%;
+        --crop-shift-y: 68%;
+      }
+
+      .character-card[data-character="hoshino"] {
+        --crop-scale: 2.68;
+        --crop-shift-x: -20%;
+        --crop-shift-y: 68%;
       }
     }
 
