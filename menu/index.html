@@ -227,33 +227,42 @@
       -webkit-appearance: none;
       appearance: none;
       -webkit-tap-highlight-color: transparent;
-      --crop-scale: 1.56;
-      --crop-shift-x: 0%;
-      --crop-shift-y: 7%;
+      --img-left: -30%;
+      --img-top: -21%;
+      --img-width: 156%;
+      --img-height: 156%;
+      --active-img-left: var(--img-left);
+      --active-img-top: var(--img-top);
+      --active-img-width: var(--img-width);
+      --active-img-height: var(--img-height);
     }
 
     .character-card[data-character="kazusa"] {
-      --crop-shift-x: -2%;
+      --img-left: -30%;
+      --active-img-top: -27.628%;
+      --active-img-height: 205.234%;
     }
 
     .character-card[data-character="reisa"] {
-      --crop-shift-x: -8%;
+      --img-left: -36%;
+      --active-img-top: -26.036%;
+      --active-img-height: 193.412%;
     }
 
     .character-card[data-character="alice"] {
-      --crop-shift-x: 3%;
+      --img-left: -25%;
     }
 
     .character-card[data-character="kei"] {
-      --crop-shift-x: -4%;
+      --img-left: -32%;
     }
 
     .character-card[data-character="hina"] {
-      --crop-shift-x: -2%;
+      --img-left: -30%;
     }
 
     .character-card[data-character="hoshino"] {
-      --crop-shift-x: -8%;
+      --img-left: -36%;
     }
 
     .character-card:hover,
@@ -283,6 +292,7 @@
     }
 
     .character-figure {
+      position: relative;
       display: grid;
       width: 100%;
       height: 100%;
@@ -292,19 +302,23 @@
     }
 
     .character-image {
+      position: absolute;
       display: block;
-      width: 100%;
-      height: 100%;
+      left: var(--img-left);
+      top: var(--img-top);
+      width: var(--img-width);
+      height: var(--img-height);
       max-width: none;
       object-fit: cover;
       object-position: center bottom;
-      transform: translate(var(--crop-shift-x), var(--crop-shift-y)) scale(var(--crop-scale));
-      transform-origin: center center;
       user-select: none;
     }
 
     .character-card.is-active .character-image {
-      transform: translate(var(--crop-shift-x), var(--crop-shift-y)) scale(var(--crop-scale));
+      left: var(--active-img-left);
+      top: var(--active-img-top);
+      width: var(--active-img-width);
+      height: var(--active-img-height);
     }
 
     .character-name {
@@ -479,8 +493,6 @@
 
       .character-card {
         flex: 0 0 calc(100% / 6);
-        --crop-scale: 2.45;
-        --crop-shift-y: 56%;
       }
 
       .character-card.is-active {
@@ -489,16 +501,11 @@
         grid-template-columns: minmax(0, 1fr) 34px;
       }
 
-      .character-image {
-        transform: translate(var(--crop-shift-x), var(--crop-shift-y)) scale(var(--crop-scale));
-      }
-
       .character-card.is-active .character-image {
-        align-self: start;
-        justify-self: start;
-        transform: translate(var(--crop-shift-x), var(--crop-shift-y)) scale(var(--crop-scale));
-        width: 43%;
-        height: 69%;
+        left: var(--active-img-left);
+        top: var(--active-img-top);
+        width: var(--active-img-width);
+        height: var(--active-img-height);
       }
 
       .character-name {
@@ -543,39 +550,69 @@
 
     @media (max-width: 760px) {
       .character-card[data-character="kazusa"] {
-        --crop-scale: 2.34;
-        --crop-shift-x: 2%;
-        --crop-shift-y: 54%;
+        --img-left: -65%;
+        --img-top: -13.349%;
+        --img-width: 234%;
+        --img-height: 240.283%;
+        --active-img-left: -27.946%;
+        --active-img-top: -8.969%;
+        --active-img-width: 100.604%;
+        --active-img-height: 161.448%;
       }
 
       .character-card[data-character="reisa"] {
-        --crop-scale: 2.4;
-        --crop-shift-x: -6%;
-        --crop-shift-y: 56%;
+        --img-left: -76%;
+        --img-top: -14%;
+        --img-width: 240%;
+        --img-height: 240%;
+        --active-img-left: -32.676%;
+        --active-img-top: -9.659%;
+        --active-img-width: 103.188%;
+        --active-img-height: 165.584%;
       }
 
       .character-card[data-character="alice"] {
-        --crop-scale: 2.58;
-        --crop-shift-x: -11%;
-        --crop-shift-y: 60%;
+        --img-left: -90%;
+        --img-top: -19%;
+        --img-width: 258%;
+        --img-height: 258%;
+        --active-img-left: -38.694%;
+        --active-img-top: -13.109%;
+        --active-img-width: 110.922%;
+        --active-img-height: 178.007%;
       }
 
       .character-card[data-character="kei"] {
-        --crop-scale: 2.5;
-        --crop-shift-x: 2%;
-        --crop-shift-y: 60%;
+        --img-left: -73%;
+        --img-top: -15%;
+        --img-width: 250%;
+        --img-height: 250%;
+        --active-img-left: -31.385%;
+        --active-img-top: -10.349%;
+        --active-img-width: 107.483%;
+        --active-img-height: 172.487%;
       }
 
       .character-card[data-character="hina"] {
-        --crop-scale: 2.72;
-        --crop-shift-x: -8%;
-        --crop-shift-y: 54%;
+        --img-left: -94%;
+        --img-top: -32%;
+        --img-width: 272%;
+        --img-height: 272%;
+        --active-img-left: -40.414%;
+        --active-img-top: -22.078%;
+        --active-img-width: 116.941%;
+        --active-img-height: 187.666%;
       }
 
       .character-card[data-character="hoshino"] {
-        --crop-scale: 2.68;
-        --crop-shift-x: 2%;
-        --crop-shift-y: 68%;
+        --img-left: -82%;
+        --img-top: -16%;
+        --img-width: 268%;
+        --img-height: 268%;
+        --active-img-left: -35.254%;
+        --active-img-top: -11.039%;
+        --active-img-width: 115.222%;
+        --active-img-height: 184.906%;
       }
     }
 
