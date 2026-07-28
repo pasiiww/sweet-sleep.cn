@@ -838,7 +838,43 @@
             border: 1px solid #d6e4ea;
             border-radius: 9px;
             box-shadow: 0 6px 12px rgba(25, 54, 84, 0.08);
+            perspective: 900px;
             animation: result-in 280ms ease both;
+        }
+
+        .result-card-inner {
+            position: absolute;
+            inset: 0;
+            transform-style: preserve-3d;
+            animation: result-flip 760ms cubic-bezier(0.2, 0.73, 0.3, 1.05) both;
+            animation-delay: var(--flip-delay, 0ms);
+            will-change: transform;
+        }
+
+        .result-face {
+            position: absolute;
+            inset: 0;
+            overflow: hidden;
+            border-radius: 6px;
+            backface-visibility: hidden;
+            -webkit-backface-visibility: hidden;
+        }
+
+        .result-back {
+            background: #d9eff8 center / cover no-repeat url("assets/card-back-blue.png");
+        }
+
+        .result-card.rarity-2 .result-back {
+            background-image: url("assets/card-back-gold.png");
+        }
+
+        .result-card.rarity-3 .result-back {
+            background-image: url("assets/card-back-rainbow.png");
+        }
+
+        .result-front {
+            background: #edf4f7;
+            transform: rotateY(180deg);
         }
 
         .result-card.rarity-3 {
@@ -872,7 +908,7 @@
             object-position: center top;
         }
 
-        .result-card.no-image::before {
+        .result-front.no-image::before {
             position: absolute;
             inset: 0;
             content: attr(data-initial);
@@ -893,7 +929,7 @@
             color: #fff;
         }
 
-        .result-card::after {
+        .result-front::after {
             position: absolute;
             right: 0;
             bottom: 0;
@@ -1023,6 +1059,22 @@
             to {
                 opacity: 1;
                 transform: translateY(0) scale(1);
+            }
+        }
+
+        @keyframes result-flip {
+            from {
+                transform: rotateY(0deg);
+            }
+            to {
+                transform: rotateY(180deg);
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .result-card-inner {
+                animation: none;
+                transform: rotateY(180deg);
             }
         }
 
@@ -2070,16 +2122,20 @@
                     return;
                 }
 
-                results.forEach(function (result) {
+                results.forEach(function (result, index) {
                     var stars = result.rarity === 3 ? "★★★" : (result.rarity === 2 ? "★★" : "★");
                     var image = result.image ? '<img src="' + result.image + '" alt="">' : "";
                     var upLabel = result.isUp ? '<span class="up-label">UP</span>' : "";
-                    var classes = "result-card rarity-" + result.rarity + (result.isUp ? " is-up" : "") + (result.image ? "" : " no-image");
-                    html += '<div class="' + classes + '" data-initial="' + result.name.slice(0, 1) + '" style="--card-tint:' + result.tint + ';">'
+                    var classes = "result-card rarity-" + result.rarity + (result.isUp ? " is-up" : "");
+                    var frontClasses = "result-face result-front" + (result.image ? "" : " no-image");
+                    html += '<div class="' + classes + '" style="--card-tint:' + result.tint + '; --flip-delay:' + (index * 65) + 'ms;">'
+                        + '<div class="result-card-inner">'
+                        + '<div class="result-face result-back" aria-hidden="true"></div>'
+                        + '<div class="' + frontClasses + '" data-initial="' + result.name.slice(0, 1) + '">'
                         + image
                         + upLabel
                         + '<div class="result-copy"><div class="stars">' + stars + '</div><div class="result-name">' + result.name + '</div><div class="result-note">' + result.note + '</div></div>'
-                        + "</div>";
+                        + '</div></div></div>';
                 });
 
                 container.innerHTML = html;
