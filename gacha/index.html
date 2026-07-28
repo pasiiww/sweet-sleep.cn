@@ -862,15 +862,15 @@
         }
 
         .result-back {
-            background: #d9eff8 center / cover no-repeat url("assets/card-back-blue.png");
+            background: #d9eff8 center / cover no-repeat url("assets/card-back-blue.webp");
         }
 
         .result-card.rarity-2 .result-back {
-            background-image: url("assets/card-back-gold.png");
+            background-image: url("assets/card-back-gold.webp");
         }
 
         .result-card.rarity-3 .result-back {
-            background-image: url("assets/card-back-rainbow.png");
+            background-image: url("assets/card-back-rainbow.webp");
         }
 
         .result-front {
@@ -1456,7 +1456,7 @@
                     </div>
                     <div class="result-area">
                         <div class="result-header">
-                            <strong>最近结果</strong>
+                            <strong>新机制结果</strong>
                             <span id="new-result-note">点击下方按钮同时开始对比</span>
                         </div>
                         <div class="result-grid" id="new-results"></div>
@@ -1526,7 +1526,7 @@
                     </div>
                     <div class="result-area">
                         <div class="result-header">
-                            <strong>最近结果</strong>
+                            <strong>旧机制结果</strong>
                             <span id="old-result-note">点击下方按钮同时开始对比</span>
                         </div>
                         <div class="result-grid" id="old-results"></div>
@@ -1797,11 +1797,11 @@
                         fesStudent,
                         3,
                         Boolean(fesStudent.isOtherUp),
-                        fesStudent.isOtherUp ? "另一位 UP / FES " + fesRate : "FES 非当前 " + fesRate
+                        fesStudent.isOtherUp ? "另一位当期 UP · FES 角色 " + fesRate : "其他 FES 角色 " + fesRate
                     );
                 }
                 if (roll < THREE_RATE) {
-                    return makeResult(randomItem(standardThreeStars), 3, false, "FES / 常驻");
+                    return makeResult(randomItem(standardThreeStars), 3, false, "常驻三星角色");
                 }
                 if (roll < THREE_RATE + TWO_RATE) {
                     return makeResult(randomItem(twoStars), 2, false, "常驻");
