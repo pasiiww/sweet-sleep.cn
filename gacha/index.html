@@ -1825,7 +1825,8 @@
                     result = normalResult(pool);
                 }
 
-                if (result.isUp) {
+                var hitCurrentUp = result.isUp && result.name === pool.name;
+                if (hitCurrentUp) {
                     state.pitySinceUp = 0;
                     state.up += 1;
                 } else {
