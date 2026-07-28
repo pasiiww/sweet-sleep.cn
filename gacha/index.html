@@ -642,13 +642,25 @@
         }
 
         .result-card.rarity-3 {
-            border-color: #e8c66f;
+            border: 2px solid transparent;
+            background:
+                linear-gradient(#edf4f7, #edf4f7) padding-box,
+                linear-gradient(135deg, #ef796b, #f1c765, #55c3d2, #a88be8) border-box;
             box-shadow: 0 7px 15px rgba(198, 151, 46, 0.19);
         }
 
         .result-card.is-up {
-            border: 2px solid var(--coral);
             box-shadow: 0 8px 18px rgba(239, 121, 107, 0.26);
+        }
+
+        .result-card.rarity-2 {
+            border: 2px solid #e3b94f;
+            box-shadow: 0 7px 15px rgba(198, 151, 46, 0.19);
+        }
+
+        .result-card.rarity-1 {
+            border: 2px solid #5b9ee5;
+            box-shadow: 0 7px 15px rgba(61, 126, 199, 0.16);
         }
 
         .result-card img {
@@ -957,7 +969,7 @@
 
         <div class="notice-line">
             <strong>FES 池</strong>
-            <span>三星概率提升至 6%，当前池 UP 仍为 0.7%。切换池子会分别保留两侧的抽卡进度。</span>
+            <span>三星概率提升至 6%，当前池 UP 仍为 0.7%。切换池子不会清空新旧机制的抽卡进度。</span>
         </div>
 
         <section class="summary-section" aria-labelledby="summary-title">
@@ -1017,7 +1029,7 @@
                 </div>
             </div>
             <div class="pool-art">
-                <img id="pool-art-image" src="../menu/assets/kei.jpg" alt="">
+                <img id="pool-art-image" src="assets/ibuki-swimsuit.webp" alt="">
                 <div class="pool-art-copy">
                     <small>Pickup student</small>
                     <strong id="pool-art-name">伊吹（泳装）</strong>
@@ -1168,7 +1180,7 @@
         </section>
 
         <footer class="footnote">
-            <span>这是概率与保底的前端模拟，不消耗任何游戏资源。角色图鉴参考 GameKee，角色头像使用当前项目素材。</span>
+            <span>这是概率与保底的前端模拟，不消耗任何游戏资源。角色头像为从 GameKee 图鉴下载的素材。</span>
             <a href="https://www.gamekee.com/ba/second/23941" target="_blank" rel="noreferrer">查看 GameKee 学生图鉴</a>
         </footer>
     </main>
@@ -1185,43 +1197,38 @@
                 ibuki: {
                     name: "伊吹（泳装）",
                     description: "格黑娜的夏日巡逻，FES 期间登场。",
-                    artImage: "../menu/assets/kei.jpg",
+                    artImage: "assets/ibuki-swimsuit.webp",
                     artNote: "当前池只会抽到伊吹（泳装）这一位限定 UP。",
-                    upImage: "../menu/assets/kei.jpg"
+                    upImage: "assets/ibuki-swimsuit.webp"
                 },
                 iroha: {
                     name: "伊吕波（泳装）",
                     description: "万魔殿的夏日巡逻，FES 期间登场。",
-                    artImage: "../menu/assets/hoshino.jpg",
+                    artImage: "assets/iroha-swimsuit.webp",
                     artNote: "当前池只会抽到伊吕波（泳装）这一位限定 UP。",
-                    upImage: "../menu/assets/hoshino.jpg"
+                    upImage: "assets/iroha-swimsuit.webp"
                 }
             };
 
             var standardThreeStars = [
-                { name: "空崎日奈", image: "../menu/assets/hina.jpg" },
-                { name: "天童爱丽丝", image: "../menu/assets/alice.jpg" },
-                { name: "杏山和纱", image: "../menu/assets/kazusa.jpg" },
-                { name: "室笠朱音", image: "../menu/assets/reisa.jpg" },
-                { name: "小鸟游星野（泳装）", image: "../menu/assets/hoshino.jpg" },
-                { name: "圣园未花", image: "../menu/assets/alice.jpg" },
-                { name: "狐坂若藻", image: "../menu/assets/reisa.jpg" }
+                { name: "空崎日奈", image: "assets/hina.webp" },
+                { name: "天童爱丽丝", image: "assets/alice.webp" },
+                { name: "室笠朱音", image: "assets/akane.webp" },
+                { name: "小鸟游星野（泳装）", image: "assets/hoshino-swimsuit.webp" }
             ];
 
             var twoStars = [
-                { name: "浅黄睦月", tint: "#f5d6aa" },
-                { name: "赤司淳子", tint: "#e8c6dc" },
-                { name: "牛牧茱莉", tint: "#c8e2d2" },
-                { name: "伊草遥香", tint: "#d6d0f0" },
-                { name: "乙花堇", tint: "#f2d2b4" }
+                { name: "浅黄睦月", image: "assets/mutsuki.webp" },
+                { name: "赤司淳子", image: "assets/junko.webp" },
+                { name: "牛牧茱莉", image: "assets/juri.webp" },
+                { name: "伊草遥香", image: "assets/haruka.webp" }
             ];
 
             var oneStars = [
-                { name: "奥空绫音", tint: "#c6dced" },
-                { name: "黑见芹香", tint: "#d8c7db" },
-                { name: "小钩晴", tint: "#d4e6c9" },
-                { name: "白子", tint: "#c7d7ef" },
-                { name: "音濑小玉", tint: "#f0d8b8" }
+                { name: "奥空绫音", image: "assets/ayane.webp" },
+                { name: "黑见芹香", image: "assets/serika.webp" },
+                { name: "白子", image: "assets/shiroko.webp" },
+                { name: "空崎日奈", image: "assets/hina.webp" }
             ];
 
             function createState() {
@@ -1235,9 +1242,10 @@
                 };
             }
 
+            var sharedStates = { "new": createState(), "old": createState() };
             var poolStates = {
-                ibuki: { "new": createState(), "old": createState() },
-                iroha: { "new": createState(), "old": createState() }
+                ibuki: sharedStates,
+                iroha: sharedStates
             };
             var activePool = "ibuki";
 

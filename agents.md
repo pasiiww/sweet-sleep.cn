@@ -53,5 +53,8 @@ For `/menu/` changes, also keep the local staging mirror in sync when it is usef
 
 - The /gacha/ page is a static HTML, CSS, and JavaScript simulator.
 - It compares the new 100/200 pull pity system with the old 200/400 pull exchange system side by side.
-- The active pickup can switch between Ibuki (Summer) and Iroha (Summer), while each pool keeps separate local progress.
+- The active pickup can switch between Ibuki (Summer) and Iroha (Summer), while both mechanisms keep shared progress across the switch.
 - FES simulation uses a 6% three-star rate and a 0.7% active UP rate.
+- Switching the active pickup keeps the shared new/old mechanism progress; it only changes the current UP artwork and name.
+- Gacha portraits under `/gacha/assets/` are locally downloaded GameKee WebP assets, not reused menu assets.
+- Gacha result borders use a multicolor frame for three-star, gold for two-star, and blue for one-star.
