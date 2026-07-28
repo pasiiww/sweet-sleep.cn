@@ -1409,8 +1409,8 @@
                         </div>
                         <div class="spark-markers">
                             <span>0</span>
-                            <span>200 · 自选 1</span>
-                            <span>400 · 自选 2</span>
+                            <span>100</span>
+                            <span id="old-progress-end-label">200 · 自选 1</span>
                         </div>
                     </div>
                     <div class="reward-area old-reward-area">
@@ -1911,9 +1911,15 @@
                     var progressPulls = state.pulls - (completedExchanges * 200);
                     var remainder = state.pulls % 200;
                     var remaining = remainder === 0 ? 200 : 200 - remainder;
+                    var endLabel = document.getElementById("old-progress-end-label");
                     width = state.redeemed >= 2
                         ? 100
                         : Math.max(0, Math.min(100, (progressPulls / 200) * 100));
+                    if (state.redeemed >= 2) {
+                        endLabel.textContent = "200 · 本轮完成";
+                    } else {
+                        endLabel.textContent = "200 · 自选 " + (state.redeemed + 1);
+                    }
                     if (unlocked > state.redeemed) {
                         label.textContent = "已有 " + (unlocked - state.redeemed) + " 次自选可用";
                     } else if (state.pulls >= 400) {
