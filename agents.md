@@ -1,0 +1,51 @@
+# Sweet Sleep Project Notes
+
+This repository contains the static website for `sweet-sleep.cn`.
+
+## Project Locations
+
+- Local repository: `/Users/bytedance/Documents/Codex/2026-07-03/ni/work/github_sweet_sleep`
+- Local staging mirror used during earlier menu work: `/Users/bytedance/Documents/Codex/2026-07-03/ni/work/menu`
+- Production web root: `/www/wwwroot/myweb`
+- Domain: `sweet-sleep.cn`
+- GitHub repository: `pasiiww/sweet-sleep.cn`
+
+## Site Structure
+
+- `/index.html`: home page, gallery, ICP/public-security filing link.
+- `/video.html`: Bilibili video page. It embeds the video first and falls back to opening Bilibili if embedding is unavailable.
+- `/ar/`: MindAR + Three.js AR page. The recognition target and display assets are under `/ar/assets/`.
+- `/menu/`: interactive character menu page. It is hand-built HTML/CSS and uses compressed/watermarked character assets under `/menu/assets/`.
+
+## Assets
+
+- AR target: `/ar/assets/target.png`
+- AR compiled target data: `/ar/assets/targets.mind`
+- AR rendered image: `/ar/assets/kei.png`
+- Menu reference/main visual: `/menu/assets/menu-main.jpg`
+- Menu character images: `/menu/assets/kazusa.jpg`, `/menu/assets/reisa.jpg`, `/menu/assets/alice.jpg`, `/menu/assets/kei.jpg`, `/menu/assets/hina.jpg`, `/menu/assets/hoshino.jpg`
+- Public-security filing icon: `/beian-gongan.jpg`
+
+## Deployment
+
+This is a static site. Deploy by copying changed files from the local repository to the production web root on the server.
+
+Typical flow:
+
+1. Edit files in the local repository.
+2. Preview locally when layout or interaction changes matter.
+3. Copy changed files to `/www/wwwroot/myweb`.
+4. Verify the live page on `https://sweet-sleep.cn/`.
+5. Commit and push changes to `main`.
+
+For `/menu/` changes, also keep the local staging mirror in sync when it is useful for visual QA.
+
+## Implementation Notes
+
+- Keep the site dependency-light. Most pages are plain HTML, CSS, and vanilla JavaScript.
+- For `/menu/`, avoid CSS transform-based crop math for the default character strips; iOS Safari handled those inconsistently. Use fixed absolute image crop variables instead.
+- The `/menu/` character strips should have no visible gaps in the collapsed state. Expanded characters should open in place toward the right and slightly downward without scaling the existing strip.
+- Menu character names should stay clean and unobtrusive, without heavy color blocks or card-like backgrounds.
+- For AR, preserve the current mobile-first interaction: user starts the camera, detected content animates in, and the capture button resembles the iOS camera shutter.
+- Do not commit private certificates, SSH keys, or local-only generated scratch files.
+
