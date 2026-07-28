@@ -61,3 +61,6 @@ For `/menu/` changes, also keep the local staging mirror in sync when it is usef
 - `/gacha/students-source.json` records the current GameKee roster: 165 standard/history-FES three-stars, 24 two-stars, and 37 one-stars, plus the two active swimsuit UPs.
 - Run `node scripts/download-gacha-assets.mjs` to refresh `/gacha/assets/students/` and regenerate `/gacha/students.json`; downloads send the GameKee roster page as the referrer because the CDN blocks unreferenced hotlinks.
 - The comparison controls above both panels perform the same single pull or ten-pull on the new and old systems together. Panel reset buttons and the old exchange button remain mechanism-specific.
+- The current gacha comparison exposes only a shared ten-pull button. New-mechanism event rewards follow the supplied 10-390 pull table, auto-record ordinary items, and show claim/use buttons for choice boxes and limited ten-pull tickets; the same table repeats after the first cycle.
+- Limited ten-pull rewards add ten pulls only to the new-mechanism statistics when used. All reset buttons stay disabled until the corresponding progress reaches 400 pulls, and the shared reset requires both sides to reach 400.
+- The new 100-pull soft pity is checked only on the 100th pull after the last UP; a miss returns to the normal 0.7% rate until the 200-pull guarantee.

@@ -165,7 +165,7 @@
 
         .summary-grid {
             display: grid;
-            grid-template-columns: repeat(4, minmax(0, 1fr));
+            grid-template-columns: repeat(5, minmax(0, 1fr));
             gap: 12px;
         }
 
@@ -548,6 +548,78 @@
 
         .progress-area {
             padding: 15px 18px 13px;
+        }
+
+        .reward-area {
+            margin: 0 18px 16px;
+            padding: 12px;
+            background: #fbfdfe;
+            border: 1px solid var(--line);
+            border-radius: 10px;
+        }
+
+        .reward-meta {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            color: var(--muted);
+            font-size: 11px;
+        }
+
+        .reward-meta strong {
+            color: var(--navy);
+            font-size: 12px;
+        }
+
+        .reward-track {
+            height: 6px;
+            margin-top: 8px;
+            overflow: hidden;
+            background: #e6eef2;
+            border-radius: 99px;
+        }
+
+        .reward-bar {
+            width: 0;
+            height: 100%;
+            background: var(--gold);
+            border-radius: inherit;
+            transition: width 240ms ease;
+        }
+
+        .reward-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        .reward-actions:empty {
+            display: none;
+        }
+
+        .reward-button {
+            min-height: 36px;
+            padding: 0 11px;
+            color: #72531b;
+            background: #fff5d6;
+            border: 1px solid #efd88d;
+            border-radius: 8px;
+            font-size: 11px;
+            font-weight: 800;
+        }
+
+        .reward-button:hover {
+            background: #ffefbd;
+        }
+
+        .reward-log {
+            margin-top: 8px;
+            overflow: hidden;
+            color: #8997a3;
+            font-size: 10px;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
 
         .progress-meta {
@@ -943,6 +1015,11 @@
                 padding-left: 13px;
             }
 
+            .reward-area {
+                margin-right: 13px;
+                margin-left: 13px;
+            }
+
             .rule-list {
                 grid-template-columns: 1fr;
             }
@@ -1022,6 +1099,13 @@
                         <div class="summary-value old"><span>旧</span><strong id="summary-old-rate">0%</strong></div>
                     </div>
                 </article>
+                <article class="summary-card">
+                    <div class="summary-label">新机制活动奖励</div>
+                    <div class="summary-values">
+                        <div class="summary-value"><span>已领</span><strong id="summary-new-rewards">0</strong></div>
+                        <div class="summary-value"><span>待领</span><strong id="summary-new-pending">0</strong></div>
+                    </div>
+                </article>
             </div>
         </section>
 
@@ -1067,9 +1151,8 @@
             </div>
 
             <div class="comparison-actions" aria-label="同时抽取控制">
-                <button class="action-button primary" type="button" data-action="compare-single">左右同时单抽 ×1</button>
                 <button class="action-button primary" type="button" data-action="compare-ten">左右同时十连 ×10</button>
-                <button class="action-button secondary" type="button" data-action="compare-reset">同时重置</button>
+                <button class="action-button secondary" id="compare-reset" type="button" data-action="compare-reset" disabled>同时重置（400 抽后）</button>
             </div>
 
             <div class="comparison-grid">
@@ -1123,6 +1206,17 @@
                             <span>200 · 必出</span>
                         </div>
                     </div>
+                    <div class="reward-area">
+                        <div class="reward-meta">
+                            <span>活动奖励进度</span>
+                            <strong id="new-reward-label">还差 10 抽</strong>
+                        </div>
+                        <div class="reward-track" aria-label="新机制活动奖励进度">
+                            <div class="reward-bar" id="new-reward-bar"></div>
+                        </div>
+                        <div class="reward-actions" id="new-reward-actions"></div>
+                        <div class="reward-log" id="new-reward-log">首轮奖励会在累计招募后逐步解锁</div>
+                    </div>
                     <div class="result-area">
                         <div class="result-header">
                             <strong>最近结果</strong>
@@ -1131,7 +1225,7 @@
                         <div class="result-grid" id="new-results"></div>
                     </div>
                     <div class="action-row">
-                        <button class="action-button secondary" type="button" data-action="reset" data-mode="new">重置新机制</button>
+                        <button class="action-button secondary" id="new-reset" type="button" data-action="reset" data-mode="new" disabled>重置新机制（400 抽后）</button>
                     </div>
                 </article>
 
@@ -1194,7 +1288,7 @@
                     </div>
                     <div class="action-row">
                         <button class="action-button secondary" id="old-redeem" type="button" data-action="redeem" data-mode="old" disabled>自选当前 UP</button>
-                        <button class="action-button secondary" type="button" data-action="reset" data-mode="old">重置旧机制</button>
+                        <button class="action-button secondary" id="old-reset" type="button" data-action="reset" data-mode="old" disabled>重置旧机制（400 抽后）</button>
                     </div>
                 </article>
             </div>
@@ -1213,6 +1307,29 @@
             var PICKUP_RATE = 0.007;
             var THREE_RATE = 0.06;
             var TWO_RATE = 0.18;
+            var REWARD_CYCLE_PULLS = 400;
+            var EVENT_REWARDS = [
+                { pulls: 10, kind: "choice", label: "高级战术教育 BD 选择箱 ×2" },
+                { pulls: 30, kind: "item", label: "神名碎片 ×10" },
+                { pulls: 50, kind: "choice", label: "高级技术笔记选择箱 ×5" },
+                { pulls: 70, kind: "ten", label: "期间限定十连招募券 ×1" },
+                { pulls: 90, kind: "item", label: "礼物箱 ×2" },
+                { pulls: 110, kind: "item", label: "神名碎片 ×20" },
+                { pulls: 130, kind: "ten", label: "期间限定十连招募券 ×1" },
+                { pulls: 150, kind: "ten", label: "期间限定十连招募券 ×1" },
+                { pulls: 170, kind: "ten", label: "期间限定十连招募券 ×1" },
+                { pulls: 190, kind: "choice", label: "最上级技术笔记选择箱 ×5" },
+                { pulls: 210, kind: "choice", label: "高级战术教育 BD 选择箱 ×2" },
+                { pulls: 230, kind: "item", label: "神名碎片 ×10" },
+                { pulls: 250, kind: "choice", label: "高级技术笔记选择箱 ×5" },
+                { pulls: 270, kind: "ten", label: "期间限定十连招募券 ×1" },
+                { pulls: 290, kind: "item", label: "礼物箱 ×2" },
+                { pulls: 310, kind: "item", label: "神名碎片 ×20" },
+                { pulls: 330, kind: "ten", label: "期间限定十连招募券 ×1" },
+                { pulls: 350, kind: "ten", label: "期间限定十连招募券 ×1" },
+                { pulls: 370, kind: "ten", label: "期间限定十连招募券 ×1" },
+                { pulls: 390, kind: "choice", label: "最上级技术笔记选择箱 ×5" }
+            ];
 
             var pools = {
                 ibuki: {
@@ -1284,7 +1401,11 @@
                     up: 0,
                     pitySinceUp: 0,
                     redeemed: 0,
-                    results: []
+                    results: [],
+                    rewardCursor: 0,
+                    rewardClaimed: 0,
+                    rewardQueue: [],
+                    rewardLog: []
                 };
             }
 
@@ -1308,6 +1429,39 @@
                     isUp: Boolean(isUp),
                     note: note || ""
                 };
+            }
+
+            function rewardThreshold(index) {
+                var cycle = Math.floor(index / EVENT_REWARDS.length);
+                var reward = EVENT_REWARDS[index % EVENT_REWARDS.length];
+                return cycle * REWARD_CYCLE_PULLS + reward.pulls;
+            }
+
+            function addRewardLog(state, text) {
+                state.rewardLog.push(text);
+                state.rewardLog = state.rewardLog.slice(-3);
+            }
+
+            function syncNewRewards(state) {
+                while (state.pulls >= rewardThreshold(state.rewardCursor)) {
+                    var rewardIndex = state.rewardCursor % EVENT_REWARDS.length;
+                    var reward = EVENT_REWARDS[rewardIndex];
+                    var cycle = Math.floor(state.rewardCursor / EVENT_REWARDS.length);
+                    var instance = {
+                        kind: reward.kind,
+                        label: reward.label,
+                        cycle: cycle,
+                        pulls: rewardThreshold(state.rewardCursor)
+                    };
+
+                    state.rewardCursor += 1;
+                    if (reward.kind === "item") {
+                        state.rewardClaimed += 1;
+                        addRewardLog(state, (cycle ? "重复特典" : "初回特典") + "：" + reward.label);
+                    } else {
+                        state.rewardQueue.push(instance);
+                    }
+                }
             }
 
             function normalResult(pool) {
@@ -1334,7 +1488,7 @@
 
                 if (mode === "new" && sinceUp >= 200) {
                     result = makeResult({ name: pool.name, image: pool.upImage }, 3, true, "200 抽必出");
-                } else if (mode === "new" && sinceUp >= 100 && Math.random() < 0.5) {
+                } else if (mode === "new" && sinceUp === 100 && Math.random() < 0.5) {
                     result = makeResult({ name: pool.name, image: pool.upImage }, 3, true, "100 抽 50%");
                 } else {
                     result = normalResult(pool);
@@ -1353,6 +1507,9 @@
 
                 state.results.push(result);
                 state.results = state.results.slice(-20);
+                if (mode === "new") {
+                    syncNewRewards(state);
+                }
             }
 
             function draw(mode, count) {
@@ -1369,6 +1526,35 @@
                     drawOne("new");
                     drawOne("old");
                 }
+                render();
+            }
+
+            function useRewardTen(index) {
+                var state = poolStates[activePool].new;
+                var reward = state.rewardQueue[index];
+                if (!reward || reward.kind !== "ten") {
+                    return;
+                }
+
+                state.rewardQueue.splice(index, 1);
+                state.rewardClaimed += 1;
+                addRewardLog(state, "已使用赠送十连：" + reward.label);
+                for (var i = 0; i < 10; i += 1) {
+                    drawOne("new");
+                }
+                render();
+            }
+
+            function claimRewardChoice(index) {
+                var state = poolStates[activePool].new;
+                var reward = state.rewardQueue[index];
+                if (!reward || reward.kind !== "choice") {
+                    return;
+                }
+
+                state.rewardQueue.splice(index, 1);
+                state.rewardClaimed += 1;
+                addRewardLog(state, "已领取自选奖励：" + reward.label);
                 render();
             }
 
@@ -1395,11 +1581,17 @@
             }
 
             function reset(mode) {
+                if (poolStates[activePool][mode].pulls < 400) {
+                    return;
+                }
                 poolStates[activePool][mode] = createState();
                 render();
             }
 
             function resetBoth() {
+                if (poolStates[activePool].new.pulls < 400 || poolStates[activePool].old.pulls < 400) {
+                    return;
+                }
                 sharedStates.new = createState();
                 sharedStates.old = createState();
                 render();
@@ -1430,6 +1622,8 @@
                 setText("summary-old-up", oldState.up);
                 setText("summary-new-rate", formatRate(newState));
                 setText("summary-old-rate", formatRate(oldState));
+                setText("summary-new-rewards", newState.rewardClaimed);
+                setText("summary-new-pending", newState.rewardQueue.length);
             }
 
             function renderProgress(mode, state) {
@@ -1441,8 +1635,10 @@
                     width = Math.min(100, (state.pitySinceUp / 200) * 100);
                     if (state.pitySinceUp >= 200) {
                         label.textContent = "本抽应当已经重置";
+                    } else if (state.pitySinceUp === 99) {
+                        label.textContent = "下一抽为 100 抽节点：50% UP";
                     } else if (state.pitySinceUp >= 100) {
-                        label.textContent = "软保底已开启：下一抽有 50% UP";
+                        label.textContent = "100 抽节点未命中：当前恢复普通 0.7%";
                     } else {
                         label.textContent = "还差 " + (100 - state.pitySinceUp) + " 抽进入软保底";
                     }
@@ -1461,6 +1657,55 @@
                 }
 
                 bar.style.width = width + "%";
+            }
+
+            function renderRewards(state) {
+                var label = document.getElementById("new-reward-label");
+                var bar = document.getElementById("new-reward-bar");
+                var actions = document.getElementById("new-reward-actions");
+                var log = document.getElementById("new-reward-log");
+                var nextReward = EVENT_REWARDS[state.rewardCursor % EVENT_REWARDS.length];
+                var nextThreshold = rewardThreshold(state.rewardCursor);
+                var cycle = Math.floor(state.rewardCursor / EVENT_REWARDS.length);
+                var cycleStart = cycle * REWARD_CYCLE_PULLS;
+                var progress = Math.max(0, Math.min(100, ((state.pulls - cycleStart) / REWARD_CYCLE_PULLS) * 100));
+
+                if (state.rewardQueue.length) {
+                    label.textContent = "有 " + state.rewardQueue.length + " 项奖励待领取";
+                } else {
+                    label.textContent = (cycle ? "重复特典" : "初回特典") + "：还差 " + Math.max(0, nextThreshold - state.pulls) + " 抽 · " + nextReward.label;
+                }
+                bar.style.width = progress + "%";
+                actions.innerHTML = state.rewardQueue.map(function (reward, index) {
+                    var text = reward.kind === "ten" ? "使用赠送十连 · " : "领取自选 · ";
+                    return '<button class="reward-button" type="button" data-reward-action="' + reward.kind + '" data-reward-index="' + index + '">' + text + reward.label + "</button>";
+                }).join("");
+                actions.querySelectorAll("[data-reward-action]").forEach(function (button) {
+                    button.addEventListener("click", function () {
+                        var index = Number(button.getAttribute("data-reward-index"));
+                        if (button.getAttribute("data-reward-action") === "ten") {
+                            useRewardTen(index);
+                        } else {
+                            claimRewardChoice(index);
+                        }
+                    });
+                });
+                log.textContent = state.rewardLog.length ? state.rewardLog[state.rewardLog.length - 1] : "首轮奖励会在累计招募后逐步解锁";
+            }
+
+            function renderResetButtons() {
+                var newState = poolStates[activePool].new;
+                var oldState = poolStates[activePool].old;
+                var bothReady = newState.pulls >= 400 && oldState.pulls >= 400;
+                var newReset = document.getElementById("new-reset");
+                var oldReset = document.getElementById("old-reset");
+                var compareReset = document.getElementById("compare-reset");
+                newReset.disabled = newState.pulls < 400;
+                oldReset.disabled = oldState.pulls < 400;
+                compareReset.disabled = !bothReady;
+                newReset.textContent = newReset.disabled ? "重置新机制（400 抽后）" : "重置新机制";
+                oldReset.textContent = oldReset.disabled ? "重置旧机制（400 抽后）" : "重置旧机制";
+                compareReset.textContent = compareReset.disabled ? "同时重置（400 抽后）" : "同时重置";
             }
 
             function renderResults(mode, state) {
@@ -1497,6 +1742,9 @@
                 setText(mode + "-three", state.three);
                 setText(mode + "-up", state.up);
                 renderProgress(mode, state);
+                if (mode === "new") {
+                    renderRewards(state);
+                }
                 renderResults(mode, state);
 
                 if (mode === "old") {
@@ -1505,6 +1753,7 @@
                     redeemButton.disabled = unlocked <= state.redeemed;
                     redeemButton.textContent = unlocked > state.redeemed ? "自选当前 UP ×" + (unlocked - state.redeemed) : "自选当前 UP";
                 }
+                renderResetButtons();
             }
 
             function renderPool() {
@@ -1533,9 +1782,7 @@
                 button.addEventListener("click", function () {
                     var action = button.getAttribute("data-action");
                     var mode = button.getAttribute("data-mode");
-                    if (action === "compare-single") {
-                        drawBoth(1);
-                    } else if (action === "compare-ten") {
+                    if (action === "compare-ten") {
                         drawBoth(10);
                     } else if (action === "compare-reset") {
                         resetBoth();
