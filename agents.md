@@ -60,8 +60,8 @@ For `/menu/` changes, also keep the local staging mirror in sync when it is usef
 - Gacha result borders use a multicolor frame for three-star, gold for two-star, and blue for one-star.
 - `/gacha/students-source.json` records the current GameKee roster: 165 standard/history-FES three-stars, 24 two-stars, and 37 one-stars, plus the two active swimsuit UPs.
 - Run `node scripts/download-gacha-assets.mjs` to refresh `/gacha/assets/students/` and regenerate `/gacha/students.json`; downloads send the GameKee roster page as the referrer because the CDN blocks unreferenced hotlinks.
-- The shared ten-pull and shared reset controls sit below both comparison panels; panel reset buttons and the old exchange button remain mechanism-specific.
+- The shared ten-pull and shared reset controls sit below both comparison panels; the old exchange action sits in a reward area matching the new mechanism.
 - The current gacha comparison exposes only a shared ten-pull button. New-mechanism event rewards follow the supplied 10-390 pull table, auto-record ordinary items, and show claim/use buttons for choice boxes and limited ten-pull tickets; the same table repeats after the first cycle.
-- Limited ten-pull rewards add ten pulls only to the new-mechanism statistics when used. Reset buttons unlock after 2 UP results on the corresponding mechanism, and the shared reset requires both sides to reach 2 UP results.
+- Limited ten-pull rewards add ten pulls only to the new-mechanism statistics when used. The shared reset unlocks after both mechanisms reach 2 UP results; there are no separate panel reset buttons. Claiming a non-draw reward updates its reward/progress/stat areas without rebuilding recent result cards.
 - The new 100-pull soft pity is checked only on the 100th pull after the last UP; a miss returns to the normal 0.7% rate until the 200-pull guarantee.
 - FES results use 6% total three-star probability: current UP 0.7%, non-current FES students 0.9% total (including the other current UP, split evenly per candidate), and the remaining 4.4% for the standard three-star pool. The summary tracks unique three-star portraits with repeat counts.

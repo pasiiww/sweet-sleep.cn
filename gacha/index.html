@@ -1361,9 +1361,6 @@
                         </div>
                         <div class="result-grid" id="new-results"></div>
                     </div>
-                    <div class="action-row">
-                        <button class="action-button secondary" id="new-reset" type="button" data-action="reset" data-mode="new" disabled>重置新机制（2 个 UP 后）</button>
-                    </div>
                 </article>
 
                 <article class="mechanic-panel old-panel" data-mode="old">
@@ -1416,16 +1413,21 @@
                             <span>400 · 自选 2</span>
                         </div>
                     </div>
+                    <div class="reward-area old-reward-area">
+                        <div class="reward-meta">
+                            <span>自选当前 UP</span>
+                            <strong id="old-reward-label">还差 200 抽</strong>
+                        </div>
+                        <div class="reward-actions">
+                            <button class="reward-button" id="old-redeem" type="button" data-action="redeem" data-mode="old" disabled>自选当前 UP</button>
+                        </div>
+                    </div>
                     <div class="result-area">
                         <div class="result-header">
                             <strong>最近结果</strong>
                             <span id="old-result-note">点击下方按钮同时开始对比</span>
                         </div>
                         <div class="result-grid" id="old-results"></div>
-                    </div>
-                    <div class="action-row">
-                        <button class="action-button secondary" id="old-redeem" type="button" data-action="redeem" data-mode="old" disabled>自选当前 UP</button>
-                        <button class="action-button secondary" id="old-reset" type="button" data-action="reset" data-mode="old" disabled>重置旧机制（2 个 UP 后）</button>
                     </div>
                 </article>
             </div>
@@ -1756,7 +1758,11 @@
                 for (var i = 0; i < 10; i += 1) {
                     drawOne("new");
                 }
-                render();
+                renderSummary();
+                renderProgress("new", state);
+                renderRewards(state);
+                renderResults("new", state);
+                renderResetButtons();
             }
 
             function claimRewardChoice(index) {
@@ -1769,7 +1775,9 @@
                 state.rewardQueue.splice(index, 1);
                 state.rewardClaimed += 1;
                 addRewardLog(state, "已领取自选奖励：" + reward.label);
-                render();
+                renderSummary();
+                renderRewards(state);
+                renderResetButtons();
             }
 
             function oldUnlocked(state) {
@@ -1791,9 +1799,10 @@
                     image: pools[activePool].upImage
                 }, 3, true, "累计自选");
                 recordThreeStar(state, redeemedResult);
-                state.results.push(redeemedResult);
-                state.results = state.results.slice(-20);
-                render();
+                renderSummary();
+                renderProgress("old", state);
+                renderOldRedeem(state);
+                renderResetButtons();
             }
 
             function reset(mode) {
@@ -1951,15 +1960,27 @@
                 var newState = poolStates[activePool].new;
                 var oldState = poolStates[activePool].old;
                 var bothReady = newState.up >= 2 && oldState.up >= 2;
-                var newReset = document.getElementById("new-reset");
-                var oldReset = document.getElementById("old-reset");
                 var compareReset = document.getElementById("compare-reset");
-                newReset.disabled = newState.up < 2;
-                oldReset.disabled = oldState.up < 2;
                 compareReset.disabled = !bothReady;
-                newReset.textContent = newReset.disabled ? "重置新机制（2 个 UP 后）" : "重置新机制";
-                oldReset.textContent = oldReset.disabled ? "重置旧机制（2 个 UP 后）" : "重置旧机制";
                 compareReset.textContent = compareReset.disabled ? "同时重置（两边各 2 个 UP 后）" : "同时重置";
+            }
+
+            function renderOldRedeem(state) {
+                var unlocked = oldUnlocked(state);
+                var available = unlocked - state.redeemed;
+                var redeemButton = document.getElementById("old-redeem");
+                var label = document.getElementById("old-reward-label");
+                redeemButton.disabled = available <= 0;
+                redeemButton.textContent = available > 0 ? "自选当前 UP ×" + available : "自选当前 UP";
+                if (available > 0) {
+                    label.textContent = "有 " + available + " 次自选可用";
+                } else if (state.pulls >= 400) {
+                    label.textContent = "本轮自选已领取";
+                } else {
+                    var remainder = state.pulls % 200;
+                    var remaining = remainder === 0 ? 200 : 200 - remainder;
+                    label.textContent = "还差 " + remaining + " 抽";
+                }
             }
 
             function renderResults(mode, state) {
@@ -2002,10 +2023,7 @@
                 renderResults(mode, state);
 
                 if (mode === "old") {
-                    var unlocked = oldUnlocked(state);
-                    var redeemButton = document.getElementById("old-redeem");
-                    redeemButton.disabled = unlocked <= state.redeemed;
-                    redeemButton.textContent = unlocked > state.redeemed ? "自选当前 UP ×" + (unlocked - state.redeemed) : "自选当前 UP";
+                    renderOldRedeem(state);
                 }
                 renderResetButtons();
             }
