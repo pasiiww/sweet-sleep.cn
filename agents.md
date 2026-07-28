@@ -25,6 +25,7 @@ This repository contains the static website for `sweet-sleep.cn`.
 - Menu reference/main visual: `/menu/assets/menu-main.jpg`
 - Menu character images: `/menu/assets/kazusa.jpg`, `/menu/assets/reisa.jpg`, `/menu/assets/alice.jpg`, `/menu/assets/kei.jpg`, `/menu/assets/hina.jpg`, `/menu/assets/hoshino.jpg`
 - Public-security filing icon: `/beian-gongan.jpg`
+- Homepage gallery files are listed in `/images.json`; keep gallery filenames URL-safe and compress large JPGs before deployment.
 
 ## Deployment
 
