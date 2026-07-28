@@ -58,3 +58,6 @@ For `/menu/` changes, also keep the local staging mirror in sync when it is usef
 - Switching the active pickup keeps the shared new/old mechanism progress; it only changes the current UP artwork and name.
 - Gacha portraits under `/gacha/assets/` are locally downloaded GameKee WebP assets, not reused menu assets.
 - Gacha result borders use a multicolor frame for three-star, gold for two-star, and blue for one-star.
+- `/gacha/students-source.json` records the current GameKee roster: 165 standard/history-FES three-stars, 24 two-stars, and 37 one-stars, plus the two active swimsuit UPs.
+- Run `node scripts/download-gacha-assets.mjs` to refresh `/gacha/assets/students/` and regenerate `/gacha/students.json`; downloads send the GameKee roster page as the referrer because the CDN blocks unreferenced hotlinks.
+- The comparison controls above both panels perform the same single pull or ten-pull on the new and old systems together. Panel reset buttons and the old exchange button remain mechanism-specific.
