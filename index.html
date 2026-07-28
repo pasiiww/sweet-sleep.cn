@@ -183,7 +183,7 @@
         <script>
             async function loadImages() {
                 try {
-                    const response = await fetch('images.json');
+                    const response = await fetch('images.json?v=20260728');
                     if (!response.ok) {
                         throw new Error('加载图片列表失败');
                     }
