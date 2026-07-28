@@ -3,247 +3,724 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>首页</title>
+    <meta name="theme-color" content="#15232d">
+    <title>午觉糖水铺 | Sweet Sleep</title>
     <style>
+        :root {
+            --ink: #15232d;
+            --muted: #6d7b83;
+            --paper: #fbfcfa;
+            --canvas: #eef3f1;
+            --line: #d8e3e3;
+            --teal: #168e96;
+            --teal-soft: #dff1ef;
+            --coral: #d8796b;
+            --shadow: 0 18px 45px rgba(21, 35, 45, 0.09);
+        }
+
         * {
-            margin: 0;
-            padding: 0;
             box-sizing: border-box;
         }
+
+        html {
+            min-width: 320px;
+            background: var(--canvas);
+        }
+
         body {
-            font-family: Arial, sans-serif;
-            line-height: 1.6;
-            color: #333;
-            background: #f5f5f5;
+            min-width: 320px;
+            margin: 0;
+            color: var(--ink);
+            background: var(--canvas);
+            font-family: Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+            line-height: 1.5;
         }
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 10px;
+
+        body.modal-open {
+            overflow: hidden;
         }
-        header {
-            background: #fff;
-            padding: 15px;
-            text-align: center;
-            margin-bottom: 20px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        h1 {
-            color: #333;
-            font-size: 24px;
-        }
-        .gallery {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 10px;
-            margin-bottom: 30px;
-        }
-        .image-item {
-            background: #fff;
-            padding: 10px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            text-align: center;
-            transition: transform 0.2s;
-        }
-        .image-item:hover {
-            transform: scale(1.02);
-        }
-        .image-item img {
-            max-width: 100%;
-            height: 150px;
-            object-fit: cover;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-        
-        @media (max-width: 768px) {
-            .gallery {
-                grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-                gap: 8px;
-            }
-            .image-item img {
-                height: 120px;
-            }
-            h1 {
-                font-size: 20px;
-            }
-        }
-        
-        @media (max-width: 480px) {
-            .gallery {
-                grid-template-columns: repeat(3, 1fr);
-                gap: 6px;
-            }
-            .image-item {
-                padding: 6px;
-            }
-            .image-item img {
-                height: 100px;
-            }
-            .image-title {
-                font-size: 10px;
-            }
-        }
-        
-        .modal {
-            display: none;
-            position: fixed;
-            z-index: 1000;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0,0,0,0.9);
-            justify-content: center;
-            align-items: center;
-        }
-        .modal-content {
-            max-width: 90%;
-            max-height: 90%;
-        }
-        .modal-content img {
-            max-width: 100%;
-            max-height: 90vh;
-            object-fit: contain;
-        }
-        .close {
-            position: absolute;
-            top: 20px;
-            right: 30px;
-            color: #fff;
-            font-size: 40px;
-            font-weight: bold;
-            cursor: pointer;
-        }
-        .close:hover {
-            color: #ccc;
-        }
-        footer {
-            background: #333;
-            color: #fff;
-            text-align: center;
-            padding: 20px;
-            margin-top: 40px;
-        }
-        .icp-info {
-            margin-top: 10px;
-            font-size: 14px;
-        }
-        .icp-info a {
-            color: #fff;
+
+        a {
+            color: inherit;
             text-decoration: none;
         }
-        .icp-info a:hover {
-            text-decoration: underline;
+
+        button {
+            font: inherit;
         }
-        .gongan-info {
-            margin-top: 8px;
-            font-size: 14px;
+
+        .site-shell {
+            width: min(1280px, calc(100% - 32px));
+            margin: 0 auto;
         }
-        .gongan-info a {
+
+        .site-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 24px;
+            padding: 18px 0;
+            border-bottom: 1px solid var(--line);
+        }
+
+        .brand {
             display: inline-flex;
             align-items: center;
-            justify-content: center;
-            color: #fff;
-            text-decoration: none;
+            gap: 12px;
+            min-width: 210px;
         }
-        .gongan-info a:hover {
+
+        .brand-mark {
+            display: grid;
+            width: 42px;
+            height: 42px;
+            place-items: center;
+            color: #fff;
+            background: var(--ink);
+            border-radius: 12px;
+            font-size: 13px;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+        }
+
+        .brand-name {
+            display: block;
+            font-size: 17px;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+        }
+
+        .brand-subtitle {
+            display: block;
+            margin-top: 1px;
+            color: var(--muted);
+            font-size: 10px;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+        }
+
+        .site-nav {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+            gap: 7px;
+        }
+
+        .nav-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 11px;
+            color: var(--muted);
+            border: 1px solid transparent;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 800;
+            transition: color 160ms ease, background 160ms ease, border-color 160ms ease;
+        }
+
+        .nav-link span {
+            color: #9aa7aa;
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 0.1em;
+        }
+
+        .nav-link:hover {
+            color: var(--ink);
+            background: #fff;
+            border-color: var(--line);
+        }
+
+        .nav-link.active {
+            color: #fff;
+            background: var(--ink);
+            border-color: var(--ink);
+        }
+
+        .nav-link.active span {
+            color: #a9d9d7;
+        }
+
+        .intro {
+            display: grid;
+            grid-template-columns: minmax(0, 1.2fr) minmax(300px, 0.8fr);
+            gap: 48px;
+            align-items: end;
+            padding: 58px 0 42px;
+        }
+
+        .eyebrow {
+            margin: 0 0 12px;
+            color: var(--teal);
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+        }
+
+        h1,
+        h2,
+        p {
+            margin-top: 0;
+        }
+
+        h1 {
+            max-width: 650px;
+            margin-bottom: 14px;
+            font-size: clamp(34px, 5vw, 58px);
+            font-weight: 800;
+            letter-spacing: 0.02em;
+            line-height: 1.08;
+        }
+
+        h1 span {
+            color: var(--coral);
+        }
+
+        .intro-copy {
+            max-width: 530px;
+            margin-bottom: 0;
+            color: var(--muted);
+            font-size: 15px;
+        }
+
+        .route-panel {
+            padding: 20px 22px;
+            background: var(--paper);
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            box-shadow: var(--shadow);
+        }
+
+        .route-panel-title {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 14px;
+            margin-bottom: 13px;
+        }
+
+        .route-panel-title strong {
+            font-size: 14px;
+        }
+
+        .route-panel-title span {
+            color: var(--muted);
+            font-size: 10px;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+        }
+
+        .route-list {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin: 0;
+            padding: 0;
+            list-style: none;
+        }
+
+        .route-link {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 11px 12px;
+            background: #f4f8f7;
+            border: 1px solid transparent;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 800;
+            transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+        }
+
+        .route-link span {
+            color: var(--muted);
+            font-size: 10px;
+            font-weight: 700;
+        }
+
+        .route-link::after {
+            color: var(--teal);
+            content: "↗";
+            font-size: 15px;
+        }
+
+        .route-link:hover {
+            background: #fff;
+            border-color: var(--line);
+            transform: translateY(-1px);
+        }
+
+        .gallery-section {
+            padding-bottom: 58px;
+        }
+
+        .section-heading {
+            display: flex;
+            align-items: end;
+            justify-content: space-between;
+            gap: 20px;
+            margin-bottom: 16px;
+        }
+
+        .section-heading h2 {
+            margin-bottom: 0;
+            font-size: 21px;
+            letter-spacing: 0.04em;
+        }
+
+        .section-heading p,
+        .gallery-count {
+            margin: 0;
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .section-heading p {
+            margin-top: 5px;
+        }
+
+        .gallery-count {
+            white-space: nowrap;
+        }
+
+        .gallery {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 16px;
+        }
+
+        .image-item {
+            position: relative;
+            min-width: 0;
+            margin: 0;
+            padding: 8px;
+            background: var(--paper);
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            box-shadow: 0 10px 24px rgba(21, 35, 45, 0.07);
+        }
+
+        .image-preview {
+            display: block;
+            width: 100%;
+            padding: 0;
+            overflow: hidden;
+            background: #e2e9e8;
+            border: 0;
+            border-radius: 8px;
+            cursor: zoom-in;
+        }
+
+        .image-preview img {
+            display: block;
+            width: 100%;
+            aspect-ratio: 4 / 5;
+            object-fit: cover;
+            transition: transform 360ms ease;
+        }
+
+        .image-preview:hover img {
+            transform: scale(1.035);
+        }
+
+        .image-index {
+            position: absolute;
+            z-index: 2;
+            top: 17px;
+            left: 17px;
+            padding: 3px 6px;
+            color: #fff;
+            background: rgba(21, 35, 45, 0.72);
+            border-radius: 5px;
+            font-size: 10px;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+        }
+
+        .gallery-empty {
+            grid-column: 1 / -1;
+            padding: 56px 20px;
+            color: var(--muted);
+            background: var(--paper);
+            border: 1px dashed var(--line);
+            border-radius: 12px;
+            text-align: center;
+        }
+
+        .site-footer {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 24px;
+            padding: 24px 0 28px;
+            color: #c8d1d2;
+            background: var(--ink);
+            border-radius: 12px 12px 0 0;
+        }
+
+        .footer-copy {
+            max-width: 420px;
+            padding-left: 24px;
+            font-size: 12px;
+        }
+
+        .footer-copy strong {
+            display: block;
+            margin-bottom: 5px;
+            color: #fff;
+            font-size: 13px;
+        }
+
+        .footer-copy p {
+            margin-bottom: 0;
+        }
+
+        .footer-meta {
+            padding-right: 24px;
+            font-size: 11px;
+            text-align: right;
+        }
+
+        .footer-meta a {
+            color: #e4eeee;
+        }
+
+        .footer-meta a:hover {
             text-decoration: underline;
         }
-        .gongan-info img {
+
+        .gongan-link {
+            display: inline-flex;
+            align-items: center;
+            margin-top: 7px;
+        }
+
+        .gongan-link img {
             width: 16px;
             height: 16px;
             margin-right: 4px;
         }
+
         .legal-info {
-            margin-top: 10px;
-            font-size: 12px;
-            color: #ccc;
+            margin-top: 7px;
+            color: #9eabad;
+            font-size: 10px;
+        }
+
+        .modal[hidden] {
+            display: none;
+        }
+
+        .modal {
+            position: fixed;
+            z-index: 20;
+            inset: 0;
+            display: grid;
+            padding: 24px;
+            place-items: center;
+            background: rgba(9, 18, 24, 0.9);
+        }
+
+        .modal-shell {
+            position: relative;
+            max-width: min(92vw, 960px);
+            max-height: 92vh;
+        }
+
+        .modal-content {
+            display: block;
+            max-width: 92vw;
+            max-height: 88vh;
+            border: 1px solid rgba(255, 255, 255, 0.28);
+            border-radius: 8px;
+            object-fit: contain;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+        }
+
+        .close {
+            position: absolute;
+            top: -14px;
+            right: -14px;
+            display: grid;
+            width: 34px;
+            height: 34px;
+            place-items: center;
+            color: #fff;
+            background: var(--coral);
+            border: 0;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 24px;
+            line-height: 1;
+        }
+
+        .close:hover {
+            background: #bf5e53;
+        }
+
+        @media (max-width: 900px) {
+            .site-header {
+                align-items: flex-start;
+                flex-direction: column;
+                gap: 14px;
+            }
+
+            .site-nav {
+                justify-content: flex-start;
+            }
+
+            .intro {
+                grid-template-columns: 1fr;
+                gap: 24px;
+                padding-top: 42px;
+            }
+
+            .gallery {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+
+        @media (max-width: 520px) {
+            .site-shell {
+                width: min(100% - 20px, 1280px);
+            }
+
+            .site-header {
+                padding-top: 14px;
+            }
+
+            .site-nav {
+                width: 100%;
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .nav-link {
+                justify-content: space-between;
+            }
+
+            .intro {
+                padding: 36px 0 30px;
+            }
+
+            h1 {
+                font-size: 37px;
+            }
+
+            .route-list {
+                grid-template-columns: 1fr;
+            }
+
+            .gallery {
+                gap: 10px;
+            }
+
+            .image-item {
+                padding: 5px;
+                border-radius: 9px;
+            }
+
+            .image-preview,
+            .image-preview img {
+                border-radius: 6px;
+            }
+
+            .image-index {
+                top: 12px;
+                left: 12px;
+                padding: 2px 5px;
+                font-size: 9px;
+            }
+
+            .site-footer {
+                flex-direction: column;
+                gap: 16px;
+                border-radius: 9px 9px 0 0;
+            }
+
+            .footer-copy,
+            .footer-meta {
+                padding: 0 16px;
+                text-align: left;
+            }
+
+            .modal {
+                padding: 16px;
+            }
+
+            .close {
+                top: -10px;
+                right: -8px;
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            *,
+            *::before,
+            *::after {
+                scroll-behavior: auto !important;
+                transition-duration: 0.01ms !important;
+                animation-duration: 0.01ms !important;
+            }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>图片展示</h1>
+    <div class="site-shell">
+        <header class="site-header">
+            <a class="brand" href="./" aria-label="回到午觉糖水铺首页">
+                <span class="brand-mark">SS</span>
+                <span>
+                    <span class="brand-name">午觉糖水铺</span>
+                    <span class="brand-subtitle">Sweet Sleep Archive</span>
+                </span>
+            </a>
+            <nav class="site-nav" aria-label="站内导航">
+                <a class="nav-link active" href="./" aria-current="page">首页 <span>HOME</span></a>
+                <a class="nav-link" href="video.html">影像 <span>VIDEO</span></a>
+                <a class="nav-link" href="ar/">AR识别 <span>AR</span></a>
+                <a class="nav-link" href="menu/">角色菜单 <span>MENU</span></a>
+                <a class="nav-link" href="gacha/">抽卡模拟 <span>GACHA</span></a>
+            </nav>
         </header>
-        
-        <div class="gallery" id="imageGallery">
-            <!-- 图片会在这里动态生成 -->
-        </div>
-        
-        <div id="imageModal" class="modal" onclick="closeModal()">
-            <span class="close">&times;</span>
-            <div class="modal-content">
-                <img id="modalImage" src="" alt="放大图片">
+
+        <main>
+            <section class="intro" aria-labelledby="page-title">
+                <div>
+                    <p class="eyebrow">午觉糖水铺 / SWEET SLEEP</p>
+                    <h1 id="page-title">收集一小段<br><span>甜甜的</span>午后</h1>
+                    <p class="intro-copy">这里放着图片档案，也连接着影像、AR、角色菜单和蔚蓝档案抽卡模拟。</p>
+                </div>
+                <aside class="route-panel" aria-label="快速入口">
+                    <div class="route-panel-title">
+                        <strong>探索入口</strong>
+                        <span>Quick routes</span>
+                    </div>
+                    <ul class="route-list">
+                        <li><a class="route-link" href="video.html">B站影像 <span>VIDEO</span></a></li>
+                        <li><a class="route-link" href="ar/">卡片 AR <span>AR</span></a></li>
+                        <li><a class="route-link" href="menu/">角色菜单 <span>MENU</span></a></li>
+                        <li><a class="route-link" href="gacha/">招募模拟 <span>GACHA</span></a></li>
+                    </ul>
+                </aside>
+            </section>
+
+            <section class="gallery-section" aria-labelledby="gallery-title">
+                <div class="section-heading">
+                    <div>
+                        <h2 id="gallery-title">图片档案</h2>
+                        <p>点击任意图片查看完整尺寸</p>
+                    </div>
+                    <p class="gallery-count" id="galleryCount">0 幅</p>
+                </div>
+                <div class="gallery" id="imageGallery" aria-live="polite">
+                    <div class="gallery-empty">正在加载图片档案</div>
+                </div>
+            </section>
+        </main>
+
+        <footer class="site-footer">
+            <div class="footer-copy">
+                <strong>午觉糖水铺 · Sweet Sleep</strong>
+                <p>一个放图片、影像和互动实验的小站。</p>
             </div>
-        </div>
-        
-        <script>
-            async function loadImages() {
-                try {
-                    const response = await fetch('images.json?v=20260728');
-                    if (!response.ok) {
-                        throw new Error('加载图片列表失败');
-                    }
-                    const imageList = await response.json();
-                    const gallery = document.getElementById('imageGallery');
-                    gallery.innerHTML = '';
-                    
-                    imageList.forEach(imageName => {
-                        const imageItem = document.createElement('div');
-                        imageItem.className = 'image-item';
-                        
-                        const img = document.createElement('img');
-                        img.src = `img/${imageName}`;
-                        img.alt = '图片';
-                        img.onclick = () => openModal(img.src);
-                        
-                        imageItem.appendChild(img);
-                        gallery.appendChild(imageItem);
-                    });
-                } catch (error) {
-                    console.error('加载图片失败:', error);
-                }
-            }
-            
-            function openModal(imgSrc) {
-                const modal = document.getElementById('imageModal');
-                const modalImg = document.getElementById('modalImage');
-                modal.style.display = 'flex';
-                modalImg.src = imgSrc;
-            }
-            
-            function closeModal() {
-                const modal = document.getElementById('imageModal');
-                modal.style.display = 'none';
-            }
-            
-            document.addEventListener('keydown', function(event) {
-                if (event.key === 'Escape') {
-                    closeModal();
-                }
-            });
-            
-            // 页面加载时加载图片
-            window.addEventListener('load', loadImages);
-        </script>
-        
-        <footer>
-            <div class="icp-info">
-                <a href="https://beian.miit.gov.cn/" target="_blank">浙ICP备2026020149号</a>
-            </div>
-            <div class="gongan-info">
-                <a href="https://beian.mps.gov.cn/#/query/webSearch?code=33011002019367" rel="noreferrer" target="_blank">
+            <div class="footer-meta">
+                <a href="https://beian.miit.gov.cn/" target="_blank" rel="noreferrer">浙ICP备2026020149号</a>
+                <a class="gongan-link" href="https://beian.mps.gov.cn/#/query/webSearch?code=33011002019367" rel="noreferrer" target="_blank">
                     <img src="beian-gongan.jpg" alt="公安备案">
                     浙公网安备33011002019367号
                 </a>
-            </div>
-            <div class="legal-info">
-                本网站仅用于展示图片，所有内容均遵守相关法律法规
+                <div class="legal-info">本网站仅用于展示图片，所有内容均遵守相关法律法规</div>
             </div>
         </footer>
     </div>
+
+    <div class="modal" id="imageModal" hidden aria-hidden="true">
+        <div class="modal-shell">
+            <button class="close" id="closeModal" type="button" aria-label="关闭大图">×</button>
+            <img class="modal-content" id="modalImage" src="" alt="">
+        </div>
+    </div>
+
+    <script>
+        const gallery = document.getElementById('imageGallery');
+        const galleryCount = document.getElementById('galleryCount');
+        const modal = document.getElementById('imageModal');
+        const modalImage = document.getElementById('modalImage');
+        const closeModalButton = document.getElementById('closeModal');
+
+        async function loadImages() {
+            try {
+                const response = await fetch('images.json?v=20260728', { cache: 'no-store' });
+                if (!response.ok) {
+                    throw new Error('加载图片列表失败');
+                }
+
+                const imageList = await response.json();
+                gallery.innerHTML = '';
+                galleryCount.textContent = imageList.length + ' 幅';
+
+                imageList.forEach((imageName, index) => {
+                    const imageItem = document.createElement('figure');
+                    imageItem.className = 'image-item';
+
+                    const indexLabel = document.createElement('span');
+                    indexLabel.className = 'image-index';
+                    indexLabel.textContent = String(index + 1).padStart(2, '0');
+
+                    const preview = document.createElement('button');
+                    preview.className = 'image-preview';
+                    preview.type = 'button';
+                    preview.setAttribute('aria-label', '查看第 ' + (index + 1) + ' 张图片');
+
+                    const image = document.createElement('img');
+                    image.src = 'img/' + imageName;
+                    image.alt = '图片 ' + (index + 1);
+                    image.loading = index < 2 ? 'eager' : 'lazy';
+                    image.decoding = 'async';
+                    image.addEventListener('click', () => openModal(image.src, image.alt));
+
+                    preview.appendChild(image);
+                    imageItem.append(indexLabel, preview);
+                    gallery.appendChild(imageItem);
+                });
+            } catch (error) {
+                gallery.innerHTML = '<div class="gallery-empty">图片暂时无法加载，请稍后再试</div>';
+                galleryCount.textContent = '加载失败';
+                console.error('加载图片失败:', error);
+            }
+        }
+
+        function openModal(imageSource, imageAlt) {
+            modalImage.src = imageSource;
+            modalImage.alt = imageAlt;
+            modal.hidden = false;
+            modal.setAttribute('aria-hidden', 'false');
+            document.body.classList.add('modal-open');
+        }
+
+        function closeModal() {
+            modal.hidden = true;
+            modal.setAttribute('aria-hidden', 'true');
+            modalImage.src = '';
+            document.body.classList.remove('modal-open');
+        }
+
+        closeModalButton.addEventListener('click', closeModal);
+        modal.addEventListener('click', (event) => {
+            if (event.target === modal) {
+                closeModal();
+            }
+        });
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && !modal.hidden) {
+                closeModal();
+            }
+        });
+        window.addEventListener('DOMContentLoaded', loadImages);
+    </script>
 </body>
 </html>
