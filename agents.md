@@ -49,3 +49,9 @@ For `/menu/` changes, also keep the local staging mirror in sync when it is usef
 - For AR, preserve the current mobile-first interaction: user starts the camera, detected content animates in, and the capture button resembles the iOS camera shutter.
 - Do not commit private certificates, SSH keys, or local-only generated scratch files.
 
+## Gacha Notes
+
+- The /gacha/ page is a static HTML, CSS, and JavaScript simulator.
+- It compares the new 100/200 pull pity system with the old 200/400 pull exchange system side by side.
+- The active pickup can switch between Ibuki (Summer) and Iroha (Summer), while each pool keeps separate local progress.
+- FES simulation uses a 6% three-star rate and a 0.7% active UP rate.

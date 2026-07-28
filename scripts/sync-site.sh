@@ -35,6 +35,7 @@ site_dirs=(
   'img'
   'ar'
   'menu'
+  'gacha'
 )
 
 for path in "${site_files[@]}" "${site_dirs[@]}"; do

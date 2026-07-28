@@ -7,6 +7,8 @@ Static website for `sweet-sleep.cn`.
 - `/index.html` - home page and image gallery
 - `/video.html` - Bilibili video embed page
 - `/ar/` - MindAR + Three.js AR page
+- `/menu/` - interactive character menu page
+- `/gacha/` - pure frontend Blue Archive gacha simulator
 
 ## Deploy
 

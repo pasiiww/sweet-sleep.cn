@@ -1,0 +1,1505 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#193654">
+    <title>蔚蓝档案 | 招募模拟</title>
+    <style>
+        :root {
+            --ink: #24344c;
+            --navy: #193654;
+            --muted: #6b7b8f;
+            --line: #d9e6ed;
+            --cyan: #53bac8;
+            --coral: #ef796b;
+            --gold: #f1c765;
+            --shadow: 0 16px 36px rgba(25, 54, 84, 0.11);
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html {
+            min-width: 320px;
+            background: #eaf3f7;
+        }
+
+        body {
+            min-width: 320px;
+            margin: 0;
+            color: var(--ink);
+            background: #eaf3f7;
+            font-family: Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+            line-height: 1.45;
+        }
+
+        body::before {
+            position: fixed;
+            z-index: -2;
+            inset: 0;
+            content: "";
+            background-image: url("assets/banner.png");
+            background-position: center top;
+            background-size: cover;
+            opacity: 0.07;
+            filter: saturate(0.7);
+            pointer-events: none;
+        }
+
+        body::after {
+            position: fixed;
+            z-index: -1;
+            inset: 0;
+            content: "";
+            background: rgba(234, 243, 247, 0.82);
+            pointer-events: none;
+        }
+
+        button,
+        a {
+            font: inherit;
+        }
+
+        button {
+            cursor: pointer;
+        }
+
+        a {
+            color: inherit;
+        }
+
+        .app-shell {
+            width: min(1440px, calc(100% - 32px));
+            margin: 0 auto;
+            padding: 24px 0 42px;
+        }
+
+        .site-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 18px;
+            margin-bottom: 18px;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 13px;
+        }
+
+        .brand-mark {
+            display: grid;
+            width: 48px;
+            height: 48px;
+            place-items: center;
+            color: #fff;
+            background: var(--navy);
+            border: 3px solid #9bd8e2;
+            border-radius: 14px 14px 14px 4px;
+            font-size: 14px;
+            font-weight: 800;
+        }
+
+        .brand h1 {
+            margin: 0;
+            font-size: clamp(20px, 2.2vw, 30px);
+        }
+
+        .brand p {
+            margin: 2px 0 0;
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .home-link {
+            display: inline-flex;
+            align-items: center;
+            min-height: 38px;
+            padding: 0 15px;
+            color: var(--navy);
+            background: rgba(255, 255, 255, 0.76);
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            text-decoration: none;
+            transition: border-color 160ms ease, background 160ms ease;
+        }
+
+        .home-link:hover {
+            background: #fff;
+            border-color: var(--cyan);
+        }
+
+        .notice-line {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            margin-bottom: 18px;
+            padding: 10px 14px;
+            color: #52667a;
+            background: rgba(255, 255, 255, 0.72);
+            border-left: 4px solid var(--gold);
+            border-radius: 7px;
+            font-size: 13px;
+        }
+
+        .notice-line strong {
+            color: var(--navy);
+        }
+
+        .section-kicker {
+            margin: 0 0 8px;
+            color: var(--muted);
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+        }
+
+        .summary-section,
+        .comparison-section {
+            margin-bottom: 22px;
+        }
+
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 12px;
+        }
+
+        .summary-card {
+            min-height: 94px;
+            padding: 15px 16px;
+            background: rgba(255, 255, 255, 0.88);
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            box-shadow: 0 8px 22px rgba(25, 54, 84, 0.06);
+        }
+
+        .summary-label {
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .summary-values {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-top: 8px;
+        }
+
+        .summary-value {
+            display: flex;
+            align-items: baseline;
+            gap: 6px;
+            min-width: 0;
+        }
+
+        .summary-value span {
+            color: var(--muted);
+            font-size: 11px;
+            white-space: nowrap;
+        }
+
+        .summary-value strong {
+            overflow: hidden;
+            color: var(--navy);
+            font-size: 21px;
+            font-weight: 800;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .summary-value.old strong {
+            color: #b86553;
+        }
+
+        .pool-section {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(320px, 0.72fr);
+            gap: 16px;
+            align-items: stretch;
+            margin-bottom: 22px;
+        }
+
+        .pool-copy,
+        .pool-art {
+            min-height: 224px;
+            overflow: hidden;
+            border: 1px solid var(--line);
+            border-radius: 18px;
+            box-shadow: var(--shadow);
+        }
+
+        .pool-copy {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 24px;
+            background: rgba(255, 255, 255, 0.92);
+        }
+
+        .pool-heading {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 14px;
+        }
+
+        .pool-heading h2 {
+            margin: 0;
+            color: var(--navy);
+            font-size: clamp(24px, 3vw, 38px);
+            line-height: 1.1;
+        }
+
+        .pool-heading p {
+            margin: 7px 0 0;
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .fes-stamp {
+            display: inline-flex;
+            align-items: center;
+            min-height: 30px;
+            padding: 0 10px;
+            color: #72531b;
+            background: #fff4ce;
+            border: 1px solid #f0d88e;
+            border-radius: 8px;
+            font-size: 11px;
+            font-weight: 800;
+            white-space: nowrap;
+        }
+
+        .pool-tabs {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 18px;
+        }
+
+        .pool-tab {
+            min-height: 40px;
+            padding: 0 16px;
+            color: var(--navy);
+            background: #f0f6f8;
+            border: 1px solid var(--line);
+            border-radius: 9px;
+            font-size: 13px;
+            font-weight: 800;
+            transition: color 160ms ease, background 160ms ease, border-color 160ms ease;
+        }
+
+        .pool-tab:hover {
+            border-color: var(--cyan);
+        }
+
+        .pool-tab.active {
+            color: #fff;
+            background: var(--navy);
+            border-color: var(--navy);
+        }
+
+        .pool-rule-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 18px;
+            margin-top: 18px;
+            padding-top: 14px;
+            color: #52667a;
+            border-top: 1px solid var(--line);
+            font-size: 12px;
+        }
+
+        .pool-rule-row b {
+            color: var(--coral);
+        }
+
+        .pool-art {
+            position: relative;
+            display: flex;
+            align-items: flex-end;
+            isolation: isolate;
+            background: var(--navy);
+        }
+
+        .pool-art::after {
+            position: absolute;
+            z-index: 1;
+            inset: 0;
+            content: "";
+            background: linear-gradient(90deg, rgba(16, 38, 60, 0.82), rgba(16, 38, 60, 0.12));
+        }
+
+        .pool-art > img {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            object-position: center 23%;
+            opacity: 0.52;
+            filter: saturate(0.8);
+        }
+
+        .pool-art-copy {
+            position: relative;
+            z-index: 2;
+            max-width: 72%;
+            padding: 22px;
+            color: #fff;
+        }
+
+        .pool-art-copy small {
+            display: block;
+            margin-bottom: 4px;
+            color: #b7deeb;
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+        }
+
+        .pool-art-copy strong {
+            display: block;
+            font-size: clamp(20px, 2.5vw, 32px);
+            line-height: 1.1;
+        }
+
+        .pool-art-copy span {
+            display: block;
+            margin-top: 8px;
+            color: #d3e8ee;
+            font-size: 12px;
+        }
+
+        .comparison-heading {
+            display: flex;
+            align-items: end;
+            justify-content: space-between;
+            gap: 16px;
+            margin-bottom: 10px;
+        }
+
+        .comparison-heading h2 {
+            margin: 0;
+            color: var(--navy);
+            font-size: 20px;
+        }
+
+        .comparison-heading p {
+            margin: 0;
+            color: var(--muted);
+            font-size: 12px;
+            text-align: right;
+        }
+
+        .comparison-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 18px;
+            align-items: start;
+        }
+
+        .mechanic-panel {
+            overflow: hidden;
+            background: rgba(255, 255, 255, 0.93);
+            border: 1px solid var(--line);
+            border-radius: 18px;
+            box-shadow: var(--shadow);
+        }
+
+        .mechanic-panel.new-panel {
+            border-top: 5px solid var(--cyan);
+        }
+
+        .mechanic-panel.old-panel {
+            border-top: 5px solid var(--coral);
+        }
+
+        .panel-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 18px 18px 14px;
+        }
+
+        .panel-header h3 {
+            margin: 0;
+            color: var(--navy);
+            font-size: 21px;
+        }
+
+        .panel-header p {
+            margin: 4px 0 0;
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .mechanic-tag {
+            display: inline-flex;
+            align-items: center;
+            min-height: 27px;
+            padding: 0 9px;
+            color: #1f6f79;
+            background: #e4f6f7;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 800;
+            white-space: nowrap;
+        }
+
+        .old-panel .mechanic-tag {
+            color: #9a5549;
+            background: #fff0e9;
+        }
+
+        .rule-list {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 8px;
+            padding: 0 18px 16px;
+        }
+
+        .rule-item {
+            min-height: 72px;
+            padding: 10px;
+            background: #f4f8fa;
+            border: 1px solid #e2edf1;
+            border-radius: 9px;
+        }
+
+        .rule-item strong {
+            display: block;
+            color: var(--navy);
+            font-size: 13px;
+        }
+
+        .rule-item span {
+            display: block;
+            margin-top: 4px;
+            color: var(--muted);
+            font-size: 11px;
+        }
+
+        .old-panel .rule-item:first-child strong {
+            color: #b86553;
+        }
+
+        .panel-stat-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            padding: 13px 18px;
+            background: #f9fcfd;
+            border-top: 1px solid var(--line);
+            border-bottom: 1px solid var(--line);
+        }
+
+        .panel-stat {
+            min-width: 0;
+            padding: 0 12px;
+            border-right: 1px solid var(--line);
+        }
+
+        .panel-stat:first-child {
+            padding-left: 0;
+        }
+
+        .panel-stat:last-child {
+            padding-right: 0;
+            border-right: 0;
+        }
+
+        .panel-stat span {
+            display: block;
+            color: var(--muted);
+            font-size: 11px;
+        }
+
+        .panel-stat strong {
+            display: block;
+            margin-top: 4px;
+            overflow: hidden;
+            color: var(--navy);
+            font-size: 20px;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .old-panel .panel-stat strong {
+            color: #a95b4d;
+        }
+
+        .progress-area {
+            padding: 15px 18px 13px;
+        }
+
+        .progress-meta {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            color: var(--muted);
+            font-size: 11px;
+        }
+
+        .progress-meta strong {
+            color: var(--navy);
+            font-size: 12px;
+        }
+
+        .old-panel .progress-meta strong {
+            color: #a95b4d;
+        }
+
+        .progress-track {
+            height: 8px;
+            margin-top: 8px;
+            overflow: hidden;
+            background: #e6eef2;
+            border-radius: 99px;
+        }
+
+        .progress-bar {
+            width: 0;
+            height: 100%;
+            background: var(--cyan);
+            border-radius: inherit;
+            transition: width 240ms ease;
+        }
+
+        .old-panel .progress-bar {
+            background: var(--coral);
+        }
+
+        .spark-markers {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 7px;
+            color: #8a99a7;
+            font-size: 10px;
+        }
+
+        .result-area {
+            min-height: 228px;
+            padding: 0 18px 16px;
+        }
+
+        .result-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 9px;
+        }
+
+        .result-header strong {
+            color: var(--navy);
+            font-size: 13px;
+        }
+
+        .result-header span {
+            color: var(--muted);
+            font-size: 11px;
+        }
+
+        .result-grid {
+            display: grid;
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+            gap: 8px;
+        }
+
+        .result-empty {
+            display: grid;
+            min-height: 164px;
+            padding: 22px;
+            place-items: center;
+            color: #91a2af;
+            background: #f6fafb;
+            border: 1px dashed #cbdde5;
+            border-radius: 11px;
+            font-size: 12px;
+            text-align: center;
+        }
+
+        .result-card {
+            position: relative;
+            display: flex;
+            min-width: 0;
+            aspect-ratio: 0.74;
+            overflow: hidden;
+            flex-direction: column;
+            justify-content: flex-end;
+            background: #edf4f7;
+            border: 1px solid #d6e4ea;
+            border-radius: 9px;
+            box-shadow: 0 6px 12px rgba(25, 54, 84, 0.08);
+            animation: result-in 280ms ease both;
+        }
+
+        .result-card.rarity-3 {
+            border-color: #e8c66f;
+            box-shadow: 0 7px 15px rgba(198, 151, 46, 0.19);
+        }
+
+        .result-card.is-up {
+            border: 2px solid var(--coral);
+            box-shadow: 0 8px 18px rgba(239, 121, 107, 0.26);
+        }
+
+        .result-card img {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            object-position: center top;
+        }
+
+        .result-card.no-image::before {
+            position: absolute;
+            inset: 0;
+            content: attr(data-initial);
+            color: rgba(25, 54, 84, 0.18);
+            background: var(--card-tint, #d7edf2);
+            font-size: clamp(28px, 3vw, 48px);
+            font-weight: 800;
+            line-height: 1;
+            text-align: center;
+            padding-top: 32%;
+        }
+
+        .result-card .result-copy {
+            position: relative;
+            z-index: 2;
+            min-width: 0;
+            padding: 7px 7px 8px;
+            color: #fff;
+        }
+
+        .result-card::after {
+            position: absolute;
+            right: 0;
+            bottom: 0;
+            left: 0;
+            height: 45%;
+            content: "";
+            background: linear-gradient(transparent, rgba(13, 33, 52, 0.88));
+        }
+
+        .result-card .stars {
+            color: #ffe396;
+            font-size: 10px;
+        }
+
+        .result-card .result-name {
+            overflow: hidden;
+            margin-top: 2px;
+            font-size: 10px;
+            font-weight: 800;
+            line-height: 1.25;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .result-card .result-note {
+            margin-top: 2px;
+            overflow: hidden;
+            color: #cfe6ec;
+            font-size: 9px;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .result-card .up-label {
+            position: absolute;
+            z-index: 3;
+            top: 6px;
+            left: 6px;
+            padding: 2px 5px;
+            color: #fff;
+            background: var(--coral);
+            border-radius: 4px;
+            font-size: 9px;
+            font-weight: 800;
+        }
+
+        .action-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 14px 18px 18px;
+            border-top: 1px solid var(--line);
+        }
+
+        .action-button {
+            flex: 1 1 100px;
+            min-height: 43px;
+            padding: 0 13px;
+            color: #fff;
+            background: var(--navy);
+            border: 1px solid var(--navy);
+            border-radius: 9px;
+            font-size: 13px;
+            font-weight: 800;
+            transition: transform 160ms ease, background 160ms ease;
+        }
+
+        .action-button:hover {
+            background: #265073;
+            transform: translateY(-1px);
+        }
+
+        .action-button:active {
+            transform: translateY(0);
+        }
+
+        .action-button.secondary {
+            color: var(--navy);
+            background: #eef6f8;
+            border-color: var(--line);
+        }
+
+        .action-button.secondary:hover {
+            background: #e0f1f4;
+        }
+
+        .old-panel .action-button.primary {
+            background: #b66555;
+            border-color: #b66555;
+        }
+
+        .old-panel .action-button.primary:hover {
+            background: #9f5143;
+        }
+
+        .action-button:disabled {
+            cursor: not-allowed;
+            color: #9aaab4;
+            background: #edf2f4;
+            border-color: #dce6ea;
+            transform: none;
+        }
+
+        .footnote {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            gap: 10px 18px;
+            color: var(--muted);
+            font-size: 11px;
+        }
+
+        .footnote a {
+            color: #347b8c;
+            text-decoration: none;
+        }
+
+        .footnote a:hover {
+            text-decoration: underline;
+        }
+
+        @keyframes result-in {
+            from {
+                opacity: 0;
+                transform: translateY(8px) scale(0.96);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        @media (max-width: 1040px) {
+            .pool-section {
+                grid-template-columns: 1fr;
+            }
+
+            .pool-art {
+                min-height: 170px;
+            }
+        }
+
+        @media (max-width: 780px) {
+            .app-shell {
+                width: min(100% - 20px, 620px);
+                padding-top: 15px;
+            }
+
+            .site-header {
+                align-items: flex-start;
+            }
+
+            .brand-mark {
+                width: 41px;
+                height: 41px;
+                border-radius: 11px 11px 11px 3px;
+            }
+
+            .brand h1 {
+                font-size: 21px;
+            }
+
+            .home-link {
+                min-height: 34px;
+                padding: 0 10px;
+                font-size: 12px;
+            }
+
+            .summary-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .comparison-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .comparison-heading {
+                align-items: flex-start;
+                flex-direction: column;
+                gap: 4px;
+            }
+
+            .comparison-heading p {
+                text-align: left;
+            }
+        }
+
+        @media (max-width: 470px) {
+            .app-shell {
+                width: calc(100% - 14px);
+                padding-bottom: 25px;
+            }
+
+            .notice-line {
+                align-items: flex-start;
+                font-size: 12px;
+            }
+
+            .pool-copy {
+                padding: 18px;
+            }
+
+            .pool-heading {
+                flex-direction: column;
+                gap: 10px;
+            }
+
+            .pool-heading h2 {
+                font-size: 27px;
+            }
+
+            .pool-art {
+                min-height: 150px;
+            }
+
+            .pool-art-copy {
+                max-width: 88%;
+                padding: 17px;
+            }
+
+            .panel-header,
+            .rule-list,
+            .panel-stat-grid,
+            .progress-area,
+            .result-area,
+            .action-row {
+                padding-right: 13px;
+                padding-left: 13px;
+            }
+
+            .rule-list {
+                grid-template-columns: 1fr;
+            }
+
+            .rule-item {
+                min-height: 0;
+            }
+
+            .result-grid {
+                gap: 6px;
+            }
+
+            .result-card .result-copy {
+                padding: 6px 5px 7px;
+            }
+
+            .result-card .result-name {
+                font-size: 9px;
+            }
+
+            .result-card .result-note {
+                font-size: 8px;
+            }
+
+            .footnote {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <main class="app-shell">
+        <header class="site-header">
+            <div class="brand">
+                <div class="brand-mark">BA</div>
+                <div>
+                    <h1>蔚蓝档案 · 招募模拟</h1>
+                    <p>同一座基沃托斯，左右两套保底逻辑</p>
+                </div>
+            </div>
+            <a class="home-link" href="../">返回主站</a>
+        </header>
+
+        <div class="notice-line">
+            <strong>FES 池</strong>
+            <span>三星概率提升至 6%，当前池 UP 仍为 0.7%。切换池子会分别保留两侧的抽卡进度。</span>
+        </div>
+
+        <section class="summary-section" aria-labelledby="summary-title">
+            <p class="section-kicker" id="summary-title">Live comparison / 实时对比</p>
+            <div class="summary-grid">
+                <article class="summary-card">
+                    <div class="summary-label">累计抽数</div>
+                    <div class="summary-values">
+                        <div class="summary-value"><span>新</span><strong id="summary-new-pulls">0</strong></div>
+                        <div class="summary-value old"><span>旧</span><strong id="summary-old-pulls">0</strong></div>
+                    </div>
+                </article>
+                <article class="summary-card">
+                    <div class="summary-label">三星获得</div>
+                    <div class="summary-values">
+                        <div class="summary-value"><span>新</span><strong id="summary-new-three">0</strong></div>
+                        <div class="summary-value old"><span>旧</span><strong id="summary-old-three">0</strong></div>
+                    </div>
+                </article>
+                <article class="summary-card">
+                    <div class="summary-label">当前 UP</div>
+                    <div class="summary-values">
+                        <div class="summary-value"><span>新</span><strong id="summary-new-up">0</strong></div>
+                        <div class="summary-value old"><span>旧</span><strong id="summary-old-up">0</strong></div>
+                    </div>
+                </article>
+                <article class="summary-card">
+                    <div class="summary-label">实际 UP 率</div>
+                    <div class="summary-values">
+                        <div class="summary-value"><span>新</span><strong id="summary-new-rate">0%</strong></div>
+                        <div class="summary-value old"><span>旧</span><strong id="summary-old-rate">0%</strong></div>
+                    </div>
+                </article>
+            </div>
+        </section>
+
+        <section class="pool-section" aria-labelledby="pool-title">
+            <div class="pool-copy">
+                <div>
+                    <div class="pool-heading">
+                        <div>
+                            <p class="section-kicker">Current pickup / 当期招募</p>
+                            <h2 id="pool-title">伊吹（泳装）</h2>
+                            <p id="pool-description">格黑娜的夏日巡逻，FES 期间登场。</p>
+                        </div>
+                        <span class="fes-stamp">FES · ★3 6%</span>
+                    </div>
+                    <div class="pool-tabs" role="tablist" aria-label="选择池子">
+                        <button class="pool-tab active" type="button" role="tab" aria-selected="true" data-pool="ibuki">伊吹（泳装）</button>
+                        <button class="pool-tab" type="button" role="tab" aria-selected="false" data-pool="iroha">伊吕波（泳装）</button>
+                    </div>
+                </div>
+                <div class="pool-rule-row">
+                    <span>三星：<b>6%</b></span>
+                    <span>当前 UP：<b>0.7%</b></span>
+                    <span>限定 UP 不会在另一池歪出</span>
+                </div>
+            </div>
+            <div class="pool-art">
+                <img id="pool-art-image" src="../menu/assets/kei.jpg" alt="">
+                <div class="pool-art-copy">
+                    <small>Pickup student</small>
+                    <strong id="pool-art-name">伊吹（泳装）</strong>
+                    <span id="pool-art-note">本页用于体验两套招募机制的差异。</span>
+                </div>
+            </div>
+        </section>
+
+        <section class="comparison-section" aria-labelledby="comparison-title">
+            <div class="comparison-heading">
+                <div>
+                    <p class="section-kicker">Two systems / 双机制</p>
+                    <h2 id="comparison-title">同时抽，直接看差异</h2>
+                </div>
+                <p>两边的概率表相同，差别只来自保底与自选。</p>
+            </div>
+
+            <div class="comparison-grid">
+                <article class="mechanic-panel new-panel" data-mode="new">
+                    <div class="panel-header">
+                        <div>
+                            <h3>新机制</h3>
+                            <p>软保底先来，200 抽必定收束</p>
+                        </div>
+                        <span class="mechanic-tag">100 / 200</span>
+                    </div>
+                    <div class="rule-list">
+                        <div class="rule-item">
+                            <strong>100 抽</strong>
+                            <span>未出 UP 时，本抽 50% 出当前 UP</span>
+                        </div>
+                        <div class="rule-item">
+                            <strong>200 抽</strong>
+                            <span>未出 UP 时，本抽必出当前 UP</span>
+                        </div>
+                        <div class="rule-item">
+                            <strong>抽到 UP</strong>
+                            <span>保底计数马上归零，重新开始</span>
+                        </div>
+                    </div>
+                    <div class="panel-stat-grid">
+                        <div class="panel-stat">
+                            <span>累计抽数</span>
+                            <strong id="new-pulls">0</strong>
+                        </div>
+                        <div class="panel-stat">
+                            <span>三星</span>
+                            <strong id="new-three">0</strong>
+                        </div>
+                        <div class="panel-stat">
+                            <span>当前 UP</span>
+                            <strong id="new-up">0</strong>
+                        </div>
+                    </div>
+                    <div class="progress-area">
+                        <div class="progress-meta">
+                            <span>距下一次机制节点</span>
+                            <strong id="new-progress-label">还差 100 抽进入软保底</strong>
+                        </div>
+                        <div class="progress-track" aria-label="新机制保底进度">
+                            <div class="progress-bar" id="new-progress-bar"></div>
+                        </div>
+                        <div class="spark-markers">
+                            <span>0</span>
+                            <span>100 · 50%</span>
+                            <span>200 · 必出</span>
+                        </div>
+                    </div>
+                    <div class="result-area">
+                        <div class="result-header">
+                            <strong>最近结果</strong>
+                            <span id="new-result-note">单抽或十连开始体验</span>
+                        </div>
+                        <div class="result-grid" id="new-results"></div>
+                    </div>
+                    <div class="action-row">
+                        <button class="action-button primary" type="button" data-action="single" data-mode="new">单抽 ×1</button>
+                        <button class="action-button primary" type="button" data-action="ten" data-mode="new">十连 ×10</button>
+                        <button class="action-button secondary" type="button" data-action="reset" data-mode="new">重置</button>
+                    </div>
+                </article>
+
+                <article class="mechanic-panel old-panel" data-mode="old">
+                    <div class="panel-header">
+                        <div>
+                            <h3>旧机制</h3>
+                            <p>每抽 0.7%，200 / 400 抽开放自选</p>
+                        </div>
+                        <span class="mechanic-tag">200 / 400</span>
+                    </div>
+                    <div class="rule-list">
+                        <div class="rule-item">
+                            <strong>每一抽</strong>
+                            <span>当前 UP 固定 0.7%，没有软保底</span>
+                        </div>
+                        <div class="rule-item">
+                            <strong>累计 200 抽</strong>
+                            <span>开放一次自选当前 UP</span>
+                        </div>
+                        <div class="rule-item">
+                            <strong>累计 400 抽</strong>
+                            <span>第二次开放自选当前 UP</span>
+                        </div>
+                    </div>
+                    <div class="panel-stat-grid">
+                        <div class="panel-stat">
+                            <span>累计抽数</span>
+                            <strong id="old-pulls">0</strong>
+                        </div>
+                        <div class="panel-stat">
+                            <span>三星</span>
+                            <strong id="old-three">0</strong>
+                        </div>
+                        <div class="panel-stat">
+                            <span>当前 UP</span>
+                            <strong id="old-up">0</strong>
+                        </div>
+                    </div>
+                    <div class="progress-area">
+                        <div class="progress-meta">
+                            <span>自选兑换进度</span>
+                            <strong id="old-progress-label">还差 200 抽</strong>
+                        </div>
+                        <div class="progress-track" aria-label="旧机制自选进度">
+                            <div class="progress-bar" id="old-progress-bar"></div>
+                        </div>
+                        <div class="spark-markers">
+                            <span>0</span>
+                            <span>200 · 自选 1</span>
+                            <span>400 · 自选 2</span>
+                        </div>
+                    </div>
+                    <div class="result-area">
+                        <div class="result-header">
+                            <strong>最近结果</strong>
+                            <span id="old-result-note">先抽到 200 抽再使用自选</span>
+                        </div>
+                        <div class="result-grid" id="old-results"></div>
+                    </div>
+                    <div class="action-row">
+                        <button class="action-button primary" type="button" data-action="single" data-mode="old">单抽 ×1</button>
+                        <button class="action-button primary" type="button" data-action="ten" data-mode="old">十连 ×10</button>
+                        <button class="action-button secondary" id="old-redeem" type="button" data-action="redeem" data-mode="old" disabled>自选当前 UP</button>
+                        <button class="action-button secondary" type="button" data-action="reset" data-mode="old">重置</button>
+                    </div>
+                </article>
+            </div>
+        </section>
+
+        <footer class="footnote">
+            <span>这是概率与保底的前端模拟，不消耗任何游戏资源。角色图鉴参考 GameKee，角色头像使用当前项目素材。</span>
+            <a href="https://www.gamekee.com/ba/second/23941" target="_blank" rel="noreferrer">查看 GameKee 学生图鉴</a>
+        </footer>
+    </main>
+
+    <script>
+        (function () {
+            "use strict";
+
+            var PICKUP_RATE = 0.007;
+            var THREE_RATE = 0.06;
+            var TWO_RATE = 0.18;
+
+            var pools = {
+                ibuki: {
+                    name: "伊吹（泳装）",
+                    description: "格黑娜的夏日巡逻，FES 期间登场。",
+                    artImage: "../menu/assets/kei.jpg",
+                    artNote: "当前池只会抽到伊吹（泳装）这一位限定 UP。",
+                    upImage: "../menu/assets/kei.jpg"
+                },
+                iroha: {
+                    name: "伊吕波（泳装）",
+                    description: "万魔殿的夏日巡逻，FES 期间登场。",
+                    artImage: "../menu/assets/hoshino.jpg",
+                    artNote: "当前池只会抽到伊吕波（泳装）这一位限定 UP。",
+                    upImage: "../menu/assets/hoshino.jpg"
+                }
+            };
+
+            var standardThreeStars = [
+                { name: "空崎日奈", image: "../menu/assets/hina.jpg" },
+                { name: "天童爱丽丝", image: "../menu/assets/alice.jpg" },
+                { name: "杏山和纱", image: "../menu/assets/kazusa.jpg" },
+                { name: "室笠朱音", image: "../menu/assets/reisa.jpg" },
+                { name: "小鸟游星野（泳装）", image: "../menu/assets/hoshino.jpg" },
+                { name: "圣园未花", image: "../menu/assets/alice.jpg" },
+                { name: "狐坂若藻", image: "../menu/assets/reisa.jpg" }
+            ];
+
+            var twoStars = [
+                { name: "浅黄睦月", tint: "#f5d6aa" },
+                { name: "赤司淳子", tint: "#e8c6dc" },
+                { name: "牛牧茱莉", tint: "#c8e2d2" },
+                { name: "伊草遥香", tint: "#d6d0f0" },
+                { name: "乙花堇", tint: "#f2d2b4" }
+            ];
+
+            var oneStars = [
+                { name: "奥空绫音", tint: "#c6dced" },
+                { name: "黑见芹香", tint: "#d8c7db" },
+                { name: "小钩晴", tint: "#d4e6c9" },
+                { name: "白子", tint: "#c7d7ef" },
+                { name: "音濑小玉", tint: "#f0d8b8" }
+            ];
+
+            function createState() {
+                return {
+                    pulls: 0,
+                    three: 0,
+                    up: 0,
+                    pitySinceUp: 0,
+                    redeemed: 0,
+                    results: []
+                };
+            }
+
+            var poolStates = {
+                ibuki: { "new": createState(), "old": createState() },
+                iroha: { "new": createState(), "old": createState() }
+            };
+            var activePool = "ibuki";
+
+            function randomItem(items) {
+                return items[Math.floor(Math.random() * items.length)];
+            }
+
+            function makeResult(student, rarity, isUp, note) {
+                return {
+                    name: student.name,
+                    image: student.image || "",
+                    tint: student.tint || "#d7edf2",
+                    rarity: rarity,
+                    isUp: Boolean(isUp),
+                    note: note || ""
+                };
+            }
+
+            function normalResult(pool) {
+                var roll = Math.random();
+                if (roll < PICKUP_RATE) {
+                    return makeResult({ name: pool.name, image: pool.upImage }, 3, true, "基础 UP 0.7%");
+                }
+                if (roll < THREE_RATE) {
+                    return makeResult(randomItem(standardThreeStars), 3, false, "FES / 常驻");
+                }
+                if (roll < THREE_RATE + TWO_RATE) {
+                    return makeResult(randomItem(twoStars), 2, false, "常驻");
+                }
+                return makeResult(randomItem(oneStars), 1, false, "常驻");
+            }
+
+            function drawOne(mode) {
+                var state = poolStates[activePool][mode];
+                var pool = pools[activePool];
+                var sinceUp = state.pitySinceUp + 1;
+                var result;
+
+                state.pulls += 1;
+
+                if (mode === "new" && sinceUp >= 200) {
+                    result = makeResult({ name: pool.name, image: pool.upImage }, 3, true, "200 抽必出");
+                } else if (mode === "new" && sinceUp >= 100 && Math.random() < 0.5) {
+                    result = makeResult({ name: pool.name, image: pool.upImage }, 3, true, "100 抽 50%");
+                } else {
+                    result = normalResult(pool);
+                }
+
+                if (result.isUp) {
+                    state.pitySinceUp = 0;
+                    state.up += 1;
+                } else {
+                    state.pitySinceUp = sinceUp;
+                }
+
+                if (result.rarity === 3) {
+                    state.three += 1;
+                }
+
+                state.results.push(result);
+                state.results = state.results.slice(-20);
+            }
+
+            function draw(mode, count) {
+                var i;
+                for (i = 0; i < count; i += 1) {
+                    drawOne(mode);
+                }
+                render();
+            }
+
+            function oldUnlocked(state) {
+                return Math.min(2, Math.floor(state.pulls / 200));
+            }
+
+            function redeemOld() {
+                var state = poolStates[activePool].old;
+                var unlocked = oldUnlocked(state);
+                if (unlocked <= state.redeemed) {
+                    return;
+                }
+
+                state.redeemed += 1;
+                state.up += 1;
+                state.three += 1;
+                state.results.push(makeResult({
+                    name: pools[activePool].name,
+                    image: pools[activePool].upImage
+                }, 3, true, "累计自选"));
+                state.results = state.results.slice(-20);
+                render();
+            }
+
+            function reset(mode) {
+                poolStates[activePool][mode] = createState();
+                render();
+            }
+
+            function formatRate(state) {
+                if (!state.pulls) {
+                    return "0%";
+                }
+                return ((state.up / state.pulls) * 100).toFixed(2) + "%";
+            }
+
+            function setText(id, value) {
+                var element = document.getElementById(id);
+                if (element) {
+                    element.textContent = value;
+                }
+            }
+
+            function renderSummary() {
+                var newState = poolStates[activePool].new;
+                var oldState = poolStates[activePool].old;
+                setText("summary-new-pulls", newState.pulls);
+                setText("summary-old-pulls", oldState.pulls);
+                setText("summary-new-three", newState.three);
+                setText("summary-old-three", oldState.three);
+                setText("summary-new-up", newState.up);
+                setText("summary-old-up", oldState.up);
+                setText("summary-new-rate", formatRate(newState));
+                setText("summary-old-rate", formatRate(oldState));
+            }
+
+            function renderProgress(mode, state) {
+                var bar = document.getElementById(mode + "-progress-bar");
+                var label = document.getElementById(mode + "-progress-label");
+                var width;
+
+                if (mode === "new") {
+                    width = Math.min(100, (state.pitySinceUp / 200) * 100);
+                    if (state.pitySinceUp >= 200) {
+                        label.textContent = "本抽应当已经重置";
+                    } else if (state.pitySinceUp >= 100) {
+                        label.textContent = "软保底已开启：下一抽有 50% UP";
+                    } else {
+                        label.textContent = "还差 " + (100 - state.pitySinceUp) + " 抽进入软保底";
+                    }
+                } else {
+                    var unlocked = oldUnlocked(state);
+                    var remainder = state.pulls % 200;
+                    var remaining = remainder === 0 ? 200 : 200 - remainder;
+                    width = Math.min(100, ((state.pulls % 200) / 200) * 100);
+                    if (unlocked > state.redeemed) {
+                        label.textContent = "已有 " + (unlocked - state.redeemed) + " 次自选可用";
+                    } else if (state.pulls >= 400) {
+                        label.textContent = "本轮两次自选已解锁";
+                    } else {
+                        label.textContent = "还差 " + remaining + " 抽";
+                    }
+                }
+
+                bar.style.width = width + "%";
+            }
+
+            function renderResults(mode, state) {
+                var container = document.getElementById(mode + "-results");
+                var note = document.getElementById(mode + "-result-note");
+                var results = state.results.slice(-10).reverse();
+                var html = "";
+
+                if (!results.length) {
+                    container.innerHTML = '<div class="result-empty">结果会从这里开始排列<br>用十连更容易观察两套机制的节奏</div>';
+                    note.textContent = "单抽或十连开始体验";
+                    return;
+                }
+
+                results.forEach(function (result) {
+                    var stars = result.rarity === 3 ? "★★★" : (result.rarity === 2 ? "★★" : "★");
+                    var image = result.image ? '<img src="' + result.image + '" alt="">' : "";
+                    var upLabel = result.isUp ? '<span class="up-label">UP</span>' : "";
+                    var classes = "result-card rarity-" + result.rarity + (result.isUp ? " is-up" : "") + (result.image ? "" : " no-image");
+                    html += '<div class="' + classes + '" data-initial="' + result.name.slice(0, 1) + '" style="--card-tint:' + result.tint + ';">'
+                        + image
+                        + upLabel
+                        + '<div class="result-copy"><div class="stars">' + stars + '</div><div class="result-name">' + result.name + '</div><div class="result-note">' + result.note + '</div></div>'
+                        + "</div>";
+                });
+
+                container.innerHTML = html;
+                note.textContent = "展示最近 " + results.length + " 个结果";
+            }
+
+            function renderPanel(mode) {
+                var state = poolStates[activePool][mode];
+                setText(mode + "-pulls", state.pulls);
+                setText(mode + "-three", state.three);
+                setText(mode + "-up", state.up);
+                renderProgress(mode, state);
+                renderResults(mode, state);
+
+                if (mode === "old") {
+                    var unlocked = oldUnlocked(state);
+                    var redeemButton = document.getElementById("old-redeem");
+                    redeemButton.disabled = unlocked <= state.redeemed;
+                    redeemButton.textContent = unlocked > state.redeemed ? "自选当前 UP ×" + (unlocked - state.redeemed) : "自选当前 UP";
+                }
+            }
+
+            function renderPool() {
+                var pool = pools[activePool];
+                setText("pool-title", pool.name);
+                setText("pool-description", pool.description);
+                setText("pool-art-name", pool.name);
+                setText("pool-art-note", pool.artNote);
+                document.getElementById("pool-art-image").src = pool.artImage;
+
+                document.querySelectorAll(".pool-tab").forEach(function (button) {
+                    var active = button.getAttribute("data-pool") === activePool;
+                    button.classList.toggle("active", active);
+                    button.setAttribute("aria-selected", active ? "true" : "false");
+                });
+            }
+
+            function render() {
+                renderPool();
+                renderSummary();
+                renderPanel("new");
+                renderPanel("old");
+            }
+
+            document.querySelectorAll("[data-action]").forEach(function (button) {
+                button.addEventListener("click", function () {
+                    var action = button.getAttribute("data-action");
+                    var mode = button.getAttribute("data-mode");
+                    if (action === "single") {
+                        draw(mode, 1);
+                    } else if (action === "ten") {
+                        draw(mode, 10);
+                    } else if (action === "reset") {
+                        reset(mode);
+                    } else if (action === "redeem") {
+                        redeemOld();
+                    }
+                });
+            });
+
+            document.querySelectorAll(".pool-tab").forEach(function (button) {
+                button.addEventListener("click", function () {
+                    activePool = button.getAttribute("data-pool");
+                    render();
+                });
+            });
+
+            window.__gachaSimulator = {
+                draw: draw,
+                reset: reset,
+                redeemOld: redeemOld,
+                getState: function () {
+                    return JSON.parse(JSON.stringify(poolStates[activePool]));
+                },
+                switchPool: function (poolId) {
+                    if (pools[poolId]) {
+                        activePool = poolId;
+                        render();
+                    }
+                }
+            };
+
+            render();
+        }());
+    </script>
+</body>
+</html>
