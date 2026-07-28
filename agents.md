@@ -62,6 +62,7 @@ For `/menu/` changes, also keep the local staging mirror in sync when it is usef
 - Gacha result borders use a multicolor frame for three-star, gold for two-star, and blue for one-star.
 - Gacha result backs are split from the supplied reference into `/gacha/assets/card-back-rainbow.png`, `/gacha/assets/card-back-gold.png`, and `/gacha/assets/card-back-blue.png`; the result card flips from the matching back into the student portrait with a staggered 3D animation.
 - Gacha result cards keep the matching back visible for 500ms, then flip over with a 980ms reveal animation.
+- On mobile, gacha comparison content reorders as new-mechanism explanation, old-mechanism explanation, new results, old results; desktop remains a two-column comparison.
 - `/gacha/students-source.json` records the current GameKee roster: 165 standard/history-FES three-stars, 24 two-stars, and 37 one-stars, plus the two active swimsuit UPs.
 - Run `node scripts/download-gacha-assets.mjs` to refresh `/gacha/assets/students/` and regenerate `/gacha/students.json`; downloads send the GameKee roster page as the referrer because the CDN blocks unreferenced hotlinks.
 - The shared ten-pull and shared reset controls sit below both comparison panels; the old exchange action sits in a reward area matching the new mechanism.

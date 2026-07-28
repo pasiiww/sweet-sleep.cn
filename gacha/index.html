@@ -817,6 +817,7 @@
             display: grid;
             min-height: 164px;
             padding: 22px;
+            grid-column: 1 / -1;
             place-items: center;
             color: #91a2af;
             background: #f6fafb;
@@ -1124,6 +1125,50 @@
 
             .comparison-grid {
                 grid-template-columns: 1fr;
+                gap: 14px;
+            }
+
+            .mechanic-panel {
+                display: contents;
+            }
+
+            .mechanic-info,
+            .mechanic-panel > .result-area {
+                grid-column: 1;
+                overflow: hidden;
+                background: rgba(255, 255, 255, 0.93);
+                border: 1px solid var(--line);
+                border-radius: 14px;
+                box-shadow: var(--shadow);
+            }
+
+            .mechanic-info {
+                border-top: 5px solid var(--cyan);
+            }
+
+            .old-panel .mechanic-info {
+                border-top-color: var(--coral);
+            }
+
+            .new-panel .mechanic-info {
+                order: 1;
+            }
+
+            .old-panel .mechanic-info {
+                order: 2;
+            }
+
+            .new-panel > .result-area {
+                order: 3;
+            }
+
+            .old-panel > .result-area {
+                order: 4;
+            }
+
+            .mechanic-panel > .result-area {
+                min-height: 0;
+                padding: 14px 13px 16px;
             }
 
             .comparison-heading {
@@ -1347,65 +1392,67 @@
 
             <div class="comparison-grid">
                 <article class="mechanic-panel new-panel" data-mode="new">
-                    <div class="panel-header">
-                        <div>
-                            <h3>新机制</h3>
-                            <p>软保底先来，200 抽必定收束</p>
+                    <div class="mechanic-info">
+                        <div class="panel-header">
+                            <div>
+                                <h3>新机制</h3>
+                                <p>软保底先来，200 抽必定收束</p>
+                            </div>
+                            <span class="mechanic-tag">100 / 200</span>
                         </div>
-                        <span class="mechanic-tag">100 / 200</span>
-                    </div>
-                    <div class="rule-list">
-                        <div class="rule-item">
-                            <strong>100 抽</strong>
-                            <span>未出 UP 时，本抽 50% 出当前 UP</span>
+                        <div class="rule-list">
+                            <div class="rule-item">
+                                <strong>100 抽</strong>
+                                <span>未出 UP 时，本抽 50% 出当前 UP</span>
+                            </div>
+                            <div class="rule-item">
+                                <strong>200 抽</strong>
+                                <span>未出 UP 时，本抽必出当前 UP</span>
+                            </div>
+                            <div class="rule-item">
+                                <strong>抽到 UP</strong>
+                                <span>保底计数马上归零，重新开始</span>
+                            </div>
                         </div>
-                        <div class="rule-item">
-                            <strong>200 抽</strong>
-                            <span>未出 UP 时，本抽必出当前 UP</span>
+                        <div class="panel-stat-grid">
+                            <div class="panel-stat">
+                                <span>累计抽数</span>
+                                <strong id="new-pulls">0</strong>
+                            </div>
+                            <div class="panel-stat">
+                                <span>三星</span>
+                                <strong id="new-three">0</strong>
+                            </div>
+                            <div class="panel-stat">
+                                <span>当前 UP</span>
+                                <strong id="new-up">0</strong>
+                            </div>
                         </div>
-                        <div class="rule-item">
-                            <strong>抽到 UP</strong>
-                            <span>保底计数马上归零，重新开始</span>
+                        <div class="progress-area">
+                            <div class="progress-meta">
+                                <span>距下一次机制节点</span>
+                                <strong id="new-progress-label">还差 100 抽进入软保底</strong>
+                            </div>
+                            <div class="progress-track" aria-label="新机制保底进度">
+                                <div class="progress-bar" id="new-progress-bar"></div>
+                            </div>
+                            <div class="spark-markers">
+                                <span>0</span>
+                                <span>100 · 50%</span>
+                                <span>200 · 必出</span>
+                            </div>
                         </div>
-                    </div>
-                    <div class="panel-stat-grid">
-                        <div class="panel-stat">
-                            <span>累计抽数</span>
-                            <strong id="new-pulls">0</strong>
+                        <div class="reward-area">
+                            <div class="reward-meta">
+                                <span>活动奖励进度</span>
+                                <strong id="new-reward-label">还差 10 抽</strong>
+                            </div>
+                            <div class="reward-track" aria-label="新机制活动奖励进度">
+                                <div class="reward-bar" id="new-reward-bar"></div>
+                            </div>
+                            <div class="reward-actions" id="new-reward-actions"></div>
+                            <div class="reward-log" id="new-reward-log">首轮奖励会在累计招募后逐步解锁</div>
                         </div>
-                        <div class="panel-stat">
-                            <span>三星</span>
-                            <strong id="new-three">0</strong>
-                        </div>
-                        <div class="panel-stat">
-                            <span>当前 UP</span>
-                            <strong id="new-up">0</strong>
-                        </div>
-                    </div>
-                    <div class="progress-area">
-                        <div class="progress-meta">
-                            <span>距下一次机制节点</span>
-                            <strong id="new-progress-label">还差 100 抽进入软保底</strong>
-                        </div>
-                        <div class="progress-track" aria-label="新机制保底进度">
-                            <div class="progress-bar" id="new-progress-bar"></div>
-                        </div>
-                        <div class="spark-markers">
-                            <span>0</span>
-                            <span>100 · 50%</span>
-                            <span>200 · 必出</span>
-                        </div>
-                    </div>
-                    <div class="reward-area">
-                        <div class="reward-meta">
-                            <span>活动奖励进度</span>
-                            <strong id="new-reward-label">还差 10 抽</strong>
-                        </div>
-                        <div class="reward-track" aria-label="新机制活动奖励进度">
-                            <div class="reward-bar" id="new-reward-bar"></div>
-                        </div>
-                        <div class="reward-actions" id="new-reward-actions"></div>
-                        <div class="reward-log" id="new-reward-log">首轮奖励会在累计招募后逐步解锁</div>
                     </div>
                     <div class="result-area">
                         <div class="result-header">
@@ -1417,62 +1464,64 @@
                 </article>
 
                 <article class="mechanic-panel old-panel" data-mode="old">
-                    <div class="panel-header">
-                        <div>
-                            <h3>旧机制</h3>
-                            <p>每抽 0.7%，200 / 400 抽开放自选</p>
+                    <div class="mechanic-info">
+                        <div class="panel-header">
+                            <div>
+                                <h3>旧机制</h3>
+                                <p>每抽 0.7%，200 / 400 抽开放自选</p>
+                            </div>
+                            <span class="mechanic-tag">200 / 400</span>
                         </div>
-                        <span class="mechanic-tag">200 / 400</span>
-                    </div>
-                    <div class="rule-list">
-                        <div class="rule-item">
-                            <strong>每一抽</strong>
-                            <span>当前 UP 固定 0.7%，没有软保底</span>
+                        <div class="rule-list">
+                            <div class="rule-item">
+                                <strong>每一抽</strong>
+                                <span>当前 UP 固定 0.7%，没有软保底</span>
+                            </div>
+                            <div class="rule-item">
+                                <strong>累计 200 抽</strong>
+                                <span>开放一次自选当前 UP</span>
+                            </div>
+                            <div class="rule-item">
+                                <strong>累计 400 抽</strong>
+                                <span>第二次开放自选当前 UP</span>
+                            </div>
                         </div>
-                        <div class="rule-item">
-                            <strong>累计 200 抽</strong>
-                            <span>开放一次自选当前 UP</span>
+                        <div class="panel-stat-grid">
+                            <div class="panel-stat">
+                                <span>累计抽数</span>
+                                <strong id="old-pulls">0</strong>
+                            </div>
+                            <div class="panel-stat">
+                                <span>三星</span>
+                                <strong id="old-three">0</strong>
+                            </div>
+                            <div class="panel-stat">
+                                <span>当前 UP</span>
+                                <strong id="old-up">0</strong>
+                            </div>
                         </div>
-                        <div class="rule-item">
-                            <strong>累计 400 抽</strong>
-                            <span>第二次开放自选当前 UP</span>
+                        <div class="progress-area">
+                            <div class="progress-meta">
+                                <span>自选兑换进度</span>
+                                <strong id="old-progress-label">还差 200 抽</strong>
+                            </div>
+                            <div class="progress-track" aria-label="旧机制自选进度">
+                                <div class="progress-bar" id="old-progress-bar"></div>
+                            </div>
+                            <div class="spark-markers">
+                                <span>0</span>
+                                <span>100</span>
+                                <span id="old-progress-end-label">200 · 自选 1</span>
+                            </div>
                         </div>
-                    </div>
-                    <div class="panel-stat-grid">
-                        <div class="panel-stat">
-                            <span>累计抽数</span>
-                            <strong id="old-pulls">0</strong>
-                        </div>
-                        <div class="panel-stat">
-                            <span>三星</span>
-                            <strong id="old-three">0</strong>
-                        </div>
-                        <div class="panel-stat">
-                            <span>当前 UP</span>
-                            <strong id="old-up">0</strong>
-                        </div>
-                    </div>
-                    <div class="progress-area">
-                        <div class="progress-meta">
-                            <span>自选兑换进度</span>
-                            <strong id="old-progress-label">还差 200 抽</strong>
-                        </div>
-                        <div class="progress-track" aria-label="旧机制自选进度">
-                            <div class="progress-bar" id="old-progress-bar"></div>
-                        </div>
-                        <div class="spark-markers">
-                            <span>0</span>
-                            <span>100</span>
-                            <span id="old-progress-end-label">200 · 自选 1</span>
-                        </div>
-                    </div>
-                    <div class="reward-area old-reward-area">
-                        <div class="reward-meta">
-                            <span>自选当前 UP</span>
-                            <strong id="old-reward-label">还差 200 抽</strong>
-                        </div>
-                        <div class="reward-actions">
-                            <button class="reward-button" id="old-redeem" type="button" data-action="redeem" data-mode="old" disabled>自选当前 UP</button>
+                        <div class="reward-area old-reward-area">
+                            <div class="reward-meta">
+                                <span>自选当前 UP</span>
+                                <strong id="old-reward-label">还差 200 抽</strong>
+                            </div>
+                            <div class="reward-actions">
+                                <button class="reward-button" id="old-redeem" type="button" data-action="redeem" data-mode="old" disabled>自选当前 UP</button>
+                            </div>
                         </div>
                     </div>
                     <div class="result-area">
@@ -1485,7 +1534,7 @@
                 </article>
             </div>
             <div class="comparison-actions" aria-label="同时抽取控制">
-                <button class="action-button primary" type="button" data-action="compare-ten">左右同时十连 ×10</button>
+                <button class="action-button primary" type="button" data-action="compare-ten">两边同时十连</button>
                 <button class="action-button secondary" id="compare-reset" type="button" data-action="compare-reset" disabled>同时重置（两边各 2 个 UP 后）</button>
             </div>
         </section>
