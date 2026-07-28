@@ -1270,7 +1270,8 @@
                 <div class="pool-rule-row">
                     <span>三星：<b>6%</b></span>
                     <span>当前 UP：<b>0.7%</b></span>
-                <span>另一位当期 UP：非当前 FES 概率</span>
+                    <span>十连保底：至少 1 个 ★2+</span>
+                    <span>另一位当期 UP：非当前 FES 概率</span>
                 </div>
             </div>
             <div class="pool-art">
@@ -1451,9 +1452,14 @@
             var THREE_RATE = 0.06;
             var NON_PICKUP_FES_RATE = 0.009;
             var TWO_RATE = 0.18;
+            var TEN_PULL_COUNT = 10;
             var FES_STUDENT_IDS = [
                 "150695", "162560", "581679", "596034", "611753", "621572", "597535",
                 "162557", "645823", "645824", "671319", "671362"
+            ];
+            var RECRUITABLE_ONE_STAR_IDS = [
+                "58280", "66272", "66275", "66646", "67655", "68176",
+                "53921", "63927", "66269", "66259", "67035"
             ];
             var REWARD_CYCLE_PULLS = 400;
             var EVENT_REWARDS = [
@@ -1511,10 +1517,17 @@
             ];
 
             var oneStars = [
-                { name: "奥空绫音", image: "assets/ayane.webp" },
-                { name: "黑见芹香", image: "assets/serika.webp" },
-                { name: "白子", image: "assets/shiroko.webp" },
-                { name: "空崎日奈", image: "assets/hina.webp" }
+                { name: "千夏", image: "assets/students/58280.webp" },
+                { name: "好美", image: "assets/students/66272.webp" },
+                { name: "芹娜", image: "assets/students/66275.webp" },
+                { name: "明日奈", image: "assets/students/66646.webp" },
+                { name: "琴里", image: "assets/students/67655.webp" },
+                { name: "菲娜", image: "assets/students/68176.webp" },
+                { name: "遥香", image: "assets/students/53921.webp" },
+                { name: "朱莉", image: "assets/students/63927.webp" },
+                { name: "志美子", image: "assets/students/66269.webp" },
+                { name: "铃美", image: "assets/students/66259.webp" },
+                { name: "小玉", image: "assets/students/67035.webp" }
             ];
             var fesThreeStars = [];
 
@@ -1537,7 +1550,9 @@
                     return FES_STUDENT_IDS.indexOf(String(student.id)) === -1;
                 });
                 twoStars = prepareStudents(data.two || []);
-                oneStars = prepareStudents(data.one || []);
+                oneStars = prepareStudents((data.one || []).filter(function (student) {
+                    return RECRUITABLE_ONE_STAR_IDS.indexOf(String(student.id)) !== -1;
+                }));
 
                 Object.keys(pools).forEach(function (poolId) {
                     var pickup = data.currentUp && data.currentUp[poolId];
@@ -1726,19 +1741,71 @@
                 if (mode === "new") {
                     syncNewRewards(state);
                 }
+                return result;
+            }
+
+            function applyTenPullGuarantee(mode, batch) {
+                var state = poolStates[activePool][mode];
+                var hasTwoStarOrHigher = batch.some(function (result) {
+                    return result.rarity >= 2;
+                });
+
+                if (hasTwoStarOrHigher) {
+                    return;
+                }
+
+                state.results[state.results.length - 1] = makeResult(
+                    randomItem(twoStars),
+                    2,
+                    false,
+                    "十连保底（2★）"
+                );
+            }
+
+            function drawTen(mode) {
+                var batch = [];
+                for (var i = 0; i < TEN_PULL_COUNT; i += 1) {
+                    batch.push(drawOne(mode));
+                }
+                applyTenPullGuarantee(mode, batch);
+            }
+
+            function drawBatch(mode, count) {
+                var fullTens = Math.floor(count / TEN_PULL_COUNT);
+                var remainder = count % TEN_PULL_COUNT;
+                var i;
+
+                for (i = 0; i < fullTens; i += 1) {
+                    drawTen(mode);
+                }
+                for (i = 0; i < remainder; i += 1) {
+                    drawOne(mode);
+                }
             }
 
             function draw(mode, count) {
-                var i;
-                for (i = 0; i < count; i += 1) {
-                    drawOne(mode);
-                }
+                drawBatch(mode, count);
                 render();
             }
 
             function drawBoth(count) {
+                var fullTens = Math.floor(count / TEN_PULL_COUNT);
+                var remainder = count % TEN_PULL_COUNT;
                 var i;
-                for (i = 0; i < count; i += 1) {
+                var newBatch;
+                var oldBatch;
+
+                for (i = 0; i < fullTens; i += 1) {
+                    newBatch = [];
+                    oldBatch = [];
+                    for (var j = 0; j < TEN_PULL_COUNT; j += 1) {
+                        newBatch.push(drawOne("new"));
+                        oldBatch.push(drawOne("old"));
+                    }
+                    applyTenPullGuarantee("new", newBatch);
+                    applyTenPullGuarantee("old", oldBatch);
+                }
+                for (i = 0; i < remainder; i += 1) {
                     drawOne("new");
                     drawOne("old");
                 }
@@ -1755,9 +1822,7 @@
                 state.rewardQueue.splice(index, 1);
                 state.rewardClaimed += 1;
                 addRewardLog(state, "已使用赠送十连：" + reward.label);
-                for (var i = 0; i < 10; i += 1) {
-                    drawOne("new");
-                }
+                drawTen("new");
                 renderSummary();
                 renderProgress("new", state);
                 renderRewards(state);
