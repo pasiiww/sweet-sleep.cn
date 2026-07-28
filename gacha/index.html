@@ -1907,9 +1907,13 @@
                     }
                 } else {
                     var unlocked = oldUnlocked(state);
+                    var completedExchanges = Math.min(2, state.redeemed);
+                    var progressPulls = state.pulls - (completedExchanges * 200);
                     var remainder = state.pulls % 200;
                     var remaining = remainder === 0 ? 200 : 200 - remainder;
-                    width = Math.min(100, ((state.pulls % 200) / 200) * 100);
+                    width = state.redeemed >= 2
+                        ? 100
+                        : Math.max(0, Math.min(100, (progressPulls / 200) * 100));
                     if (unlocked > state.redeemed) {
                         label.textContent = "已有 " + (unlocked - state.redeemed) + " 次自选可用";
                     } else if (state.pulls >= 400) {
