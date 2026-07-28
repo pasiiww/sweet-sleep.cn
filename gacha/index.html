@@ -169,6 +169,123 @@
             gap: 12px;
         }
 
+        .three-star-summary {
+            margin-top: 12px;
+            padding: 14px 16px;
+            background: rgba(255, 255, 255, 0.88);
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            box-shadow: 0 8px 22px rgba(25, 54, 84, 0.06);
+        }
+
+        .three-star-summary-heading {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .three-star-summary-heading strong {
+            color: var(--navy);
+            font-size: 12px;
+        }
+
+        .three-star-summary-heading span {
+            color: var(--muted);
+            font-size: 10px;
+        }
+
+        .three-star-summary-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 14px;
+            margin-top: 12px;
+        }
+
+        .three-star-summary-row {
+            min-width: 0;
+        }
+
+        .three-star-summary-row > header {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 7px;
+            color: var(--muted);
+            font-size: 11px;
+        }
+
+        .three-star-summary-row > header strong {
+            color: var(--navy);
+        }
+
+        .three-star-summary-row.old > header strong {
+            color: #b86553;
+        }
+
+        .three-star-avatars {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 7px;
+            min-height: 46px;
+            align-items: center;
+        }
+
+        .three-star-avatar {
+            position: relative;
+            flex: 0 0 44px;
+            width: 44px;
+            height: 44px;
+            overflow: hidden;
+            background:
+                linear-gradient(#edf4f7, #edf4f7) padding-box,
+                linear-gradient(135deg, #ef796b, #f1c765, #55c3d2, #a88be8) border-box;
+            border: 3px solid transparent;
+            border-radius: 9px;
+        }
+
+        .three-star-avatar.is-up {
+            background:
+                linear-gradient(#edf4f7, #edf4f7) padding-box,
+                var(--coral) border-box;
+        }
+
+        .three-star-avatar.is-fes {
+            background:
+                linear-gradient(#edf4f7, #edf4f7) padding-box,
+                #8b75c7 border-box;
+        }
+
+        .three-star-avatar img {
+            display: block;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            object-position: center top;
+            border-radius: 6px;
+        }
+
+        .three-star-avatar .avatar-count {
+            position: absolute;
+            right: 2px;
+            bottom: 2px;
+            min-width: 16px;
+            padding: 1px 4px;
+            color: #fff;
+            background: rgba(13, 33, 52, 0.82);
+            border-radius: 99px;
+            font-size: 9px;
+            font-weight: 800;
+            line-height: 1.2;
+            text-align: center;
+        }
+
+        .three-star-empty {
+            color: #91a2af;
+            font-size: 11px;
+        }
+
         .summary-card {
             min-height: 94px;
             padding: 15px 16px;
@@ -402,7 +519,7 @@
             display: flex;
             flex-wrap: wrap;
             gap: 10px;
-            margin-bottom: 12px;
+            margin-top: 14px;
         }
 
         .comparison-actions .action-button {
@@ -949,6 +1066,10 @@
                 grid-template-columns: repeat(2, minmax(0, 1fr));
             }
 
+            .three-star-summary-grid {
+                grid-template-columns: 1fr;
+            }
+
             .comparison-grid {
                 grid-template-columns: 1fr;
             }
@@ -1020,6 +1141,11 @@
                 margin-left: 13px;
             }
 
+            .three-star-summary {
+                padding-right: 13px;
+                padding-left: 13px;
+            }
+
             .rule-list {
                 grid-template-columns: 1fr;
             }
@@ -1065,7 +1191,7 @@
 
         <div class="notice-line">
             <strong>FES 池</strong>
-            <span>三星概率提升至 6%，当前池 UP 仍为 0.7%。切换池子不会清空新旧机制的抽卡进度。</span>
+            <span>三星概率提升至 6%，当前 UP 为 0.7%；非当前 UP 的 FES 角色合计 0.9%，包含另一位当期 UP。切换池子不会清空进度。</span>
         </div>
 
         <section class="summary-section" aria-labelledby="summary-title">
@@ -1107,6 +1233,22 @@
                     </div>
                 </article>
             </div>
+            <div class="three-star-summary">
+                <div class="three-star-summary-heading">
+                    <strong>已获得的三星角色</strong>
+                    <span>头像边框：当前 UP / 其他 FES</span>
+                </div>
+                <div class="three-star-summary-grid">
+                    <div class="three-star-summary-row">
+                        <header><strong>新机制</strong><span id="summary-new-three-roster-count">0 位</span></header>
+                        <div class="three-star-avatars" id="summary-new-three-roster"><span class="three-star-empty">还没有三星角色</span></div>
+                    </div>
+                    <div class="three-star-summary-row old">
+                        <header><strong>旧机制</strong><span id="summary-old-three-roster-count">0 位</span></header>
+                        <div class="three-star-avatars" id="summary-old-three-roster"><span class="three-star-empty">还没有三星角色</span></div>
+                    </div>
+                </div>
+            </div>
         </section>
 
         <section class="pool-section" aria-labelledby="pool-title">
@@ -1128,7 +1270,7 @@
                 <div class="pool-rule-row">
                     <span>三星：<b>6%</b></span>
                     <span>当前 UP：<b>0.7%</b></span>
-                    <span>限定 UP 不会在另一池歪出</span>
+                <span>另一位当期 UP：非当前 FES 概率</span>
                 </div>
             </div>
             <div class="pool-art">
@@ -1148,11 +1290,6 @@
                     <h2 id="comparison-title">同时抽，直接看差异</h2>
                 </div>
                 <p>两边的概率表相同，差别只来自保底与自选。</p>
-            </div>
-
-            <div class="comparison-actions" aria-label="同时抽取控制">
-                <button class="action-button primary" type="button" data-action="compare-ten">左右同时十连 ×10</button>
-                <button class="action-button secondary" id="compare-reset" type="button" data-action="compare-reset" disabled>同时重置（400 抽后）</button>
             </div>
 
             <div class="comparison-grid">
@@ -1220,12 +1357,12 @@
                     <div class="result-area">
                         <div class="result-header">
                             <strong>最近结果</strong>
-                            <span id="new-result-note">点击上方按钮同时开始对比</span>
+                            <span id="new-result-note">点击下方按钮同时开始对比</span>
                         </div>
                         <div class="result-grid" id="new-results"></div>
                     </div>
                     <div class="action-row">
-                        <button class="action-button secondary" id="new-reset" type="button" data-action="reset" data-mode="new" disabled>重置新机制（400 抽后）</button>
+                        <button class="action-button secondary" id="new-reset" type="button" data-action="reset" data-mode="new" disabled>重置新机制（2 个 UP 后）</button>
                     </div>
                 </article>
 
@@ -1282,15 +1419,19 @@
                     <div class="result-area">
                         <div class="result-header">
                             <strong>最近结果</strong>
-                            <span id="old-result-note">点击上方按钮同时开始对比</span>
+                            <span id="old-result-note">点击下方按钮同时开始对比</span>
                         </div>
                         <div class="result-grid" id="old-results"></div>
                     </div>
                     <div class="action-row">
                         <button class="action-button secondary" id="old-redeem" type="button" data-action="redeem" data-mode="old" disabled>自选当前 UP</button>
-                        <button class="action-button secondary" id="old-reset" type="button" data-action="reset" data-mode="old" disabled>重置旧机制（400 抽后）</button>
+                        <button class="action-button secondary" id="old-reset" type="button" data-action="reset" data-mode="old" disabled>重置旧机制（2 个 UP 后）</button>
                     </div>
                 </article>
+            </div>
+            <div class="comparison-actions" aria-label="同时抽取控制">
+                <button class="action-button primary" type="button" data-action="compare-ten">左右同时十连 ×10</button>
+                <button class="action-button secondary" id="compare-reset" type="button" data-action="compare-reset" disabled>同时重置（两边各 2 个 UP 后）</button>
             </div>
         </section>
 
@@ -1306,7 +1447,12 @@
 
             var PICKUP_RATE = 0.007;
             var THREE_RATE = 0.06;
+            var NON_PICKUP_FES_RATE = 0.009;
             var TWO_RATE = 0.18;
+            var FES_STUDENT_IDS = [
+                "150695", "162560", "581679", "596034", "611753", "621572", "597535",
+                "162557", "645823", "645824", "671319", "671362"
+            ];
             var REWARD_CYCLE_PULLS = 400;
             var EVENT_REWARDS = [
                 { pulls: 10, kind: "choice", label: "高级战术教育 BD 选择箱 ×2" },
@@ -1336,14 +1482,14 @@
                     name: "伊吹（泳装）",
                     description: "格黑娜的夏日巡逻，FES 期间登场。",
                     artImage: "assets/ibuki-swimsuit.webp",
-                    artNote: "当前池只会抽到伊吹（泳装）这一位限定 UP。",
+                    artNote: "当前 UP 是伊吹（泳装），另一位当期 UP 也有小概率出现。",
                     upImage: "assets/ibuki-swimsuit.webp"
                 },
                 iroha: {
                     name: "伊吕波（泳装）",
                     description: "万魔殿的夏日巡逻，FES 期间登场。",
                     artImage: "assets/iroha-swimsuit.webp",
-                    artNote: "当前池只会抽到伊吕波（泳装）这一位限定 UP。",
+                    artNote: "当前 UP 是伊吕波（泳装），另一位当期 UP 也有小概率出现。",
                     upImage: "assets/iroha-swimsuit.webp"
                 }
             };
@@ -1368,6 +1514,7 @@
                 { name: "白子", image: "assets/shiroko.webp" },
                 { name: "空崎日奈", image: "assets/hina.webp" }
             ];
+            var fesThreeStars = [];
 
             function resolveStudentImage(student) {
                 return student.image || student.sourceImage || "";
@@ -1380,7 +1527,13 @@
             }
 
             function applyStudentData(data) {
-                standardThreeStars = prepareStudents(data.standardThree || []);
+                var allThreeStars = prepareStudents(data.standardThree || []);
+                fesThreeStars = allThreeStars.filter(function (student) {
+                    return FES_STUDENT_IDS.indexOf(String(student.id)) !== -1;
+                });
+                standardThreeStars = allThreeStars.filter(function (student) {
+                    return FES_STUDENT_IDS.indexOf(String(student.id)) === -1;
+                });
                 twoStars = prepareStudents(data.two || []);
                 oneStars = prepareStudents(data.one || []);
 
@@ -1402,6 +1555,7 @@
                     pitySinceUp: 0,
                     redeemed: 0,
                     results: [],
+                    threeStars: [],
                     rewardCursor: 0,
                     rewardClaimed: 0,
                     rewardQueue: [],
@@ -1420,15 +1574,64 @@
                 return items[Math.floor(Math.random() * items.length)];
             }
 
+            function getOtherPool(pool) {
+                return pools[activePool === "ibuki" ? "iroha" : "ibuki"];
+            }
+
+            function getNonPickupFesStudents(pool) {
+                var students = fesThreeStars.map(function (student) {
+                    return Object.assign({}, student, { isFes: true });
+                });
+                var otherPool = getOtherPool(pool);
+                students.push({
+                    name: otherPool.name,
+                    image: otherPool.upImage,
+                    isFes: true,
+                    isOtherUp: true
+                });
+                return students;
+            }
+
+            function getNonPickupFesRate(pool) {
+                var students = getNonPickupFesStudents(pool);
+                return students.length ? NON_PICKUP_FES_RATE / students.length : 0;
+            }
+
             function makeResult(student, rarity, isUp, note) {
                 return {
+                    id: student.id || "",
                     name: student.name,
                     image: student.image || "",
                     tint: student.tint || "#d7edf2",
                     rarity: rarity,
                     isUp: Boolean(isUp),
+                    isFes: Boolean(student.isFes),
+                    isOtherUp: Boolean(student.isOtherUp),
                     note: note || ""
                 };
+            }
+
+            function recordThreeStar(state, result) {
+                var key = result.id || result.image || result.name;
+                var entry = state.threeStars.find(function (student) {
+                    return student.key === key;
+                });
+
+                if (entry) {
+                    entry.count += 1;
+                    entry.isUp = entry.isUp || result.isUp;
+                    entry.isFes = entry.isFes || result.isFes;
+                    return;
+                }
+
+                state.threeStars.push({
+                    key: key,
+                    name: result.name,
+                    image: result.image,
+                    count: 1,
+                    isUp: result.isUp,
+                    isFes: result.isFes
+                });
             }
 
             function rewardThreshold(index) {
@@ -1469,6 +1672,16 @@
                 if (roll < PICKUP_RATE) {
                     return makeResult({ name: pool.name, image: pool.upImage }, 3, true, "基础 UP 0.7%");
                 }
+                if (roll < PICKUP_RATE + NON_PICKUP_FES_RATE) {
+                    var fesStudent = randomItem(getNonPickupFesStudents(pool));
+                    var fesRate = (getNonPickupFesRate(pool) * 100).toFixed(2) + "%";
+                    return makeResult(
+                        fesStudent,
+                        3,
+                        Boolean(fesStudent.isOtherUp),
+                        fesStudent.isOtherUp ? "另一位 UP / FES " + fesRate : "FES 非当前 " + fesRate
+                    );
+                }
                 if (roll < THREE_RATE) {
                     return makeResult(randomItem(standardThreeStars), 3, false, "FES / 常驻");
                 }
@@ -1503,6 +1716,7 @@
 
                 if (result.rarity === 3) {
                     state.three += 1;
+                    recordThreeStar(state, result);
                 }
 
                 state.results.push(result);
@@ -1572,16 +1786,18 @@
                 state.redeemed += 1;
                 state.up += 1;
                 state.three += 1;
-                state.results.push(makeResult({
+                var redeemedResult = makeResult({
                     name: pools[activePool].name,
                     image: pools[activePool].upImage
-                }, 3, true, "累计自选"));
+                }, 3, true, "累计自选");
+                recordThreeStar(state, redeemedResult);
+                state.results.push(redeemedResult);
                 state.results = state.results.slice(-20);
                 render();
             }
 
             function reset(mode) {
-                if (poolStates[activePool][mode].pulls < 400) {
+                if (poolStates[activePool][mode].up < 2) {
                     return;
                 }
                 poolStates[activePool][mode] = createState();
@@ -1589,7 +1805,7 @@
             }
 
             function resetBoth() {
-                if (poolStates[activePool].new.pulls < 400 || poolStates[activePool].old.pulls < 400) {
+                if (poolStates[activePool].new.up < 2 || poolStates[activePool].old.up < 2) {
                     return;
                 }
                 sharedStates.new = createState();
@@ -1611,6 +1827,42 @@
                 }
             }
 
+            function escapeHtml(value) {
+                return String(value)
+                    .replace(/&/g, "&amp;")
+                    .replace(/</g, "&lt;")
+                    .replace(/>/g, "&gt;")
+                    .replace(/\"/g, "&quot;")
+                    .replace(/'/g, "&#39;");
+            }
+
+            function renderThreeStarRoster(mode, state) {
+                var container = document.getElementById("summary-" + mode + "-three-roster");
+                var count = document.getElementById("summary-" + mode + "-three-roster-count");
+                var total = state.threeStars.reduce(function (sum, student) {
+                    return sum + student.count;
+                }, 0);
+
+                count.textContent = state.threeStars.length + " 位 · " + total + " 次";
+                if (!state.threeStars.length) {
+                    container.innerHTML = '<span class="three-star-empty">还没有三星角色</span>';
+                    return;
+                }
+
+                container.innerHTML = state.threeStars.map(function (student) {
+                    var classes = "three-star-avatar";
+                    if (student.isUp) {
+                        classes += " is-up";
+                    } else if (student.isFes) {
+                        classes += " is-fes";
+                    }
+                    return '<div class="' + classes + '" title="' + escapeHtml(student.name) + " ×" + student.count + '">'
+                        + '<img src="' + escapeHtml(student.image) + '" alt="' + escapeHtml(student.name) + '">'
+                        + '<span class="avatar-count">×' + student.count + "</span>"
+                        + "</div>";
+                }).join("");
+            }
+
             function renderSummary() {
                 var newState = poolStates[activePool].new;
                 var oldState = poolStates[activePool].old;
@@ -1624,6 +1876,8 @@
                 setText("summary-old-rate", formatRate(oldState));
                 setText("summary-new-rewards", newState.rewardClaimed);
                 setText("summary-new-pending", newState.rewardQueue.length);
+                renderThreeStarRoster("new", newState);
+                renderThreeStarRoster("old", oldState);
             }
 
             function renderProgress(mode, state) {
@@ -1696,16 +1950,16 @@
             function renderResetButtons() {
                 var newState = poolStates[activePool].new;
                 var oldState = poolStates[activePool].old;
-                var bothReady = newState.pulls >= 400 && oldState.pulls >= 400;
+                var bothReady = newState.up >= 2 && oldState.up >= 2;
                 var newReset = document.getElementById("new-reset");
                 var oldReset = document.getElementById("old-reset");
                 var compareReset = document.getElementById("compare-reset");
-                newReset.disabled = newState.pulls < 400;
-                oldReset.disabled = oldState.pulls < 400;
+                newReset.disabled = newState.up < 2;
+                oldReset.disabled = oldState.up < 2;
                 compareReset.disabled = !bothReady;
-                newReset.textContent = newReset.disabled ? "重置新机制（400 抽后）" : "重置新机制";
-                oldReset.textContent = oldReset.disabled ? "重置旧机制（400 抽后）" : "重置旧机制";
-                compareReset.textContent = compareReset.disabled ? "同时重置（400 抽后）" : "同时重置";
+                newReset.textContent = newReset.disabled ? "重置新机制（2 个 UP 后）" : "重置新机制";
+                oldReset.textContent = oldReset.disabled ? "重置旧机制（2 个 UP 后）" : "重置旧机制";
+                compareReset.textContent = compareReset.disabled ? "同时重置（两边各 2 个 UP 后）" : "同时重置";
             }
 
             function renderResults(mode, state) {
@@ -1716,7 +1970,7 @@
 
                 if (!results.length) {
                     container.innerHTML = '<div class="result-empty">结果会从这里开始排列<br>用十连更容易观察两套机制的节奏</div>';
-                    note.textContent = "点击上方按钮同时开始对比";
+                    note.textContent = "点击下方按钮同时开始对比";
                     return;
                 }
 
