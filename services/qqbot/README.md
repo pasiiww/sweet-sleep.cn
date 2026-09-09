@@ -59,7 +59,7 @@ journalctl -u sweet-qqbot -n 30 --no-pager
 
 历史 `KB_API_URL` 以 `/retrieve` 结尾时自动升级为 `/answer`，其他自定义 URL 按原值使用。知识库 `/answer` 是读取并生成回答的接口，不再只是原文召回，使用共享只读密钥鉴权；该密钥持有者可触发已启用模型的调用费用。超时上限：每次模型调用20秒（关键词与回答各一次），机器人知识库请求55秒。
 
-普通群消息 `on_group_message_create` 直接忽略；只有平台的 `on_group_at_message_create` 事件可进入群处理流程，且内部入口再次检查 mention 标志。私聊保持直接处理。
+普通群消息进入独立学习队列；`on_group_at_message_create` 或全量事件中可核实的本机器人提及，才进入群客服回复流程，内部入口再次检查 mention 标志。私聊保持直接处理。
 
 
 ## 多轮对话
@@ -71,3 +71,13 @@ journalctl -u sweet-qqbot -n 30 --no-pager
 ## 对话 Trace
 
 知识库请求附带来源、用户OpenID与隔离会话标识；拿到 trace 回执后，QQ 发送结果单独回写。后台可查询最近7天的检索和回复详情。回写失败只记录 TRACE_REPORT_FAILED，不重发QQ消息，界面保持“未收到发送回执”。
+
+## 全量群消息与学习接入
+
+`compat.py` 为固定的 qq-botpy 1.2.1 补充 `GROUP_MESSAGE_CREATE` 解析，并保留全量和 @ 事件中的引用元数据。仍订阅 `public_messages`（`1<<25`）。群主需在手机 QQ 的机器人设置中，将「机器人可获取的群聊消息范围」设为「获取群内全部消息」。服务端订阅不能代替群主开启开关。
+
+普通全量消息进入学习上传队列，只有已确认 @ 当前机器人的消息进入客服回复流程；全量与 @ 双事件按消息 ID 去重，避免重复回复。引用识别使用 `message_type=103`、`ref_msg_idx` 或 `message_reference`，转发聊天记录不会被当作管理员的引用回复。仅保留文本、来源索引等学习字段，不传递 `auth_token`。学习不会主动向群发送消息。
+
+QQ 环境文件与知识库环境文件需配置相同、独立的 `KB_LEARN_TOKEN`，部署时也需复制 `learner.py` 和 `compat.py` 到 `/opt/sweet-qqbot`。阈值、OpenID 绑定和学习提示词在知识库后台修改，无需重启 QQ 服务。消息上传队列保留30分钟、最多1000条，服务端按来源消息时间处理知识新旧；全量记录与学习 Trace 保留7天。
+
+QQ 回归：`/opt/sweet-qqbot/venv/bin/python -m unittest discover -s services/qqbot -p 'test_*.py'`，客服查询使用 mock，学习上传使用本地测试 HTTP 服务，不调用真实大模型。

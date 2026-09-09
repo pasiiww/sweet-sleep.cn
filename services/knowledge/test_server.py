@@ -120,7 +120,7 @@ class KnowledgeTests(unittest.TestCase):
 
     def test_http_auth_and_static_allowlist(self):
         self.doc()
-        app.ADMIN_TOKEN, app.READ_TOKEN = 'a' * 32, 'r' * 32
+        app.ADMIN_TOKEN, app.READ_TOKEN, app.LEARN_TOKEN = 'a' * 32, 'r' * 32, 'l' * 32
         http = app.ThreadingHTTPServer(('127.0.0.1', 0), app.Handler)
         thread = threading.Thread(target=http.serve_forever, daemon=True)
         thread.start()
@@ -134,6 +134,10 @@ class KnowledgeTests(unittest.TestCase):
                 return exc.code, exc.read()
         try:
             self.assertEqual(req('api/bases')[0], 401)
+            self.assertEqual(req('api/learning/events',app.READ_TOKEN,{'kb_id':self.kb})[0],403)
+            self.assertEqual(req('api/learning/events',app.LEARN_TOKEN,{'kb_id':self.kb})[0],200)
+            self.assertEqual(req('api/bases',app.LEARN_TOKEN)[0],403)
+            self.assertEqual(req('api/learning/jobs?kb_id='+self.kb,app.READ_TOKEN)[0],403)
             self.assertEqual(req('api/bases', app.READ_TOKEN)[0], 403)
             self.assertEqual(req('api/answer-settings', app.READ_TOKEN)[0], 403)
             self.assertEqual(req('api/traces', app.READ_TOKEN)[0], 403)

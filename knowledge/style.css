@@ -8,3 +8,10 @@
 .trace-filters{padding:0 24px 24px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;align-items:end}.trace-filters input,.trace-filters select{min-width:0}.trace-filters button{justify-self:start}.trace-table{min-width:900px;table-layout:fixed;white-space:normal}.trace-table th:nth-child(1){width:20%}.trace-table th:nth-child(2){width:25%}.trace-table th:nth-child(3){width:30%}.trace-table th:nth-child(4){width:17%}.trace-table th:nth-child(5){width:8%}.trace-table td{vertical-align:top;overflow-wrap:anywhere;line-height:1.7;padding:18px 16px}.trace-table small{display:block;margin-top:6px;overflow-wrap:anywhere}.trace-dialog{width:min(1050px,calc(100% - 30px))}.trace-dialog h3{margin-top:24px;margin-bottom:10px}.trace-dialog h4{margin:15px 0 8px}.trace-text{white-space:pre-wrap;overflow-wrap:anywhere;padding:14px;background:#f5f8f5;border:1px solid #e7eee8;border-radius:7px;font-size:13px;line-height:1.8}.trace-dialog details{margin-top:15px;padding:14px;border:1px solid #e7eee8;border-radius:7px}.trace-dialog summary{cursor:pointer;line-height:1.8;overflow-wrap:anywhere}.trace-meta{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;font-size:12px}.trace-dialog small{overflow-wrap:anywhere}@media(max-width:760px){.trace-filters{grid-template-columns:1fr 1fr;padding:0 19px 19px}.trace-filters label{font-size:11px}}
 
 .qa-table{min-width:740px;table-layout:fixed;white-space:normal}.qa-table th:first-child{width:34%}.qa-table th:nth-child(2){width:48%}.qa-table th:last-child{width:18%}.qa-table th small{margin-left:8px}.qa-table td{vertical-align:top;padding:18px 20px}.qa-table textarea{margin:0;font-size:13px;line-height:1.8;resize:vertical;background:#fbfcfa}.qa-table .alias-row-actions{margin-top:12px}.qa-table .alias-dirty{background:#fdfdf7}
+
+.learning-panel { max-width: 1100px; margin-bottom: 24px; }
+.learning-panel .table-wrap { margin: 16px 0; }
+.learning-panel table { min-width: 760px; }
+.learning-panel table input, .learning-panel table select { width: 100%; min-width: 150px; }
+.learning-panel h3 { margin-top: 24px; }
+#learning-jobs td { overflow-wrap: anywhere; }

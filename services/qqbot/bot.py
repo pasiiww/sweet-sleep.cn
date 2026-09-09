@@ -14,6 +14,8 @@ import aiohttp
 import botpy
 import botpy.gateway
 import botpy.http
+from learner import Learner
+import compat
 
 LOG = logging.getLogger('knowledge-bot')
 HELP = '我是午觉糖水铺的客服机器人。\n直接发送问题，或输入：/检索 你的问题\n我会根据知识库资料回答，资料不足时请群主或管理员确认。模型不可用时返回最相关文档。\n同一会话保留最近30分钟的问答，可发送 /新对话 清空。\n管理员可在群内发送 /身份，获取后台人工接管配置需要的 OpenID。'
@@ -141,13 +143,18 @@ class Retriever:
 
 class KnowledgeBot(botpy.Client):
     def __init__(self, retriever, seen, **kwargs):
+        compat.install()
         super().__init__(intents=botpy.Intents(public_messages=True), timeout=15,
                          log_level=logging.INFO, ext_handlers=False, **kwargs)
         self.retriever, self.seen = retriever, seen
         self.capacity = asyncio.Semaphore(4)
         self.conversations = {}
+        self.learner = None
+        if os.environ.get("KB_LEARN_TOKEN"):
+            self.learner = Learner(seen.conn, retriever.url.rsplit("/",1)[0]+"/learning/events", os.environ["KB_LEARN_TOKEN"], retriever.kb_id)
 
     async def on_ready(self):
+        if self.learner: self.learner.start()
         LOG.info('QQ_CONNECTED app_id=%s knowledge_id=%s', os.environ.get('QQ_APP_ID'), self.retriever.kb_id)
 
     async def on_error(self, event_method, *args, **kwargs):
@@ -157,12 +164,15 @@ class KnowledgeBot(botpy.Client):
         await self.answer(message, 'c2c')
 
     async def on_group_at_message_create(self, message):
+        if self.learner: self.learner.observe(message)
         # The platform event certifies this bot was mentioned; text may omit the tag.
         await self.answer(message, 'group', mentioned=True)
 
     async def on_group_message_create(self, message):
-        # Ordinary group messages must not enter deduplication, retrieval or model calls.
-        return
+        # Only delivered platform events can be observed; learning never sends a reply.
+        if self.learner: self.learner.observe(message)
+        if getattr(message, 'sweet_mentioned', False):
+            await self.answer(message, 'group', mentioned=True)
 
     async def answer(self, message, kind, mentioned=False):
         if kind == 'group' and not mentioned:
@@ -245,7 +255,7 @@ def configure_logging():
             if record.levelno < logging.INFO:
                 return False
             text = record.getMessage()
-            for key in ('QQ_APP_SECRET', 'KB_READ_TOKEN'):
+            for key in ('QQ_APP_SECRET', 'KB_READ_TOKEN', 'KB_LEARN_TOKEN'):
                 value = os.environ.get(key)
                 if value:
                     text = text.replace(value, '[redacted]')

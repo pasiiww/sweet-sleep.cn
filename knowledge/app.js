@@ -33,13 +33,14 @@ $('login-form').addEventListener('submit', async event => {
   });
 });
 $('logout').onclick = logout;
-const views = { qa: ['QA 知识库', '整理常见问题，让每次回答都有合适的参考。'], traces: ['对话 Trace', '从问题到回复，查看每次检索与模型调用的过程。'], aliases: ['实体别名', '统一名称，让不同称呼都能找到同一份知识。'], documents: ['知识库', '把分散的信息，变成有据可依的回答。'], retrieve: ['召回测试', '在连接大模型之前，先看看知识是否被准确找到。'], integration: ['API 接入', '把你的知识，接入任意大模型工作流。'], settings: ['模型设置', '为你的知识库，连接语义理解能力。'] };
+const views = { learning:['持续学习','将管理员确认的信息，沉淀为可持续更新的知识。'], qa: ['QA 知识库', '整理常见问题，让每次回答都有合适的参考。'], traces: ['对话 Trace', '从问题到回复，查看每次检索与模型调用的过程。'], aliases: ['实体别名', '统一名称，让不同称呼都能找到同一份知识。'], documents: ['知识库', '把分散的信息，变成有据可依的回答。'], retrieve: ['召回测试', '在连接大模型之前，先看看知识是否被准确找到。'], integration: ['API 接入', '把你的知识，接入任意大模型工作流。'], settings: ['模型设置', '为你的知识库，连接语义理解能力。'] };
 document.querySelectorAll('[data-view]').forEach(button => button.onclick = () => {
   const view = button.dataset.view;
   document.querySelectorAll('.view').forEach(el => el.hidden = el.id !== 'view-' + view);
   document.querySelectorAll('[data-view]').forEach(el => el.classList.toggle('active', el === button));
   $('page-title').textContent = $('breadcrumb').textContent = views[view][0]; $('page-subtitle').textContent = views[view][1];
   $('create-base').hidden = view !== 'documents';
+  if (view === 'learning') loadLearning().catch(error=>toast(error.message));
   if (view === 'traces') loadTraces(true).catch(error => toast(error.message));
 });
 async function refresh() {
@@ -49,7 +50,7 @@ async function refresh() {
   $('stats').innerHTML = [ ['知识库', items.length, '▤'], ['文档总数', items.reduce((s, b) => s + b.document_count, 0), '▧'], ['可检索分段', items.reduce((s, b) => s + b.chunk_count, 0), '⌘'] ].map(([title, count, icon]) => `<div class="stat"><div><small>${title}</small><strong>${count.toLocaleString()}</strong></div><div class="stat-icon">${icon}</div></div>`).join('');
   $('base-list').innerHTML = items.map(b => `<button class="base-card ${b.id === state.selected ? 'selected' : ''}" data-base="${b.id}"><div class="base-card-top"><span class="base-icon">▤</span><span class="badge ${b.vector_count < b.chunk_count ? 'pending' : ''}">${b.chunk_count && b.vector_count === b.chunk_count ? '向量已就绪' : '关键词检索'}</span></div><h3>${esc(b.name)}</h3><p>${esc(b.description || '为大模型准备有来源的知识')}</p><div class="base-card-bottom"><span>${b.document_count} 份文档</span><span>${b.chunk_count} 个分段</span><span>${b.vector_count} 个向量</span></div></button>`).join('');
   $('no-base').hidden = items.length > 0; $('document-panel').hidden = !state.selected;
-  for (const id of ['retrieve-base', 'api-base', 'answer-base', 'aliases-base', 'qa-base']) {
+  for (const id of ['retrieve-base', 'api-base', 'answer-base', 'aliases-base', 'qa-base', 'learning-base']) {
     const previous = $(id).value;
     $(id).innerHTML = items.map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join('');
     $(id).value = items.some(b => b.id === previous) ? previous : state.selected;
@@ -358,7 +359,7 @@ let qaRows = [], qaKb = '', qaOffset = 0, qaTotal = 0, qaRequest = 0, qaSequence
 const qaValue = row => ({question:row.question.trim(),answer:row.answer.trim()});
 const qaDirty = row => !row.original || row.question.trim() !== row.original.question || row.answer.trim() !== row.original.answer;
 function renderQAs() {
-  $('qa-rows').innerHTML = qaRows.map(row=>`<tr data-qa-row="${row.key}"><td><textarea data-field="question" aria-label="问题 Q ${row.key}" rows="4" maxlength="1000" placeholder="例如：凯伊的价格是多少？">${esc(row.question)}</textarea></td><td><textarea data-field="answer" aria-label="答案 A ${row.key}" rows="5" maxlength="10000" placeholder="填写已确认的参考答案">${esc(row.answer)}</textarea></td><td><span class="badge" data-qa-status></span><div class="alias-row-actions"><button class="row-button" data-qa-action="save">保存</button><button class="row-button" data-qa-action="reset">撤销</button><button class="row-button delete" data-qa-action="delete">删除</button></div></td></tr>`).join('');
+  $('qa-rows').innerHTML = qaRows.map(row=>`<tr data-qa-row="${row.key}"><td><textarea data-field="question" aria-label="问题 Q ${row.key}" rows="4" maxlength="1000" placeholder="例如：凯伊的价格是多少？">${esc(row.question)}</textarea></td><td><textarea data-field="answer" aria-label="答案 A ${row.key}" rows="5" maxlength="10000" placeholder="填写已确认的参考答案">${esc(row.answer)}</textarea></td><td><span class="badge" data-qa-status></span>${row.original?.updated_at?`<p class="hint">更新于 ${esc(new Date(row.original.updated_at).toLocaleString())}</p>`:''}<div class="alias-row-actions"><button class="row-button" data-qa-action="save">保存</button><button class="row-button" data-qa-action="reset">撤销</button><button class="row-button delete" data-qa-action="delete">删除</button></div></td></tr>`).join('');
   updateQAs();
 }
 function updateQAs() {
@@ -411,3 +412,44 @@ $('qa-rows').onclick=async event=>{
     else {const saved=await api(row.original?`qa/${row.original.id}`:`bases/${kb}/qa`,row.original?'PUT':'POST',{...value,...(row.original?{revision:row.original.revision}:{})});if(!row.original)qaTotal++;row.original=saved;row.key=String(saved.id);row.question=saved.question;row.answer=saved.answer;toast('QA 已保存，下次提问生效');}
   }catch(error){toast(error.message);}finally{qaSaving=false;renderQAs();}
 };
+
+let learningRows=[], learningDefault='', learningRequest=0;
+const learningTriggers={quoted_reply:'引用回复 · 单条触发',message_count:'累计消息触发',idle_timeout:'静默10分钟触发'};
+const learningStates={pending:'排队 / 等待重试',running:'学习中',completed:'已完成',error:'失败',cancelled:'已取消'};
+function renderLearningBindings(){
+  $('learning-bindings').innerHTML=learningRows.map((row,i)=>`<tr><td><select data-learning-field="qq" data-index="${i}" aria-label="管理员 QQ ${i+1}">${['1229837719','471718054'].map(qq=>`<option ${row.qq===qq?'selected':''}>${qq}</option>`).join('')}</select></td><td><input data-learning-field="group_id" data-index="${i}" aria-label="群 OpenID ${i+1}" maxlength="128" value="${esc(row.group_id)}"></td><td><input data-learning-field="member_id" data-index="${i}" aria-label="成员 OpenID ${i+1}" maxlength="128" value="${esc(row.member_id)}"></td><td><button type="button" data-remove-learning="${i}">删除行</button></td></tr>`).join('');
+}
+$('learning-bindings').oninput=event=>{const key=event.target.dataset.learningField;if(key)learningRows[Number(event.target.dataset.index)][key]=event.target.value;};
+$('learning-bindings').onclick=event=>{const b=event.target.closest('[data-remove-learning]');if(b){learningRows.splice(Number(b.dataset.removeLearning),1);renderLearningBindings();}};
+$('learning-add-binding').onclick=()=>{learningRows.push({qq:'1229837719',group_id:'',member_id:''});renderLearningBindings();};
+async function loadLearning(){
+  const kb=$('learning-base').value, generation=++learningRequest;
+  if(!kb){$('learning-status').textContent='请先创建知识库';return;}
+  const cfg=await api(`bases/${kb}/learning`);if(generation!==learningRequest)return;
+  $('learning-enabled').checked=cfg.enabled;$('learning-threshold').value=cfg.threshold;$('learning-prompt').value=cfg.prompt;learningDefault=cfg.default_prompt;
+  learningRows=cfg.bindings.length?cfg.bindings:['1229837719','471718054'].map(qq=>({qq,group_id:'',member_id:''}));renderLearningBindings();
+  $('learning-status').textContent=!cfg.ingestion_ready?'服务器尚未配置学习事件密钥':!cfg.bindings.length?'学习通道已就绪，填写 OpenID 并保存后开始累计消息':cfg.enabled?'学习已启用，配置下次消息生效':'学习已关闭';
+  await loadLearningJobs();
+}
+$('learning-base').onchange=()=>loadLearning().catch(error=>toast(error.message));
+$('learning-restore').onclick=()=>{$('learning-prompt').value=learningDefault;};
+$('learning-form').onsubmit=event=>{event.preventDefault();busy(event.submitter,async()=>{
+  const kb=$('learning-base').value;
+  await api(`bases/${kb}/learning`,'PUT',{enabled:$('learning-enabled').checked,threshold:Number($('learning-threshold').value),prompt:$('learning-prompt').value,bindings:learningRows.filter(r=>r.group_id.trim()||r.member_id.trim()).map(r=>({qq:r.qq,group_id:r.group_id.trim(),member_id:r.member_id.trim()}))});
+  await loadLearning();toast('学习配置已保存');
+});};
+async function loadLearningJobs(){
+  const kb=$('learning-base').value;if(!kb)return;
+  const result=await api(`learning/jobs?kb_id=${encodeURIComponent(kb)}`);if(kb!==$('learning-base').value)return;
+  $('learning-pending').textContent=`待累计管理员消息：${result.pending_messages} 条 · 最近7天，最多50个任务`;
+  $('learning-jobs').innerHTML=result.items.map(j=>`<tr><td>${esc(new Date(j.created*1000).toLocaleString())}<p class="hint">${esc(learningTriggers[j.trigger]||'')}</p></td><td>${esc(j.group_id)}</td><td>${esc(learningStates[j.status]||j.status)}${j.error?`<p class="hint">${esc(j.error)}</p>`:''}</td><td><button data-learning-job="${j.id}">查看详情</button>${j.status==='error'?`<button data-learning-retry="${j.id}">重试</button>`:''}</td></tr>`).join('')||'<tr><td colspan="4">暂无任务，绑定管理员并累计消息后会显示在这里。</td></tr>';
+}
+$('learning-refresh').onclick=()=>loadLearningJobs().catch(error=>toast(error.message));
+$('learning-close').onclick=()=>$('learning-dialog').close();
+$('learning-jobs').onclick=async event=>{try{
+ const retry=event.target.closest('[data-learning-retry]');if(retry){await api(`learning/jobs/${retry.dataset.learningRetry}/retry`,'POST',{});await loadLearningJobs();return;}
+ const b=event.target.closest('[data-learning-job]');if(!b)return;
+ const row=await api(`learning/jobs/${b.dataset.learningJob}`),d=row.details;
+ $('learning-detail').innerHTML=`<p>${esc(learningStates[row.status])} · 尝试 ${row.attempts} 次 · ${esc(row.error)}</p><p>Trace ID：${esc(row.id)} · ${esc(learningTriggers[d.trigger]||'')} · ${d.elapsed_ms||0} ms</p><h3>相关性判断</h3>${traceText(d.classification?JSON.stringify(d.classification,null,2):'尚未完成判断')}<h3>知识变更</h3>${(d.changes||[]).map(c=>`<details open><summary>${esc(c.action)} · QA ${c.qa_id} · ${esc(c.qq||'')}</summary>${c.before?`<h4>更新前</h4>${traceText(c.before.answer)}<p>原更新时间：${esc(c.before.updated_at)}</p>`:''}${c.after?`<h4>${esc(c.after.question)}</h4>${traceText(c.after.answer)}<p>更新时间：${esc(c.after.updated_at)}</p>`:''}${c.reason?traceText(c.reason):''}${c.proposed?traceText(JSON.stringify(c.proposed,null,2)):''}<h4>来源原话</h4>${traceText(c.quote||'')}<p>消息 ID：${esc(c.source_id)}</p></details>`).join('')||'<p>没有知识变更（闲聊、未执行或执行失败）。</p>'}<h3>聊天上下文</h3>${(d.context||[]).map(m=>`<h4>${esc(m.qq||'普通成员')} · ${esc(new Date(m.at*1000).toLocaleString())}${(d.batch_source_ids||[]).includes(m.message_id)?' · 本批来源':''}</h4>${traceText(m.content)}${m.reference&&(m.reference.quotes||[]).length?`<details open><summary>引用内容（仅用于理解回复对象）</summary>${(m.reference.quotes||[]).map(q=>traceText(q.content)).join('')}</details>`:''}`).join('')}<details><summary>每条发言前的10条其他成员消息 · 去重索引</summary>${traceText(JSON.stringify(d.context_by_source||{},null,2))}</details><details><summary>更新前的知识检索</summary>${traceText(JSON.stringify(d.retrievals||[],null,2))}</details><details><summary>模型输入 / 输出</summary>${traceText(JSON.stringify(d.model_calls||[],null,2))}</details>`;
+ $('learning-dialog').showModal();
+ }catch(error){toast(error.message);}};

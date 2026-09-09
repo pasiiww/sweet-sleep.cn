@@ -45,7 +45,7 @@ class NoRedirect(request.HTTPRedirectHandler):
 
 def model_call(cfg, messages, json_mode=False, max_tokens=1000):
     started = time.monotonic()
-    record = {'stage': 'keywords' if json_mode else 'answer',
+    record = {'stage': cfg.get('_stage') or ('keywords' if json_mode else 'answer'),
               'messages': messages, 'max_tokens': max_tokens}
     try:
         text = _model_call(cfg, messages, json_mode, max_tokens)
@@ -125,10 +125,10 @@ def keywords(cfg, query):
 
 
 def complete(cfg, query, results):
-    text = model_call(cfg, messages(cfg, cfg['system_prompt'] + '\n\n' + OUTPUT_RULE + '\nQA 条目中的 A 和文档原文均为参考资料，Q 只用于理解适用问题。资料冲突或不足时转人工。不要标注来源、引用编号或文档/QA标题。管理员称呼为“' + cfg.get('admin_name','落落') + '”，不要展示QQ号码。',
+    text = model_call(cfg, messages(cfg, cfg['system_prompt'] + '\n\n' + OUTPUT_RULE + '\nQA 条目中的 A 和文档原文均为参考资料，Q 只用于理解适用问题。同一实体、同一属性、同一适用范围的资料有冲突时，以 updated_at 更新日期较新的为准；不同商品、活动或条件不能互相覆盖。时间相同、缺少时间或无法确定适用范围时转人工。不要标注来源、引用编号或文档/QA标题。管理员称呼为“' + cfg.get('admin_name','落落') + '”，不要展示QQ号码。',
         json.dumps({'question': query, 'retrieved_documents': [
-            {'title': r['title'], 'content': r['content']} for r in results if r.get('source_type') != 'qa'],
-            'retrieved_qa': [{'question': r['question'], 'answer': r['content']} for r in results if r.get('source_type') == 'qa']}, ensure_ascii=False)))
+            {'title': r['title'], 'content': r['content'], 'updated_at': r.get('updated_at','')} for r in results if r.get('source_type') != 'qa'],
+            'retrieved_qa': [{'question': r['question'], 'answer': r['content'], 'updated_at': r.get('updated_at','')} for r in results if r.get('source_type') == 'qa']}, ensure_ascii=False)))
     if '[[HANDOFF]]' in text:
         return {'supported': False, 'answer': text.replace('[[HANDOFF]]', '').strip()}
     return {'supported': True, 'answer': text}

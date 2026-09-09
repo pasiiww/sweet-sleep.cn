@@ -21,11 +21,14 @@ import answers
 import entities
 import traces
 import qa
+import learning
+import sys
 
 DATA = Path(os.environ.get('KB_DATA_DIR', '/var/lib/sweet-knowledge'))
 STATIC = Path(os.environ.get('KB_STATIC_DIR', Path(__file__).resolve().parents[2] / 'knowledge'))
 ADMIN_TOKEN = os.environ.get('KB_ADMIN_TOKEN', '')
 READ_TOKEN = os.environ.get('KB_READ_TOKEN', '')
+LEARN_TOKEN = os.environ.get('KB_LEARN_TOKEN', '')
 WRITE_LOCK = threading.RLock()
 VECTOR_LOCK = threading.Lock()
 ANSWER_SLOTS = threading.BoundedSemaphore(4)
@@ -87,10 +90,11 @@ def initialize():
         c.execute('INSERT OR IGNORE INTO app_settings VALUES(?,?)', ('answer', json.dumps(answers.defaults())))
         traces.initialize(c)
         qa.initialize(c)
+        learning.initialize(c)
 
 
 def now():
-    return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+    return learning.utc(time.time())
 
 
 def string(data, key, limit, required=False):
@@ -366,10 +370,10 @@ def retrieve(data):
                 chunk_id = 'qa:' + str(item_id)
                 result = {'chunk_id':chunk_id,'ordinal':0,'content':row['answer'][:2000],
                           'question':row['question'],'title':row['question'],'document_id':chunk_id,
-                          'qa_id':item_id,'source':'','source_type':'qa','truncated':len(row['answer'])>2000}
+                          'qa_id':item_id,'updated_at':row['updated_at'],'source':'','source_type':'qa','truncated':len(row['answer'])>2000}
             else:
                 chunk_id = item_id
-                row = c.execute('SELECT c.id AS chunk_id,c.ordinal,c.content,d.id AS document_id,d.title,d.source FROM chunks c JOIN documents d ON d.id=c.doc_id WHERE c.id=? AND c.kb_id=?', (chunk_id, kb_id)).fetchone()
+                row = c.execute('SELECT c.id AS chunk_id,c.ordinal,c.content,d.id AS document_id,d.title,d.source,d.updated_at FROM chunks c JOIN documents d ON d.id=c.doc_id WHERE c.id=? AND c.kb_id=?', (chunk_id, kb_id)).fetchone()
                 if not row: continue
                 result = dict(row) | {'source_type':'document'}
             prefix = f'[{len(results) + 1}] {result["title"]} (document={result["document_id"]}, chunk={chunk_id})\n'
@@ -445,7 +449,7 @@ def respond(data):
     meta['origin'] = origin
     with WRITE_LOCK, db() as c:
         base(c, kb_id)
-        secrets_to_hide = [ADMIN_TOKEN, READ_TOKEN, answer_config(c)['api_key'], config(c)['api_key']]
+        secrets_to_hide = [ADMIN_TOKEN, READ_TOKEN, LEARN_TOKEN, answer_config(c)['api_key'], config(c)['api_key']]
         trace_id, receipt = traces.create(c, kb_id, traces.redact(query, secrets_to_hide), meta)
     details, started = {'model_calls': [], 'retrievals': []}, time.monotonic()
     try:
@@ -469,6 +473,7 @@ def trace_cleanup():
         try:
             with WRITE_LOCK, db() as c:
                 traces.cleanup(c)
+                learning.cleanup(c)
         except Exception as exc:
             print('Trace cleanup failed: ' + type(exc).__name__, flush=True)
 
@@ -572,13 +577,40 @@ def api(method, path, data, params):
         v = embed(['连接测试'], cfg)
         return {'dimensions': len(v[0]), 'ok': True}
     with WRITE_LOCK, db() as c:
+        if segments == ['learning', 'events'] and method == 'POST':
+            kb_id = string(data, 'kb_id', 80, True)
+            base(c, kb_id)
+            try: return learning.ingest(c, kb_id, traces.redact(data,[ADMIN_TOKEN,READ_TOKEN,LEARN_TOKEN,answer_config(c)['api_key'],config(c)['api_key']]))
+            except ValueError as exc: fail(400, str(exc))
+        if len(segments) == 3 and segments[0] == 'bases' and segments[2] == 'learning':
+            kb_id = base(c, segments[1])['id']
+            if method == 'PUT':
+                try: learning.save_config(c, kb_id, data)
+                except ValueError as exc: fail(400,str(exc))
+            elif method != 'GET': fail(405,'不支持此操作')
+            return learning.config(c,kb_id) | {'default_prompt':learning.PROMPT,'ingestion_ready':bool(LEARN_TOKEN)}
+        if segments == ['learning', 'jobs'] and method == 'GET':
+            kb_id = params.get('kb_id',[''])[0]
+            base(c,kb_id)
+            return {'items':[dict(r) for r in c.execute("SELECT id,created,status,attempts,error,group_id,json_extract(details,'$.trigger') AS trigger FROM learning_jobs WHERE kb_id=? AND created>? ORDER BY created DESC LIMIT 50",(kb_id,time.time()-7*86400))],
+                    'pending_messages':c.execute("SELECT count(*) FROM learning_events WHERE kb_id=? AND qq<>'' AND job_id IS NULL AND at>?",(kb_id,time.time()-1800)).fetchone()[0]}
+        if len(segments) == 3 and segments[:2] == ['learning','jobs'] and method == 'GET':
+            row=c.execute('SELECT * FROM learning_jobs WHERE id=? AND created>?',(segments[2],time.time()-7*86400)).fetchone()
+            if not row: fail(404,'学习任务不存在')
+            return dict(row) | {'details':json.loads(row['details'])}
+        if len(segments) == 4 and segments[:2] == ['learning','jobs'] and segments[3]=='retry' and method=='POST':
+            row=c.execute("SELECT * FROM learning_jobs WHERE id=? AND status='error'",(segments[2],)).fetchone()
+            if not row: fail(409,'只有失败的学习任务可以重试')
+            if json.loads(row['details'])['settings'] != learning.config(c,row['kb_id']): fail(409,'学习配置已变更，不能重试旧任务')
+            c.execute("UPDATE learning_jobs SET status='pending',attempts=0,next_try=0,error='' WHERE id=?",(segments[2],))
+            return {'ok':True}
         if segments == ['trace-delivery'] and method == 'POST':
             status = string(data, 'status', 20, True)
             if status not in ('delivered', 'failed'):
                 fail(400, 'status 必须为 delivered 或 failed')
             try:
                 return traces.delivery(c, string(data, 'trace_id', 64, True), string(data, 'receipt', 100, True), status,
-                                       traces.redact(string(data, 'content', 3000), [ADMIN_TOKEN, READ_TOKEN, answer_config(c)['api_key'], config(c)['api_key']]), string(data, 'error', 80))
+                                       traces.redact(string(data, 'content', 3000), [ADMIN_TOKEN, READ_TOKEN, LEARN_TOKEN, answer_config(c)['api_key'], config(c)['api_key']]), string(data, 'error', 80))
             except ValueError as exc:
                 fail(403, str(exc))
         if segments and segments[0] == 'traces' and method == 'GET':
@@ -804,9 +836,12 @@ class Handler(BaseHTTPRequestHandler):
             supplied = self.headers.get('Authorization', '').removeprefix('Bearer ')
             admin = bool(ADMIN_TOKEN) and hmac.compare_digest(supplied.encode(), ADMIN_TOKEN.encode())
             reader = bool(READ_TOKEN) and hmac.compare_digest(supplied.encode(), READ_TOKEN.encode())
-            if not admin and not reader:
+            learner = bool(LEARN_TOKEN) and hmac.compare_digest(supplied.encode(), LEARN_TOKEN.encode())
+            if not admin and not reader and not learner:
                 fail(401, '请输入有效的访问密钥')
-            if not admin and not (parsed.path in ('/knowledge/api/retrieve', '/knowledge/api/answer', '/knowledge/api/trace-delivery') and self.command == 'POST'):
+            if learner and not admin and not (parsed.path == '/knowledge/api/learning/events' and self.command == 'POST'):
+                fail(403, '学习密钥仅可提交聊天事件')
+            if not admin and not learner and not (parsed.path in ('/knowledge/api/retrieve', '/knowledge/api/answer', '/knowledge/api/trace-delivery') and self.command == 'POST'):
                 fail(403, '召回密钥仅可调用检索接口')
             data = {}
             if self.command in ('POST', 'PUT') or (self.command == 'DELETE' and self.headers.get('Content-Length', '0') != '0'):
@@ -840,6 +875,7 @@ if __name__ == '__main__':
     os.umask(0o077)
     initialize()
     threading.Thread(target=trace_cleanup, daemon=True).start()
+    threading.Thread(target=learning.worker, args=(sys.modules[__name__],), daemon=True).start()
     port = int(os.environ.get('KB_PORT', '8765'))
     print(f'Knowledge listening on 127.0.0.1:{port}', flush=True)
     ThreadingHTTPServer(('127.0.0.1', port), Handler).serve_forever()
