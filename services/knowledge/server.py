@@ -582,13 +582,21 @@ def respond_pipeline(data, details):
                 return fallback(str(exc))
             # A planning failure must not skip the independent answer stage.
             terms = entities.fallback_groups(catalog, query, history) or [catalog.normalize(query)[:2000]]
-        result = search(terms)
-        if not result['results']:
+        if not terms:
+            cfg=cfg|{'retrieval_skipped':True}
+            details['retrieval_skipped']='pe1_empty_query_groups'
+            result={'results':[]}
+        else:
+            result = search(terms)
+        if terms and not result['results']:
             retry_cfg=cfg|{'empty_retrieval':{'question':query,'failed_query_groups':terms,'result_count':0},'_stage':'keywords_retry'}
             try:
                 retry_terms=answers.keywords(retry_cfg,query)
                 terms=answers.normalize_query_groups([[catalog.normalize(t) for t in group] for group in retry_terms])
-                result=search(terms)
+                if terms:result=search(terms)
+                else:
+                    cfg=cfg|{'retrieval_skipped':True}
+                    details['retrieval_skipped']='pe1_retry_empty_query_groups'
             except answers.ModelError as exc:details['retry_error']=str(exc)
             except ValueError:details['retry_error']='invalid_keywords'
         model = answers.complete(cfg, query, result['results'])
@@ -601,6 +609,8 @@ def respond_pipeline(data, details):
         return finish({'mode': 'model', 'reason': 'ok', 'handoff': False, 'mention_openids': [],
                        'answer': answers.plain(model['answer']), 'sticker_name':model.get('sticker_name'), 'results': result['results']})
     except answers.ModelError as exc:
+        if cfg.get('retrieval_skipped'):
+            return finish({'mode':'fallback','reason':str(exc),'handoff':False,'mention_openids':[],'answer':'我在呀～你想了解什么呢？','results':[]})
         return fallback(str(exc), result)
     finally:
         ANSWER_SLOTS.release()

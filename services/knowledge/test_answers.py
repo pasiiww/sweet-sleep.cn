@@ -181,8 +181,25 @@ class AnswerTests(unittest.TestCase):
         with self.assertRaises(app.Problem):
             self.configure(system_prompt='')
 
+    def test_empty_plan_skips_original_search_and_retry(self):
+        self.configure()
+        with patch.object(answers,'keywords',return_value=[]) as planner, patch.object(app,'search_terms') as search, patch.object(answers,'complete',return_value={'supported':True,'answer':'我在呀，你想问什么？'}) as complete:
+            result=self.ask('你知道吗')
+            self.assertEqual(result['search_terms'],[])
+            self.assertEqual(result['results'],[])
+            self.assertFalse(result['handoff'])
+            search.assert_not_called();planner.assert_called_once()
+            self.assertTrue(complete.call_args.args[0]['retrieval_skipped'])
+        with patch.object(answers,'keywords',return_value=[]),patch.object(app,'search_terms') as search,patch.object(answers,'complete',side_effect=answers.ModelError('network_error')):
+            result=self.ask('你知道吗');self.assertFalse(result['handoff']);search.assert_not_called()
+
+
 
 class KeywordTests(unittest.TestCase):
+    def test_empty_plan_is_valid(self):
+        with patch.object(answers,'model_call',return_value='{"query_groups":[]}'):
+            self.assertEqual(answers.keywords(answers.defaults(),'你知道吗'),[])
+
     def test_keyword_count_uniqueness_and_json_mode(self):
         cfg = answers.defaults()
         with patch.object(answers, 'model_call', return_value='{"query_groups":[["凯伊","价格"],["kei","定金"],["价格","凯伊"],["KEI","定金"]]}') as model:
