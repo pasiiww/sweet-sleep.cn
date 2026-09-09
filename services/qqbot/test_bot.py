@@ -28,7 +28,7 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
     async def test_private_message_retrieval(self):
         message = self.message('/检索 机器人怎么使用')
         await self.bot.on_c2c_message_create(message)
-        self.retriever.search.assert_awaited_once_with('机器人怎么使用', group_id='', history=[])
+        self.retriever.search.assert_awaited_once_with('机器人怎么使用', group_id='', history=[], trace_meta={'origin':'qq_private','user_id':'','session_id':''})
         kwargs = message.reply.call_args.kwargs
         self.assertIn('机器人返回原文', kwargs['content'])
         self.assertIn('来源：演示', kwargs['content'])
@@ -37,7 +37,7 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
     async def test_group_mention_and_dedup(self):
         message = self.message('<@!1905586446> /search 机器人')
         await asyncio.gather(self.bot.on_group_at_message_create(message), self.bot.on_group_at_message_create(message))
-        self.retriever.search.assert_awaited_once_with('机器人', group_id='', history=[])
+        self.retriever.search.assert_awaited_once_with('机器人', group_id='', history=[], trace_meta={'origin':'qq_group','user_id':'','session_id':''})
         self.assertEqual(message.reply.await_count, 1)
 
     async def test_real_sdk_reply_routing(self):
@@ -160,6 +160,23 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
         self.assertLessEqual(len(history), 20)
         self.assertLessEqual(sum(len(m['content']) for m in history), 12000)
         self.assertEqual(history[-2]['content'], '11')
+
+    async def test_trace_delivery_and_metadata(self):
+        self.retriever.report_delivery = AsyncMock()
+        trace = {'answer':'定金20元。','trace_id':'trace-1','trace_receipt':'receipt-secret'}
+        self.retriever.search.return_value = trace
+        msg = self.identified('定金呢', 'delivery-trace')
+        await self.bot.answer(msg, 'group', mentioned=True)
+        self.retriever.report_delivery.assert_awaited_once_with(trace,'delivered','定金20元。','')
+        meta = self.retriever.search.call_args.kwargs['trace_meta']
+        self.assertEqual(meta['origin'],'qq_group')
+        self.assertEqual(meta['user_id'],'user1')
+        self.assertEqual(meta['session_id'],conversation_key(msg,'group','test'))
+        self.retriever.report_delivery.reset_mock()
+        msg = self.identified('失败', 'failed-trace')
+        msg.reply.side_effect = RuntimeError('send failed')
+        await self.bot.answer(msg,'c2c')
+        self.retriever.report_delivery.assert_awaited_once_with(trace,'failed','','RuntimeError')
 
     async def test_model_text_and_trusted_mentions(self):
         data = {'answer': '请管理员确认 <qqbot-at-user id="evil-user" />', 'handoff': True,

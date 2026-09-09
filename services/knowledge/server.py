@@ -19,6 +19,7 @@ from urllib import request, error
 from urllib.parse import urlsplit, parse_qs
 import answers
 import entities
+import traces
 
 DATA = Path(os.environ.get('KB_DATA_DIR', '/var/lib/sweet-knowledge'))
 STATIC = Path(os.environ.get('KB_STATIC_DIR', Path(__file__).resolve().parents[2] / 'knowledge'))
@@ -83,6 +84,7 @@ def initialize():
         c.execute('INSERT OR IGNORE INTO settings VALUES(1, ?)', (json.dumps({
             'base_url': '', 'model': '', 'api_key': '', 'revision': secrets.token_hex(8)}),))
         c.execute('INSERT OR IGNORE INTO app_settings VALUES(?,?)', ('answer', json.dumps(answers.defaults())))
+        traces.initialize(c)
 
 
 def now():
@@ -382,11 +384,12 @@ def answer_status(cfg, mode, reason):
 
 def search_terms(kb_id, terms):
     # Fuse rankings, deduplicate chunk IDs and identical text, then apply a shared budget.
-    candidates = {}
+    candidates, searches = {}, []
     for term in terms:
         search = {'query_groups': [term]} if isinstance(term, list) else {'query': term}
         result = retrieve({'kb_id': kb_id, **search, 'mode': 'keyword',
                            'top_k': 5, 'max_context_chars': 12000})
+        searches.append({'query': term, 'elapsed_ms': result.get('elapsed_ms', 0), 'hits': [{'chunk_id': row['chunk_id'], 'title': row['title'], 'score': row.get('score')} for row in result['results']]})
         for rank, row in enumerate(result['results'], 1):
             key = row['chunk_id']
             if key not in candidates:
@@ -408,10 +411,48 @@ def search_terms(kb_id, terms):
         selected.append(row)
         if len(selected) >= 8:
             break
-    return {'results': selected}
+    return {'results': selected, 'searches': searches}
 
 
 def respond(data):
+    query = string(data, 'query', 2000, True)
+    kb_id = string(data, 'kb_id', 80, True)
+    origin = string(data, 'origin', 20) or 'api'
+    if origin not in ('api', 'preview', 'qq_group', 'qq_private'):
+        fail(400, 'origin 格式不正确')
+    meta = {key: string(data, key, 128) for key in ('user_id', 'group_id', 'session_id')}
+    meta['origin'] = origin
+    with WRITE_LOCK, db() as c:
+        base(c, kb_id)
+        secrets_to_hide = [ADMIN_TOKEN, READ_TOKEN, answer_config(c)['api_key'], config(c)['api_key']]
+        trace_id, receipt = traces.create(c, kb_id, traces.redact(query, secrets_to_hide), meta)
+    details, started = {'model_calls': [], 'retrievals': []}, time.monotonic()
+    try:
+        response = respond_pipeline(data, details)
+    except Exception as exc:
+        details['error_type'] = type(exc).__name__
+        with WRITE_LOCK, db() as c:
+            traces.finish(c, trace_id, {'mode': 'error', 'reason': 'internal_error'}, traces.redact(details, secrets_to_hide), round((time.monotonic() - started) * 1000))
+        raise
+    details['search_terms'] = response.get('search_terms', [])
+    details['matched_aliases'] = response.get('matched_aliases', [])
+    details['alias_context'] = response.get('alias_context', '')
+    with WRITE_LOCK, db() as c:
+        traces.finish(c, trace_id, traces.redact(response, secrets_to_hide), traces.redact(details, secrets_to_hide), round((time.monotonic() - started) * 1000))
+    return response | {'trace_id': trace_id, 'trace_receipt': receipt if origin.startswith('qq_') else ''}
+
+
+def trace_cleanup():
+    while True:
+        time.sleep(3600)
+        try:
+            with WRITE_LOCK, db() as c:
+                traces.cleanup(c)
+        except Exception as exc:
+            print('Trace cleanup failed: ' + type(exc).__name__, flush=True)
+
+
+def respond_pipeline(data, details):
     query = string(data, 'query', 2000, True)
     group_id = string(data, 'group_id', 128)
     kb_id = string(data, 'kb_id', 80, True)
@@ -424,7 +465,13 @@ def respond(data):
     except ValueError as exc:
         fail(400, str(exc))
     hints = catalog.hints([m['content'] for m in history] + [query])
-    cfg = cfg | {'conversation_history': history, 'alias_context': entities.context(hints)}
+    cfg = cfg | {'conversation_history': history, 'alias_context': entities.context(hints), '_trace': details}
+    details.update(history=history, model=cfg['model'], system_prompt=cfg['system_prompt'], keyword_prompt=answers.KEYWORD_PROMPT)
+    def search(terms):
+        started = time.monotonic()
+        result = search_terms(kb_id, terms)
+        details['retrievals'].append({'terms': terms, 'elapsed_ms': round((time.monotonic() - started) * 1000), **result})
+        return result
     terms = [catalog.normalize(query)[:2000]]
     def finish(response):
         response['alias_context'] = cfg['alias_context']
@@ -441,7 +488,7 @@ def respond(data):
             if not groups and history and entities.is_followup(query):
                 return finish(answers.handoff(cfg, group_id, 'insufficient_evidence'))
             terms = groups or [catalog.normalize(query)[:2000]]
-            result = search_terms(kb_id, terms)
+            result = search(terms)
         if not result['results']:
             return finish(answers.handoff(cfg, group_id, 'no_results'))
         return finish(answers.fallback(result, reason))
@@ -456,7 +503,7 @@ def respond(data):
             terms = answers.normalize_query_groups([[catalog.normalize(term) for term in group] for group in terms])
         except ValueError:
             raise answers.ModelError('invalid_keywords') from None
-        result = search_terms(kb_id, terms)
+        result = search(terms)
         if not result['results']:
             return finish(answers.handoff(cfg, group_id, 'no_results'))
         model = answers.complete(cfg, query, result['results'])
@@ -496,6 +543,29 @@ def api(method, path, data, params):
         v = embed(['连接测试'], cfg)
         return {'dimensions': len(v[0]), 'ok': True}
     with WRITE_LOCK, db() as c:
+        if segments == ['trace-delivery'] and method == 'POST':
+            status = string(data, 'status', 20, True)
+            if status not in ('delivered', 'failed'):
+                fail(400, 'status 必须为 delivered 或 failed')
+            try:
+                return traces.delivery(c, string(data, 'trace_id', 64, True), string(data, 'receipt', 100, True), status,
+                                       traces.redact(string(data, 'content', 3000), [ADMIN_TOKEN, READ_TOKEN, answer_config(c)['api_key'], config(c)['api_key']]), string(data, 'error', 80))
+            except ValueError as exc:
+                fail(403, str(exc))
+        if segments and segments[0] == 'traces' and method == 'GET':
+            filters = {key: params.get(key, [''])[0][:200] for key in ('kb_id','origin','mode','user_id','group_id','session_id','q')}
+            try:
+                filters['offset'] = max(0, min(1000000, int(params.get('offset', ['0'])[0])))
+                for key in ('start', 'end'):
+                    if params.get(key, [''])[0]:
+                        value = float(params[key][0])
+                        if not math.isfinite(value): raise ValueError()
+                        filters[key] = value
+            except ValueError:
+                fail(400, '时间或分页参数不正确')
+            result = traces.query(c, filters, segments[1] if len(segments) == 2 else None)
+            if result is None: fail(404, '记录不存在或已超过7天')
+            return result
         if segments == ['answer-settings']:
             cfg = answer_config(c)
             if method == 'PUT':
@@ -670,7 +740,7 @@ class Handler(BaseHTTPRequestHandler):
             reader = bool(READ_TOKEN) and hmac.compare_digest(supplied.encode(), READ_TOKEN.encode())
             if not admin and not reader:
                 fail(401, '请输入有效的访问密钥')
-            if not admin and not (parsed.path in ('/knowledge/api/retrieve', '/knowledge/api/answer') and self.command == 'POST'):
+            if not admin and not (parsed.path in ('/knowledge/api/retrieve', '/knowledge/api/answer', '/knowledge/api/trace-delivery') and self.command == 'POST'):
                 fail(403, '召回密钥仅可调用检索接口')
             data = {}
             if self.command in ('POST', 'PUT'):
@@ -703,6 +773,7 @@ if __name__ == '__main__':
         raise SystemExit('Set distinct KB_ADMIN_TOKEN and KB_READ_TOKEN (at least 24 characters each)')
     os.umask(0o077)
     initialize()
+    threading.Thread(target=trace_cleanup, daemon=True).start()
     port = int(os.environ.get('KB_PORT', '8765'))
     print(f'Knowledge listening on 127.0.0.1:{port}', flush=True)
     ThreadingHTTPServer(('127.0.0.1', port), Handler).serve_forever()

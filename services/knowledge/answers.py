@@ -1,6 +1,7 @@
 """DeepSeek grounded-answer policy. Credentials stay inside the knowledge service."""
 import json
 import re
+import time
 from urllib import request, error
 
 DEFAULT_PROMPT = '''你是午觉糖水铺的客服机器人。请使用亲切、简洁、自然的中文回答用户。
@@ -43,6 +44,24 @@ class NoRedirect(request.HTTPRedirectHandler):
 
 
 def model_call(cfg, messages, json_mode=False, max_tokens=1000):
+    started = time.monotonic()
+    record = {'stage': 'keywords' if json_mode else 'answer'}
+    try:
+        text = _model_call(cfg, messages, json_mode, max_tokens)
+        # Never include HTTP headers, upstream error bodies or credentials.
+        output = text.replace(cfg['api_key'], '[redacted]') if cfg.get('api_key') else text
+        record.update(output=output[:4000], truncated=len(output) > 4000)
+        return text
+    except ModelError as exc:
+        record['error'] = str(exc)
+        raise
+    finally:
+        record['elapsed_ms'] = round((time.monotonic() - started) * 1000)
+        if '_trace' in cfg:
+            cfg['_trace']['model_calls'].append(record)
+
+
+def _model_call(cfg, messages, json_mode=False, max_tokens=1000):
     payload = {'model': cfg['model'], 'thinking': {'type': 'disabled'},
                'max_tokens': max_tokens, 'stream': False, 'messages': messages}
     if json_mode:

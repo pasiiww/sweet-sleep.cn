@@ -115,13 +115,28 @@ class Retriever:
         self.url = url.removesuffix('/retrieve') + '/answer' if url.endswith('/retrieve') else url
         self.token, self.kb_id = token, kb_id
 
-    async def search(self, query, group_id='', history=None):
+    async def search(self, query, group_id='', history=None, trace_meta=None):
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=55)) as session:
             async with session.post(self.url, headers={'Authorization': 'Bearer ' + self.token},
-                                    json={'kb_id': self.kb_id, 'query': query, 'group_id': group_id, 'history': history or []}) as response:
+                                    json={'kb_id': self.kb_id, 'query': query, 'group_id': group_id, 'history': history or [], **(trace_meta or {})}) as response:
                 if response.status != 200:
                     raise RuntimeError(f'Knowledge HTTP {response.status}')
                 return await response.json()
+
+
+    async def report_delivery(self, trace, status, content, error=''):
+        if not trace.get('trace_id') or not trace.get('trace_receipt'):
+            return
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
+                async with session.post(self.url.rsplit('/', 1)[0] + '/trace-delivery',
+                    headers={'Authorization': 'Bearer ' + self.token},
+                    json={'trace_id': trace['trace_id'], 'receipt': trace['trace_receipt'], 'status': status,
+                          'content': content[:3000], 'error': error[:80]}) as response:
+                    if response.status != 200:
+                        LOG.warning('TRACE_REPORT_FAILED status=%s', response.status)
+        except Exception as exc:
+            LOG.warning('TRACE_REPORT_FAILED error=%s', type(exc).__name__)
 
 
 class KnowledgeBot(botpy.Client):
@@ -170,6 +185,7 @@ class KnowledgeBot(botpy.Client):
     async def _answer(self, message, kind, session):
         query = normalize(message.content)
         remember = False
+        trace, delivery, sent, delivery_error = None, 'failed', '', ''
         try:
             if not query or query.lower() in ('帮助', '/帮助', '/help', 'help', '/start'):
                 reply = HELP
@@ -188,23 +204,35 @@ class KnowledgeBot(botpy.Client):
             else:
                 async with self.capacity:
                     group_id = getattr(message, 'group_openid', '') if kind == 'group' else ''
-                    reply = format_reply(await self.retriever.search(query, group_id=group_id, history=self.seen.history(session)), kind)
+                    author = getattr(message, 'author', None)
+                    meta = {'origin': 'qq_group' if kind == 'group' else 'qq_private',
+                            'user_id': getattr(author, 'member_openid' if kind == 'group' else 'user_openid', ''), 'session_id': session}
+                    trace = await self.retriever.search(query, group_id=group_id, history=self.seen.history(session), trace_meta=meta)
+                    reply = format_reply(trace, kind)
                     remember = True
             response = await message.reply(content=reply, msg_type=0, msg_seq=1)
             if not response:
                 raise RuntimeError('QQ empty response')
+            delivery, sent = 'delivered', reply
             if remember:
                 self.seen.remember(session, query, reply)
             LOG.info('REPLY_OK kind=%s chars=%s', kind, len(reply))
         except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError) as exc:
+            delivery_error = type(exc).__name__
             LOG.error('REQUEST_FAILED kind=%s error=%s', kind, type(exc).__name__)
             # Same msg_seq prevents duplicate delivery if the first reply actually arrived.
             try:
-                await message.reply(content='检索服务暂时不可用，请稍后重新发送问题。', msg_type=0, msg_seq=1)
+                fallback_reply = '检索服务暂时不可用，请稍后重新发送问题。'
+                fallback_result = await message.reply(content=fallback_reply, msg_type=0, msg_seq=1)
+                if fallback_result: delivery, sent = 'delivered', fallback_reply
             except Exception as send_error:
                 LOG.error('REPLY_FAILED error=%s', type(send_error).__name__)
         except Exception as exc:
+            delivery_error = type(exc).__name__
             LOG.error('REPLY_FAILED kind=%s error=%s', kind, type(exc).__name__)
+        finally:
+            if trace and trace.get('trace_id'):
+                await self.retriever.report_delivery(trace, delivery, sent, delivery_error)
 
 
 def configure_logging():

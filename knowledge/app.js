@@ -33,13 +33,14 @@ $('login-form').addEventListener('submit', async event => {
   });
 });
 $('logout').onclick = logout;
-const views = { aliases: ['实体别名', '统一名称，让不同称呼都能找到同一份知识。'], documents: ['知识库', '把分散的信息，变成有据可依的回答。'], retrieve: ['召回测试', '在连接大模型之前，先看看知识是否被准确找到。'], integration: ['API 接入', '把你的知识，接入任意大模型工作流。'], settings: ['模型设置', '为你的知识库，连接语义理解能力。'] };
+const views = { traces: ['对话 Trace', '从问题到回复，查看每次检索与模型调用的过程。'], aliases: ['实体别名', '统一名称，让不同称呼都能找到同一份知识。'], documents: ['知识库', '把分散的信息，变成有据可依的回答。'], retrieve: ['召回测试', '在连接大模型之前，先看看知识是否被准确找到。'], integration: ['API 接入', '把你的知识，接入任意大模型工作流。'], settings: ['模型设置', '为你的知识库，连接语义理解能力。'] };
 document.querySelectorAll('[data-view]').forEach(button => button.onclick = () => {
   const view = button.dataset.view;
   document.querySelectorAll('.view').forEach(el => el.hidden = el.id !== 'view-' + view);
   document.querySelectorAll('[data-view]').forEach(el => el.classList.toggle('active', el === button));
   $('page-title').textContent = $('breadcrumb').textContent = views[view][0]; $('page-subtitle').textContent = views[view][1];
   $('create-base').hidden = view !== 'documents';
+  if (view === 'traces') loadTraces(true).catch(error => toast(error.message));
 });
 async function refresh() {
   const { items } = await api('bases'); state.bases = items;
@@ -53,6 +54,9 @@ async function refresh() {
     $(id).innerHTML = items.map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join('');
     $(id).value = items.some(b => b.id === previous) ? previous : state.selected;
   }
+  const traceBase = $('trace-base').value;
+  $('trace-base').innerHTML = '<option value="">全部知识库</option>' + items.map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join('');
+  $('trace-base').value = items.some(b => b.id === traceBase) ? traceBase : '';
   updateExample();
   await loadAliases();
   if (state.selected) {
@@ -215,9 +219,9 @@ $('answer-preview-form').onsubmit = event => { event.preventDefault(); busy(even
   $('answer-preview').textContent = '正在检索并生成回复…';
   try {
     const kb = $('answer-base').value, query = $('answer-query').value;
-    const result = await api('answer', 'POST', {kb_id: kb, query, history: previewHistory(kb)});
+    const result = await api('answer', 'POST', {kb_id: kb, query, origin: 'preview', history: previewHistory(kb)});
     previewTurns.set(kb, [...(previewTurns.get(kb) || []), {query, reply: result.answer, at: Date.now()}].slice(-10));
-    $('answer-preview').textContent = (answerReasons[result.reason] || result.mode) + '\n携带历史：' + result.history_turns + ' 轮' + (result.alias_context ? '\n' + result.alias_context : '') + '\n检索词：' + (result.search_terms || []).map(group => Array.isArray(group) ? '[' + group.join(' + ') + ']' : group).join(' / ') + '\n\n' + result.answer + (result.handoff ? '\n\n实际群聊会按该群的人工联系人配置尝试艾特；这里仅预览文本。' : '');
+    $('answer-preview').textContent = (answerReasons[result.reason] || result.mode) + (result.trace_id ? '\nTrace ID：' + result.trace_id : '') + '\n携带历史：' + result.history_turns + ' 轮' + (result.alias_context ? '\n' + result.alias_context : '') + '\n检索词：' + (result.search_terms || []).map(group => Array.isArray(group) ? '[' + group.join(' + ') + ']' : group).join(' / ') + '\n\n' + result.answer + (result.handoff ? '\n\n实际群聊会按该群的人工联系人配置尝试艾特；这里仅预览文本。' : '');
   } catch (error) { $('answer-preview').textContent = error.message; throw error; }
 }); };
 
@@ -307,4 +311,40 @@ $('alias-rows').onclick = async event => {
     toast(action === 'delete' ? '实体已删除' : `「${value.name}」已保存，下次提问生效`);
   } catch (error) { toast(error.message); }
   finally { aliasSaving = false; renderAliases(); }
+};
+
+let traceOffset = 0, traceTotal = 0, traceRequest = 0;
+const traceModes = {model:'模型回答',document:'原文回退',handoff:'转人工',error:'异常',running:'处理中 / 未完成'};
+const traceOrigins = {qq_group:'QQ 群聊',qq_private:'QQ 私聊',preview:'后台预览',api:'API'};
+const traceDelivery = {pending:'未收到发送回执',delivered:'已发送',failed:'发送失败',not_applicable:'无需发送 QQ'};
+const traceTime = value => new Date(value * 1000).toLocaleString('zh-CN');
+async function loadTraces(reset = false) {
+  if (reset) traceOffset = 0;
+  const request = ++traceRequest, params = new URLSearchParams({offset:String(traceOffset)});
+  for (const [field,id] of Object.entries({kb_id:'trace-base',q:'trace-query',origin:'trace-origin',mode:'trace-mode',user_id:'trace-user',group_id:'trace-group'})) if ($(id).value.trim()) params.set(field,$(id).value.trim());
+  for (const field of ['start','end']) if ($('trace-'+field).value) params.set(field,String(new Date($('trace-'+field).value).getTime()/1000));
+  if (params.has('start') && params.has('end') && +params.get('start') > +params.get('end')) throw new Error('开始时间不能晚于结束时间');
+  $('trace-count').textContent = '正在查询…'; $('trace-prev').disabled = $('trace-next').disabled = true;
+  try {
+    const data = await api('traces?' + params);
+    if (request !== traceRequest) return;
+    traceTotal = data.total;
+    $('trace-list').innerHTML = data.items.length ? data.items.map(row => `<tr><td>${esc(traceTime(row.created))}<small>${esc(traceOrigins[row.origin] || row.origin)} · ${esc(row.kb_name)}</small></td><td>${esc(row.question.slice(0,100))}${row.question.length>100?'…':''}<small class="trace-terms">${esc((row.search_terms||[]).map(group=>Array.isArray(group)?'['+group.join(' + ')+']':group).join(' / '))} · ${row.retrieval_count} 次检索</small><small>${esc(row.user_id || '—')}</small></td><td>${esc(row.answer.slice(0,140) || '尚无回复')}${row.answer.length>140?'…':''}</td><td><span class="badge ${row.mode==='model'?'':'pending'}">${esc(traceModes[row.mode] || row.mode)}</span><small>${row.elapsed_ms} ms · ${esc(traceDelivery[row.delivery] || row.delivery)}</small></td><td><button class="row-button" data-trace="${row.id}">查看详情</button></td></tr>`).join('') : '<tr><td colspan="5" class="empty">没有符合条件的记录。新对话将自动记录，超过7天的记录会清理。</td></tr>';
+    $('trace-count').textContent = `共 ${data.total} 条 · 第 ${Math.floor(data.offset/30)+1} 页 · 保留7天`;
+    $('trace-prev').disabled = !traceOffset; $('trace-next').disabled = traceOffset + 30 >= traceTotal;
+  } catch (error) { if (request === traceRequest) $('trace-count').textContent = error.message; throw error; }
+}
+$('trace-filter').onsubmit = event => { event.preventDefault(); busy(event.submitter, () => loadTraces(true)); };
+$('trace-prev').onclick = () => { traceOffset = Math.max(0,traceOffset-30); loadTraces().catch(error=>toast(error.message)); };
+$('trace-next').onclick = () => { traceOffset += 30; loadTraces().catch(error=>toast(error.message)); };
+$('close-trace').onclick = () => $('trace-dialog').close();
+const traceText = value => `<div class="trace-text">${esc(value || '无')}</div>`;
+$('trace-list').onclick = event => {
+  const button = event.target.closest('[data-trace]');
+  if (!button) return;
+  busy(button, async () => {
+    const row = await api('traces/'+button.dataset.trace), d = row.details;
+    $('trace-detail').innerHTML = `<div class="trace-meta"><span>${esc(traceTime(row.created))}</span><span>${esc(traceOrigins[row.origin])} · ${esc(row.kb_name)}</span><span>${esc(traceModes[row.mode])} · ${row.elapsed_ms} ms</span><span>${esc(traceDelivery[row.delivery])}</span></div><small>Trace ID：${esc(row.id)}<br>用户：${esc(row.user_id || '—')}<br>群：${esc(row.group_id || '—')}<br>会话：${esc(row.session_id || '—')}</small><h3>用户问题</h3>${traceText(row.question)}<h3>生成的回复</h3>${traceText(row.answer)}<p class="hint">原因：${esc(answerReasons[row.reason] || row.reason || '未完成')}</p>${d.delivery?`<h3>QQ 实际发送内容</h3>${traceText(d.delivery.content)}<p class="hint">${esc(d.delivery.error || '')}</p>`:''}<h3>最终检索词</h3>${traceText((d.search_terms||[]).map(group=>Array.isArray(group)?'['+group.join(' + ')+']':group).join(' / '))}<h3>别名说明</h3>${traceText(d.alias_context)}<h3>召回过程</h3>${(d.retrievals||[]).map((search,index)=>`<details open><summary>第 ${index+1} 次召回 · ${search.elapsed_ms} ms · ${(search.searches||[]).length} 组查询 · ${(search.results||[]).length} 个去重分段</summary>${(search.searches||[]).map(group=>`<p class="hint">${esc(JSON.stringify(group.query))} · ${group.elapsed_ms} ms · ${group.hits.length} 个命中</p>${traceText(group.hits.map(hit=>hit.title+' · chunk '+hit.chunk_id+' · score '+hit.score).join('\n'))}`).join('')}${(search.results||[]).map(result=>`<details><summary>${esc(result.title)} · 分段 ${result.ordinal+1} · ${esc(result.document_id)}</summary>${traceText(result.content)}</details>`).join('')}</details>`).join('') || '<p class="hint">本次未执行检索。</p>'}<h3>模型调用</h3>${(d.model_calls||[]).map(call=>`<details><summary>${call.stage==='keywords'?'生成检索词':'生成回答'} · ${call.elapsed_ms} ms${call.error?' · '+esc(call.error):''}</summary>${traceText(call.output)}${call.truncated?'<p class="hint">输出已截断</p>':''}</details>`).join('') || '<p class="hint">本次未调用模型。</p>'}<details><summary>携带的历史问答 · ${(d.history||[]).length/2} 轮</summary>${(d.history||[]).map(message=>`<h4>${message.role==='user'?'用户':'机器人'}</h4>${traceText(message.content)}`).join('')}</details><details><summary>本次模型与提示词</summary><p>${esc(d.model || '')}</p><h4>回答 System Prompt</h4>${traceText(d.system_prompt)}<h4>检索词提示词</h4>${traceText(d.keyword_prompt)}</details>${d.error_type?`<p class="error">异常类型：${esc(d.error_type)}</p>`:''}`;
+    $('trace-dialog').showModal();
+  });
 };
