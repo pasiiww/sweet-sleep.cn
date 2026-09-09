@@ -33,7 +33,7 @@ $('login-form').addEventListener('submit', async event => {
   });
 });
 $('logout').onclick = logout;
-const views = { traces: ['对话 Trace', '从问题到回复，查看每次检索与模型调用的过程。'], aliases: ['实体别名', '统一名称，让不同称呼都能找到同一份知识。'], documents: ['知识库', '把分散的信息，变成有据可依的回答。'], retrieve: ['召回测试', '在连接大模型之前，先看看知识是否被准确找到。'], integration: ['API 接入', '把你的知识，接入任意大模型工作流。'], settings: ['模型设置', '为你的知识库，连接语义理解能力。'] };
+const views = { qa: ['QA 知识库', '整理常见问题，让每次回答都有合适的参考。'], traces: ['对话 Trace', '从问题到回复，查看每次检索与模型调用的过程。'], aliases: ['实体别名', '统一名称，让不同称呼都能找到同一份知识。'], documents: ['知识库', '把分散的信息，变成有据可依的回答。'], retrieve: ['召回测试', '在连接大模型之前，先看看知识是否被准确找到。'], integration: ['API 接入', '把你的知识，接入任意大模型工作流。'], settings: ['模型设置', '为你的知识库，连接语义理解能力。'] };
 document.querySelectorAll('[data-view]').forEach(button => button.onclick = () => {
   const view = button.dataset.view;
   document.querySelectorAll('.view').forEach(el => el.hidden = el.id !== 'view-' + view);
@@ -49,7 +49,7 @@ async function refresh() {
   $('stats').innerHTML = [ ['知识库', items.length, '▤'], ['文档总数', items.reduce((s, b) => s + b.document_count, 0), '▧'], ['可检索分段', items.reduce((s, b) => s + b.chunk_count, 0), '⌘'] ].map(([title, count, icon]) => `<div class="stat"><div><small>${title}</small><strong>${count.toLocaleString()}</strong></div><div class="stat-icon">${icon}</div></div>`).join('');
   $('base-list').innerHTML = items.map(b => `<button class="base-card ${b.id === state.selected ? 'selected' : ''}" data-base="${b.id}"><div class="base-card-top"><span class="base-icon">▤</span><span class="badge ${b.vector_count < b.chunk_count ? 'pending' : ''}">${b.chunk_count && b.vector_count === b.chunk_count ? '向量已就绪' : '关键词检索'}</span></div><h3>${esc(b.name)}</h3><p>${esc(b.description || '为大模型准备有来源的知识')}</p><div class="base-card-bottom"><span>${b.document_count} 份文档</span><span>${b.chunk_count} 个分段</span><span>${b.vector_count} 个向量</span></div></button>`).join('');
   $('no-base').hidden = items.length > 0; $('document-panel').hidden = !state.selected;
-  for (const id of ['retrieve-base', 'api-base', 'answer-base', 'aliases-base']) {
+  for (const id of ['retrieve-base', 'api-base', 'answer-base', 'aliases-base', 'qa-base']) {
     const previous = $(id).value;
     $(id).innerHTML = items.map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join('');
     $(id).value = items.some(b => b.id === previous) ? previous : state.selected;
@@ -59,6 +59,7 @@ async function refresh() {
   $('trace-base').value = items.some(b => b.id === traceBase) ? traceBase : '';
   updateExample();
   await loadAliases();
+  await loadQAs(true);
   if (state.selected) {
     const selected = items.find(b => b.id === state.selected);
     $('selected-base-name').textContent = selected.name; $('selected-base-description').textContent = selected.description || '管理文档内容与召回索引';
@@ -148,7 +149,7 @@ $('retrieve-form').onsubmit = event => { event.preventDefault(); busy(event.subm
     }
     const result = await api('retrieve', 'POST', { ...(grouped ? {query_groups: groups} : {}), kb_id: $('retrieve-base').value, query: $('retrieve-query').value, mode: $('retrieve-mode').value, top_k: +$('retrieve-top-k').value, max_context_chars: +$('context-budget').value });
     $('result-meta').textContent = `${result.results.length} 个片段 · ${result.elapsed_ms} ms`;
-    $('results').innerHTML = result.results.length ? result.results.map(r => `<article class="result-card"><div class="result-title"><strong>[${r.citation}] ${esc(r.title)}</strong><span class="badge">${esc(result.score_type.toUpperCase())} ${Number(r.score).toPrecision(4)}</span></div><p>${esc(r.content)}</p><small>来源：${esc(r.source || r.title)} · 分段 ${r.ordinal + 1}${r.truncated ? ' · 已按上下文预算截断' : ''}</small></article>`).join('') : '<div class="empty"><h3>没有找到相关片段</h3><p>试试不同关键词，或为知识库补充相关内容。</p></div>';
+    $('results').innerHTML = result.results.length ? result.results.map(r => `<article class="result-card"><div class="result-title"><strong>[${r.citation}] ${r.source_type === 'qa' ? 'QA · ' : ''}${esc(r.title)}</strong><span class="badge">${esc(result.score_type.toUpperCase())} ${Number(r.score).toPrecision(4)}</span></div><p>${esc(r.content)}</p><small>来源：${esc(r.source || r.title)} · 分段 ${r.ordinal + 1}${r.truncated ? ' · 已按上下文预算截断' : ''}</small></article>`).join('') : '<div class="empty"><h3>没有找到相关片段</h3><p>试试不同关键词，或为知识库补充相关内容。</p></div>';
     state.context = result.context; $('context-actions').hidden = !result.context;
   } catch (error) { $('result-meta').textContent = '查询未完成'; $('results').innerHTML = `<div class="empty"><p class="error">${esc(error.message)}</p></div>`; throw error; }
 }); };
@@ -177,6 +178,7 @@ async function loadAnswerSettings() {
   answerDefaults = cfg.default_prompt;
   $('answer-enabled').checked = cfg.enabled;
   $('answer-model').value = cfg.model;
+  $('admin-name').value = cfg.admin_name || '落落';
   $('admin-qq').value = cfg.admin_qq;
   $('answer-key').value = '';
   $('answer-clear-key').checked = false;
@@ -193,7 +195,7 @@ $('answer-settings-form').onsubmit = event => { event.preventDefault(); busy(eve
     if (Object.hasOwn(groups, group)) throw new Error('同一个群请写在同一行');
     groups[group] = ids;
   }
-  await api('answer-settings', 'PUT', { enabled: $('answer-enabled').checked, model: $('answer-model').value, api_key: $('answer-key').value, clear_key: $('answer-clear-key').checked, system_prompt: $('answer-prompt').value, admin_qq: $('admin-qq').value, handoff_groups: groups });
+  await api('answer-settings', 'PUT', { enabled: $('answer-enabled').checked, model: $('answer-model').value, api_key: $('answer-key').value, clear_key: $('answer-clear-key').checked, system_prompt: $('answer-prompt').value, admin_qq: $('admin-qq').value, admin_name: $('admin-name').value, handoff_groups: groups });
   await loadAnswerSettings(); $('answer-test-status').textContent = ''; toast('客服配置已保存，下次提问立即生效');
 }); };
 $('test-answer-model').onclick = () => busy($('test-answer-model'), async () => {
@@ -344,7 +346,65 @@ $('trace-list').onclick = event => {
   if (!button) return;
   busy(button, async () => {
     const row = await api('traces/'+button.dataset.trace), d = row.details;
-    $('trace-detail').innerHTML = `<div class="trace-meta"><span>${esc(traceTime(row.created))}</span><span>${esc(traceOrigins[row.origin])} · ${esc(row.kb_name)}</span><span>${esc(traceModes[row.mode])} · ${row.elapsed_ms} ms</span><span>${esc(traceDelivery[row.delivery])}</span></div><small>Trace ID：${esc(row.id)}<br>用户：${esc(row.user_id || '—')}<br>群：${esc(row.group_id || '—')}<br>会话：${esc(row.session_id || '—')}</small><h3>用户问题</h3>${traceText(row.question)}<h3>生成的回复</h3>${traceText(row.answer)}<p class="hint">原因：${esc(answerReasons[row.reason] || row.reason || '未完成')}</p>${d.delivery?`<h3>QQ 实际发送内容</h3>${traceText(d.delivery.content)}<p class="hint">${esc(d.delivery.error || '')}</p>`:''}<h3>最终检索词</h3>${traceText((d.search_terms||[]).map(group=>Array.isArray(group)?'['+group.join(' + ')+']':group).join(' / '))}<h3>别名说明</h3>${traceText(d.alias_context)}<h3>召回过程</h3>${(d.retrievals||[]).map((search,index)=>`<details open><summary>第 ${index+1} 次召回 · ${search.elapsed_ms} ms · ${(search.searches||[]).length} 组查询 · ${(search.results||[]).length} 个去重分段</summary>${(search.searches||[]).map(group=>`<p class="hint">${esc(JSON.stringify(group.query))} · ${group.elapsed_ms} ms · ${group.hits.length} 个命中</p>${traceText(group.hits.map(hit=>hit.title+' · chunk '+hit.chunk_id+' · score '+hit.score).join('\n'))}`).join('')}${(search.results||[]).map(result=>`<details><summary>${esc(result.title)} · 分段 ${result.ordinal+1} · ${esc(result.document_id)}</summary>${traceText(result.content)}</details>`).join('')}</details>`).join('') || '<p class="hint">本次未执行检索。</p>'}<h3>模型调用</h3>${(d.model_calls||[]).map(call=>`<details><summary>${call.stage==='keywords'?'生成检索词':'生成回答'} · ${call.elapsed_ms} ms${call.error?' · '+esc(call.error):''}</summary>${traceText(call.output)}${call.truncated?'<p class="hint">输出已截断</p>':''}</details>`).join('') || '<p class="hint">本次未调用模型。</p>'}<details><summary>携带的历史问答 · ${(d.history||[]).length/2} 轮</summary>${(d.history||[]).map(message=>`<h4>${message.role==='user'?'用户':'机器人'}</h4>${traceText(message.content)}`).join('')}</details><details><summary>本次模型与提示词</summary><p>${esc(d.model || '')}</p><h4>回答 System Prompt</h4>${traceText(d.system_prompt)}<h4>检索词提示词</h4>${traceText(d.keyword_prompt)}</details>${d.error_type?`<p class="error">异常类型：${esc(d.error_type)}</p>`:''}`;
+    $('trace-detail').innerHTML = `<div class="trace-meta"><span>${esc(traceTime(row.created))}</span><span>${esc(traceOrigins[row.origin])} · ${esc(row.kb_name)}</span><span>${esc(traceModes[row.mode])} · ${row.elapsed_ms} ms</span><span>${esc(traceDelivery[row.delivery])}</span></div><small>Trace ID：${esc(row.id)}<br>用户：${esc(row.user_id || '—')}<br>群：${esc(row.group_id || '—')}<br>会话：${esc(row.session_id || '—')}</small><h3>用户问题</h3>${traceText(row.question)}<h3>生成的回复</h3>${traceText(row.answer)}<p class="hint">原因：${esc(answerReasons[row.reason] || row.reason || '未完成')}</p>${d.delivery?`<h3>QQ 实际发送内容</h3>${traceText(d.delivery.content)}<p class="hint">${esc(d.delivery.error || '')}</p>`:''}<h3>最终检索词</h3>${traceText((d.search_terms||[]).map(group=>Array.isArray(group)?'['+group.join(' + ')+']':group).join(' / '))}<h3>别名说明</h3>${traceText(d.alias_context)}<h3>召回过程</h3>${(d.retrievals||[]).map((search,index)=>`<details open><summary>第 ${index+1} 次召回 · ${search.elapsed_ms} ms · ${(search.searches||[]).length} 组查询 · ${(search.results||[]).length} 个去重分段</summary>${(search.searches||[]).map(group=>`<p class="hint">${esc(JSON.stringify(group.query))} · ${group.elapsed_ms} ms · ${group.hits.length} 个命中</p>${traceText(group.hits.map(hit=>(hit.source_type==='qa'?'QA · ':'文档 · ')+hit.title+' · ID '+hit.chunk_id+' · score '+hit.score).join('\n'))}`).join('')}${(search.results||[]).map(result=>`<details><summary>${result.source_type==='qa'?'QA · ':'文档 · '}${esc(result.title)} · ${result.source_type==='qa'?'参考答案':'分段 '+(result.ordinal+1)} · ${esc(result.document_id)}</summary>${traceText(result.content)}</details>`).join('')}</details>`).join('') || '<p class="hint">本次未执行检索。</p>'}<h3>模型调用</h3>${(d.model_calls||[]).map(call=>`<details><summary>${call.stage==='keywords'?'生成检索词':'生成回答'} · ${call.elapsed_ms} ms${call.error?' · '+esc(call.error):''}</summary>${traceText(call.output)}${call.truncated?'<p class="hint">输出已截断</p>':''}</details>`).join('') || '<p class="hint">本次未调用模型。</p>'}<details><summary>携带的历史问答 · ${(d.history||[]).length/2} 轮</summary>${(d.history||[]).map(message=>`<h4>${message.role==='user'?'用户':'机器人'}</h4>${traceText(message.content)}`).join('')}</details><details><summary>本次模型与提示词</summary><p>${esc(d.model || '')}</p><h4>回答 System Prompt</h4>${traceText(d.system_prompt)}<h4>检索词提示词</h4>${traceText(d.keyword_prompt)}</details>${d.error_type?`<p class="error">异常类型：${esc(d.error_type)}</p>`:''}`;
     $('trace-dialog').showModal();
   });
+};
+
+let qaRows = [], qaKb = '', qaOffset = 0, qaTotal = 0, qaRequest = 0, qaSequence = 0, qaSaving = false;
+const qaValue = row => ({question:row.question.trim(),answer:row.answer.trim()});
+const qaDirty = row => !row.original || row.question.trim() !== row.original.question || row.answer.trim() !== row.original.answer;
+function renderQAs() {
+  $('qa-rows').innerHTML = qaRows.map(row=>`<tr data-qa-row="${row.key}"><td><textarea data-field="question" aria-label="问题 Q ${row.key}" rows="4" maxlength="1000" placeholder="例如：凯伊的价格是多少？">${esc(row.question)}</textarea></td><td><textarea data-field="answer" aria-label="答案 A ${row.key}" rows="5" maxlength="10000" placeholder="填写已确认的参考答案">${esc(row.answer)}</textarea></td><td><span class="badge" data-qa-status></span><div class="alias-row-actions"><button class="row-button" data-qa-action="save">保存</button><button class="row-button" data-qa-action="reset">撤销</button><button class="row-button delete" data-qa-action="delete">删除</button></div></td></tr>`).join('');
+  updateQAs();
+}
+function updateQAs() {
+  for (const tr of $('qa-rows').children) {
+    const row = qaRows.find(item=>item.key===tr.dataset.qaRow), dirty = qaDirty(row), badge=tr.querySelector('[data-qa-status]');
+    badge.textContent = !row.original?'新增':dirty?'未保存':'已保存'; badge.classList.toggle('pending',dirty);
+    tr.classList.toggle('alias-dirty',dirty);
+    tr.querySelectorAll('textarea').forEach(input=>{input.disabled=qaSaving;});
+    tr.querySelector('[data-qa-action="save"]').disabled = qaSaving || !dirty;
+    tr.querySelector('[data-qa-action="reset"]').disabled = qaSaving || !dirty;
+    tr.querySelector('[data-qa-action="delete"]').disabled = qaSaving;
+  }
+  $('qa-base').disabled=$('qa-search').disabled=$('refresh-qa').disabled=qaSaving;
+  $('add-qa').disabled=qaSaving || !qaKb;
+  $('qa-prev').disabled=qaSaving || !qaOffset; $('qa-next').disabled=qaSaving || qaOffset+20>=qaTotal;
+  $('qa-empty').hidden=qaRows.length>0;
+  $('qa-status').textContent=`共 ${qaTotal} 条已保存 QA · 第 ${Math.floor(qaOffset/20)+1} 页 · ${qaRows.filter(qaDirty).length} 行未保存`;
+}
+async function loadQAs(reset=false) {
+  if(reset) qaOffset=0;
+  const kb=$('qa-base').value, request=++qaRequest;
+  qaKb='';qaRows=[];qaTotal=0;renderQAs(); $('qa-status').textContent=kb?'正在读取…':'请先创建知识库';
+  if(!kb) return;
+  try {
+    const result=await api(`bases/${kb}/qa?q=${encodeURIComponent($('qa-search').value)}&offset=${qaOffset}`);
+    if(request!==qaRequest) return;
+    qaKb=kb;qaTotal=result.total;
+    qaRows=result.items.map(item=>({key:String(item.id),original:item,question:item.question,answer:item.answer}));renderQAs();
+  } catch(error){if(request===qaRequest)$('qa-status').textContent=error.message;throw error;}
+}
+$('qa-base').onchange=()=>{ $('qa-search').value='';loadQAs(true).catch(error=>toast(error.message)); };
+$('refresh-qa').onclick=()=>loadQAs(true).catch(error=>toast(error.message));
+$('qa-search').onkeydown=event=>{if(event.key==='Enter')loadQAs(true).catch(error=>toast(error.message));};
+$('qa-prev').onclick=()=>{qaOffset=Math.max(0,qaOffset-20);loadQAs().catch(error=>toast(error.message));};
+$('qa-next').onclick=()=>{qaOffset+=20;loadQAs().catch(error=>toast(error.message));};
+$('add-qa').onclick=()=>{qaRows.unshift({key:'new-'+(++qaSequence),original:null,question:'',answer:''});renderQAs();$('qa-rows').firstElementChild.querySelector('textarea').focus();};
+$('qa-rows').oninput=event=>{const field=event.target.dataset.field,tr=event.target.closest('[data-qa-row]');if(!field||!tr)return;qaRows.find(row=>row.key===tr.dataset.qaRow)[field]=event.target.value;updateQAs();};
+$('qa-rows').onclick=async event=>{
+  const button=event.target.closest('[data-qa-action]');if(!button||button.disabled||qaSaving)return;
+  const action=button.dataset.qaAction,row=qaRows.find(item=>item.key===button.closest('tr').dataset.qaRow),kb=qaKb;
+  if(action==='reset') {if(row.original){row.question=row.original.question;row.answer=row.original.answer;}else qaRows=qaRows.filter(item=>item!==row);renderQAs();return;}
+  if(action==='delete'&&row.original&&!await confirmDelete(`删除这条 QA？\n${row.original.question.slice(0,100)}`))return;
+  if(kb!==qaKb||!qaRows.includes(row))return;
+  if(action==='delete'&&!row.original){qaRows=qaRows.filter(item=>item!==row);renderQAs();return;}
+  const value=qaValue(row);
+  if(action==='save'&&(!value.question||!value.answer)){toast('请填写问题 Q 和答案 A');return;}
+  qaSaving=true;updateQAs();button.textContent='处理中…';
+  try{
+    if(action==='delete'){await api(`qa/${row.original.id}`,'DELETE',{revision:row.original.revision});qaRows=qaRows.filter(item=>item!==row);qaTotal--;toast('QA 已删除');}
+    else {const saved=await api(row.original?`qa/${row.original.id}`:`bases/${kb}/qa`,row.original?'PUT':'POST',{...value,...(row.original?{revision:row.original.revision}:{})});if(!row.original)qaTotal++;row.original=saved;row.key=String(saved.id);row.question=saved.question;row.answer=saved.answer;toast('QA 已保存，下次提问生效');}
+  }catch(error){toast(error.message);}finally{qaSaving=false;renderQAs();}
 };

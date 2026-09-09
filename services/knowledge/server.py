@@ -20,6 +20,7 @@ from urllib.parse import urlsplit, parse_qs
 import answers
 import entities
 import traces
+import qa
 
 DATA = Path(os.environ.get('KB_DATA_DIR', '/var/lib/sweet-knowledge'))
 STATIC = Path(os.environ.get('KB_STATIC_DIR', Path(__file__).resolve().parents[2] / 'knowledge'))
@@ -85,6 +86,7 @@ def initialize():
             'base_url': '', 'model': '', 'api_key': '', 'revision': secrets.token_hex(8)}),))
         c.execute('INSERT OR IGNORE INTO app_settings VALUES(?,?)', ('answer', json.dumps(answers.defaults())))
         traces.initialize(c)
+        qa.initialize(c)
 
 
 def now():
@@ -346,19 +348,37 @@ def retrieve(data):
             ranking = sorted(scores.items(), key=lambda row: row[1], reverse=True)
         else:
             ranking = keyword if mode == 'keyword' else semantic
+        qa_ranking = qa.search(c, kb_id, query, groups, catalog, tokens, k * 4) if mode != 'vector' else []
+        score_type = 'rrf' if groups and mode == 'keyword' else {'keyword':'bm25','vector':'cosine','hybrid':'rrf'}[mode]
+        if qa_ranking:
+            # Separate corpora have incomparable BM25 values; merge their ranks, not raw scores.
+            combined = {('document', chunk_id): 1/(60+rank) for rank,(chunk_id,_) in enumerate(ranking,1)}
+            combined.update({('qa', qa_id): 1/(60+rank) for rank,(qa_id,_) in enumerate(qa_ranking,1)})
+            ranking = sorted(combined.items(),key=lambda item:(-item[1],item[0]))
+            score_type = 'rrf'
+        else:
+            ranking = [(('document', chunk_id),score) for chunk_id,score in ranking]
         results, context, used = [], [], 0
-        for chunk_id, score in ranking[:k]:
-            row = c.execute('SELECT c.id AS chunk_id,c.ordinal,c.content,d.id AS document_id,d.title,d.source FROM chunks c JOIN documents d ON d.id=c.doc_id WHERE c.id=? AND c.kb_id=?', (chunk_id, kb_id)).fetchone()
-            if not row:
-                continue
-            result = dict(row)
+        for (source_type, item_id), score in ranking[:k]:
+            if source_type == 'qa':
+                row = c.execute('SELECT * FROM qa_entries WHERE id=? AND kb_id=?',(item_id,kb_id)).fetchone()
+                if not row: continue
+                chunk_id = 'qa:' + str(item_id)
+                result = {'chunk_id':chunk_id,'ordinal':0,'content':row['answer'][:2000],
+                          'question':row['question'],'title':row['question'],'document_id':chunk_id,
+                          'qa_id':item_id,'source':'','source_type':'qa','truncated':len(row['answer'])>2000}
+            else:
+                chunk_id = item_id
+                row = c.execute('SELECT c.id AS chunk_id,c.ordinal,c.content,d.id AS document_id,d.title,d.source FROM chunks c JOIN documents d ON d.id=c.doc_id WHERE c.id=? AND c.kb_id=?', (chunk_id, kb_id)).fetchone()
+                if not row: continue
+                result = dict(row) | {'source_type':'document'}
             prefix = f'[{len(results) + 1}] {result["title"]} (document={result["document_id"]}, chunk={chunk_id})\n'
             available = budget - used - len(prefix) - (2 if context else 0)
             if available <= 0:
                 break
             original = result['content']
             result['content'] = original[:available]
-            result['truncated'] = len(original) > available
+            result['truncated'] = result.get('truncated', False) or len(original) > available
             result['score'] = round(score, 8)
             result['citation'] = len(results) + 1
             block = prefix + result['content']
@@ -368,7 +388,7 @@ def retrieve(data):
         return {'query': query, 'kb_id': kb_id, 'mode': mode, 'results': results,
                 'context': '\n\n'.join(context), 'elapsed_ms': round((time.monotonic() - started) * 1000),
                 'query_groups': groups or [],
-                'score_type': 'rrf' if groups and mode == 'keyword' else {'keyword': 'bm25', 'vector': 'cosine', 'hybrid': 'rrf'}[mode]}
+                'score_type': score_type}
 
 
 def answer_config(c):
@@ -389,7 +409,7 @@ def search_terms(kb_id, terms):
         search = {'query_groups': [term]} if isinstance(term, list) else {'query': term}
         result = retrieve({'kb_id': kb_id, **search, 'mode': 'keyword',
                            'top_k': 5, 'max_context_chars': 12000})
-        searches.append({'query': term, 'elapsed_ms': result.get('elapsed_ms', 0), 'hits': [{'chunk_id': row['chunk_id'], 'title': row['title'], 'score': row.get('score')} for row in result['results']]})
+        searches.append({'query': term, 'elapsed_ms': result.get('elapsed_ms', 0), 'hits': [{'chunk_id': row['chunk_id'], 'title': row['title'], 'source_type': row.get('source_type','document'), 'score': row.get('score')} for row in result['results']]})
         for rank, row in enumerate(result['results'], 1):
             key = row['chunk_id']
             if key not in candidates:
@@ -398,7 +418,8 @@ def search_terms(kb_id, terms):
     selected, seen, remaining = [], set(), 6000
     for item in sorted(candidates.values(), key=lambda x: x['rank'], reverse=True):
         row = dict(item['row'])
-        key = hashlib.sha256(' '.join(row['content'].split()).encode()).hexdigest()
+        identity = ((row.get('question','') + '\n') if row.get('source_type') == 'qa' else '') + ' '.join(row['content'].split())
+        key = hashlib.sha256(identity.encode()).hexdigest()
         if key in seen:
             continue
         seen.add(key)
@@ -585,6 +606,7 @@ def api(method, path, data, params):
                 if not re.fullmatch(r'[1-9][0-9]{4,11}', admin_qq):
                     fail(400, '管理员QQ号格式不正确')
                 cfg = {'enabled': data['enabled'], 'model': model, 'admin_qq': admin_qq,
+                       'admin_name': string(data, 'admin_name', 40) or cfg['admin_name'],
                        'system_prompt': string(data, 'system_prompt', 12000, True),
                        'api_key': key or ('' if data.get('clear_key') else cfg['api_key']),
                        'handoff_groups': groups, 'revision': secrets.token_hex(8)}
@@ -628,6 +650,18 @@ def api(method, path, data, params):
                 return base(c, kb_id)
         if len(segments) >= 2 and segments[0] == 'bases':
             kb = base(c, segments[1])
+            if len(segments) == 3 and segments[2] == 'qa':
+                if method == 'GET':
+                    query = params.get('q',[''])[0][:200]
+                    try: offset = max(0,int(params.get('offset',['0'])[0]))
+                    except ValueError: fail(400,'分页参数不正确')
+                    total = c.execute('SELECT count(*) FROM qa_entries WHERE kb_id=? AND instr(lower(question),lower(?))>0',(kb['id'],query)).fetchone()[0]
+                    items = [dict(row) for row in c.execute('SELECT * FROM qa_entries WHERE kb_id=? AND instr(lower(question),lower(?))>0 ORDER BY id DESC LIMIT 20 OFFSET ?',(kb['id'],query,offset))]
+                    return {'items':items,'total':total,'offset':offset,'limit':20}
+                if method == 'POST':
+                    if c.execute('SELECT count(*) FROM qa_entries WHERE kb_id=?',(kb['id'],)).fetchone()[0] >= 1000:
+                        fail(400,'每个知识库最多1000条 QA')
+                    return save_qa(c,kb['id'],data)
             if len(segments) == 3 and segments[2] == 'entities':
                 if method == 'PUT':
                     if 'expected_items' in data and data['expected_items'] != entity_catalog(c, kb['id']):
@@ -666,6 +700,16 @@ def api(method, path, data, params):
                         ORDER BY updated_at DESC,id''', (kb['id'], query, query))]}
                 if method == 'POST':
                     return save_document(c, kb, data)
+        if len(segments) == 2 and segments[0] == 'qa':
+            item = c.execute('SELECT * FROM qa_entries WHERE id=?',(segments[1],)).fetchone()
+            if not item: fail(404,'QA 不存在')
+            if method == 'GET': return dict(item)
+            if data.get('revision') and data['revision'] != item['revision']:
+                fail(409,'此 QA 已在其他页面修改，请重新加载后编辑')
+            if method == 'PUT': return save_qa(c,item['kb_id'],data,item['id'])
+            if method == 'DELETE':
+                c.execute('DELETE FROM qa_entries WHERE id=?',(item['id'],))
+                return {'deleted':True}
         if len(segments) == 2 and segments[0] == 'documents':
             d = c.execute('SELECT * FROM documents WHERE id=?', (segments[1],)).fetchone()
             if not d:
@@ -678,6 +722,19 @@ def api(method, path, data, params):
                 c.execute('DELETE FROM documents WHERE id=?', (d['id'],))
                 return {'deleted': True}
     fail(404, '接口不存在')
+
+
+def save_qa(c, kb_id, data, qa_id=None):
+    question, answer = string(data,'question',1000,True), string(data,'answer',10000,True)
+    revision = secrets.token_hex(8)
+    if qa_id is None:
+        qa_id = c.execute('INSERT INTO qa_entries(kb_id,question,answer,revision,updated_at) VALUES(?,?,?,?,?)',(kb_id,question,answer,revision,now())).lastrowid
+    else:
+        c.execute('UPDATE qa_entries SET question=?,answer=?,revision=?,updated_at=? WHERE id=?',(question,answer,revision,now(),qa_id))
+        c.execute('DELETE FROM qa_fts WHERE rowid=?',(qa_id,))
+    # Never index A, including when updating or rebuilding a question.
+    c.execute('INSERT INTO qa_fts(rowid,question) VALUES(?,?)',(qa_id,' '.join(tokens(question))))
+    return dict(c.execute('SELECT * FROM qa_entries WHERE id=?',(qa_id,)).fetchone())
 
 
 def validate_base(data):
@@ -743,7 +800,7 @@ class Handler(BaseHTTPRequestHandler):
             if not admin and not (parsed.path in ('/knowledge/api/retrieve', '/knowledge/api/answer', '/knowledge/api/trace-delivery') and self.command == 'POST'):
                 fail(403, '召回密钥仅可调用检索接口')
             data = {}
-            if self.command in ('POST', 'PUT'):
+            if self.command in ('POST', 'PUT') or (self.command == 'DELETE' and self.headers.get('Content-Length', '0') != '0'):
                 if self.headers.get('Transfer-Encoding'):
                     fail(400, '不支持分块请求体')
                 length = int(self.headers.get('Content-Length', 0))

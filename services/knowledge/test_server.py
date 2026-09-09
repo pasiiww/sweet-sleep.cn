@@ -137,6 +137,8 @@ class KnowledgeTests(unittest.TestCase):
             self.assertEqual(req('api/bases', app.READ_TOKEN)[0], 403)
             self.assertEqual(req('api/answer-settings', app.READ_TOKEN)[0], 403)
             self.assertEqual(req('api/traces', app.READ_TOKEN)[0], 403)
+            self.assertEqual(req(f'api/bases/{self.kb}/qa', app.READ_TOKEN)[0], 403)
+            self.assertEqual(req('api/qa/1', app.READ_TOKEN)[0], 403)
             self.assertEqual(req('api/traces/example', app.READ_TOKEN)[0], 403)
             self.assertEqual(req('api/traces', app.ADMIN_TOKEN)[0], 200)
             self.assertEqual(req('api/trace-delivery', app.READ_TOKEN, {'trace_id':'unknown','receipt':'bad','status':'delivered'})[0], 403)
