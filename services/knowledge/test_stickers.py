@@ -106,6 +106,14 @@ class StickerTests(unittest.TestCase):
    self.assertEqual(result['sticker_name'],'独特表情')
    messages=model.call_args.args[1]
    self.assertEqual(sum(m['content'].count('[独特表情]') for m in messages),1)
-   self.assertIn('频率建议：店铺咨询类问题控制在1/2以下。',messages[0]['content'])
+   self.assertIn('频率建议：店铺咨询类问题的50%以下的轮次带表情包。',messages[0]['content'])
    self.assertNotIn('available_stickers',messages[-1]['content'])
    self.assertNotIn('sticker_allowed',messages[-1]['content'])
+
+ def test_only_first_valid_sticker_in_output_order(self):
+  library=[{'name':'开心'},{'name':'收到'}]
+  for output in ('正文[开心][收到][开心]','正文[开心][[STICKER:收到]]','正文[[STICKER:开心]][收到]','正文[[STICKER:未知]][开心][收到]'):
+   with self.subTest(output=output):self.assertEqual(answers.parse_sticker(output,library),('正文','开心'))
+  self.assertEqual(answers.parse_sticker('正文[说明][收到][开心]',library),('正文[说明]','收到'))
+  self.assertEqual(answers.parse_sticker('正文[[HANDOFF]][开心][收到]',library),('正文[[HANDOFF]]','开心'))
+  self.assertEqual(answers.parse_sticker('正文',library),('正文',None))
