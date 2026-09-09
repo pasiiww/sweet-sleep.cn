@@ -4,7 +4,7 @@ from botpy.connection import ConnectionState
 from botpy.message import GroupMessage
 
 
-def reference_metadata(data):
+def reference_metadata(data, own_ids=()):
     scene=data.get('message_scene') or {}
     ext=scene.get('ext',[]) if isinstance(scene,dict) else []
     indices={}
@@ -24,7 +24,13 @@ def reference_metadata(data):
                 quotes.append({'content':content[:1500], 'member_id':str(author.get('member_openid') or author.get('id') or '')[:128] if isinstance(author,dict) else '', 'msg_idx':str(el.get('msg_idx') or '')[:200]})
             collect(el.get('msg_elements'),depth+1)
     if is_reply:collect(data.get('msg_elements'))
-    return {'is_reply':bool(is_reply),'msg_idx':indices.get('msg_idx',''),
+    mentions=[]
+    raw_mentions=data.get('mentions') or []
+    for m in (raw_mentions if isinstance(raw_mentions,list) else [])[:20]:
+        if not isinstance(m,dict) or m.get('bot'):continue
+        member=m.get('member_openid') or m.get('id')
+        if isinstance(member,str) and member and len(member)<=128 and member not in own_ids and member not in mentions:mentions.append(member)
+    return {'mentions':mentions,'is_reply':bool(is_reply),'msg_idx':indices.get('msg_idx',''),
             'reference':{'message_id':str(ref.get('message_id') or '')[:200] if isinstance(ref,dict) else '',
                          'msg_idx':indices.get('ref_msg_idx',''),'quotes':quotes}}
 
@@ -38,7 +44,7 @@ class FullGroupMessage(GroupMessage):
         mentions = data.get('mentions') or []
         self.sweet_mentioned = any(isinstance(m,dict) and str(m.get('id','')) in own_ids
                                    for m in (mentions if isinstance(mentions,list) else []))
-        self.sweet_learning=reference_metadata(data)
+        self.sweet_learning=reference_metadata(data,own_ids)
 
 
 def parse_full_group(self, payload):

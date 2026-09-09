@@ -14,7 +14,7 @@ class LearningTests(unittest.TestCase):
         guard=patch.object(answers,'_model_call',side_effect=AssertionError('Regression must mock model calls'));guard.start();self.addCleanup(guard.stop)
         self.temp=tempfile.TemporaryDirectory();app.DATA=Path(self.temp.name);app.initialize()
         self.kb=self.api('POST','bases',{'name':'学习测试'})['id'];self.at=time.time()-500
-        self.cfg=learning.defaults()|{'bindings':[{'qq':'1229837719','group_id':'group001','member_id':'owner001'},{'qq':'471718054','group_id':'group001','member_id':'admin001'}]}
+        self.cfg=learning.defaults()|{'threshold':3,'bindings':[{'qq':'1229837719','group_id':'group001','member_id':'owner001'},{'qq':'471718054','group_id':'group001','member_id':'admin001'}]}
         self.api('PUT',f'bases/{self.kb}/learning',self.cfg)
         self.api('PUT','answer-settings',{'enabled':True,'model':'deepseek-v4-flash','api_key':'test-key','system_prompt':answers.DEFAULT_PROMPT})
     def tearDown(self):self.temp.cleanup()
@@ -139,3 +139,38 @@ class LearningTests(unittest.TestCase):
     def test_quote_content_cannot_supply_source_evidence(self):
         job=self.event('reply','不知道',is_reply=True,reference={'quotes':[{'content':'凯伊售价100元'}]})['job_id']
         row=self.run_job(job,[self.fact('reply')]);self.assertEqual(row['error'],'invalid_learning_output')
+
+    def test_default_four_counts_both_admins_but_not_immediate_jobs(self):
+        self.assertEqual(learning.defaults()['threshold'],4)
+        self.api('PUT',f'bases/{self.kb}/learning',self.cfg|{'threshold':4})
+        self.event('a');self.event('b',member='admin001')
+        self.event('mention','100元',mentions=['visitor1'])
+        self.assertNotIn('job_id',self.event('c'))
+        job=self.event('d',member='admin001')['job_id']
+        d=self.api('GET','learning/jobs/'+job)['details']
+        self.assertEqual(d['batch_source_ids'],['a','b','c','d'])
+
+    def test_mention_targets_last_two_each_dedup_and_quote_together(self):
+        for i in range(3):self.event('g'+str(i),'凯伊价格？',member='visitor1',at=self.at+i)
+        self.event('h','定金多少？',member='visitor2',at=self.at+3)
+        self.event('future','不要读未来',member='visitor1',at=self.at+20)
+        self.event('noise','无关聊天',member='visitor3',at=self.at+4)
+        job=self.event('reply','凯伊售价100元',at=self.at+5,mentions=['visitor1','visitor1','visitor2','missing1'],is_reply=True,reference={'message_id':'g0'})['job_id']
+        d=self.api('GET','learning/jobs/'+job)['details']
+        self.assertEqual(d['context_by_source']['reply'],['g1','g2','h'])
+        self.assertEqual(d['mention_context_by_source']['reply'],{'visitor1':['g1','g2'],'visitor2':['h'],'missing1':[]})
+        self.assertEqual([r['message_id'] for r in d['context']],['g1','g2','h','reply'])
+        self.assertEqual(d['context'][-1]['reference']['quotes'][0]['message_id'],'g0')
+        row=self.run_job(job,[self.fact('reply')]);self.assertEqual(row['status'],'completed')
+        payload=json.loads(row['details']['model_calls'][0]['messages'][-1]['content'])
+        self.assertEqual(payload['mention_context_by_source'],d['mention_context_by_source'])
+
+    def test_guest_mention_no_trigger_and_admin_mention_resets_silence(self):
+        self.event('normal')
+        self.assertNotIn('job_id',self.event('guest',member='visitor1',mentions=['owner001']))
+        job=self.event('mention',at=self.at+300,mentions=['visitor1'])['job_id']
+        self.assertEqual(self.api('GET','learning/jobs/'+job)['details']['trigger'],'member_mention')
+        with patch.object(learning.time,'time',return_value=self.at+899),app.db() as c:
+            learning.schedule_idle(c);self.assertEqual(c.execute('SELECT count(*) FROM learning_jobs').fetchone()[0],1)
+        with patch.object(learning.time,'time',return_value=self.at+900),app.db() as c:
+            learning.schedule_idle(c);self.assertEqual(c.execute('SELECT count(*) FROM learning_jobs').fetchone()[0],2)

@@ -66,3 +66,8 @@ class LearningBotTests(unittest.IsolatedAsyncioTestCase):
         body=json.loads(self.seen.conn.execute('SELECT payload FROM learning_outbox').fetchone()[0]);self.assertTrue(body['is_reply'])
     def test_forwarded_history_is_not_a_quoted_reply(self):
         self.assertFalse(compat.reference_metadata({'message_type':102,'msg_elements':[{'content':'凯伊售价100元'}]})['is_reply'])
+
+    def test_member_mentions_preserved_without_bots_and_deduplicated(self):
+        data={'mentions':[{'id':'own_bot'},{'id':'other_bot','bot':True},{'id':'guest001'},{'member_openid':'guest002','id':'different'},{'id':'guest001'}]}
+        self.assertEqual(compat.reference_metadata(data,{'own_bot'})['mentions'],['guest001','guest002'])
+        self.assertEqual(compat.reference_metadata({'content':'@guest001 hello'})['mentions'],[])

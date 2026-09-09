@@ -81,3 +81,5 @@ journalctl -u sweet-qqbot -n 30 --no-pager
 QQ 环境文件与知识库环境文件需配置相同、独立的 `KB_LEARN_TOKEN`，部署时也需复制 `learner.py` 和 `compat.py` 到 `/opt/sweet-qqbot`。阈值、OpenID 绑定和学习提示词在知识库后台修改，无需重启 QQ 服务。消息上传队列保留30分钟、最多1000条，服务端按来源消息时间处理知识新旧；全量记录与学习 Trace 保留7天。
 
 QQ 回归：`/opt/sweet-qqbot/venv/bin/python -m unittest discover -s services/qqbot -p 'test_*.py'`，客服查询使用 mock，学习上传使用本地测试 HTTP 服务，不调用真实大模型。
+
+学习触发：管理员引用回复单条触发，输入被引用内容；管理员 @ 成员单条触发，输入每位被 @ 成员此前最多两条已接收发言（同群、去重）。普通发言默认同群两位管理员累计四条，或同群管理员静默十分钟触发，每条普通发言取之前十条其他成员消息并去重。即时触发的消息不计入普通发言批次，所有触发方式与上下文索引均记录在持续学习 Trace 中。
