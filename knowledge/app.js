@@ -18,6 +18,7 @@ async function busy(button, action) {
   finally { button.disabled = false; button.textContent = previous; }
 }
 function logout() {
+  $('sticker-add').reset();
   previewTurns.clear();
   state.token = ''; state.bases = []; state.selected = ''; state.context = '';
   $('workspace').hidden = true; $('login').hidden = false; $('token').value = '';
@@ -476,5 +477,37 @@ async function loadStickers() {
  });
 }
 $('sticker-add').onsubmit=event=>{event.preventDefault();busy(event.submitter,async()=>{
- const form=event.target;await api('stickers','POST',{name:form.elements.name.value,path:form.elements.path.value});form.reset();await loadStickers();toast('已添加表情包');
+ const form=event.target;const file=selectedStickerFile;
+ if(file){
+   if(file.size>5*1024*1024)throw new Error('图片不能超过 5 MB');
+   const response=await fetch('/knowledge/api/stickers/upload?name='+encodeURIComponent(form.elements.name.value),{method:'POST',headers:{Authorization:'Bearer '+state.token,'Content-Type':file.type||'application/octet-stream'},body:file});
+   const result=await response.json();if(!response.ok)throw new Error(result.error||'上传失败');
+ }else await api('stickers','POST',{name:form.elements.name.value,path:form.elements.path.value});form.reset();await loadStickers();toast('已添加表情包');
 });};
+
+let selectedStickerFile=null;
+function clearStickerUpload(){
+ selectedStickerFile=null;$('sticker-file').value='';$('sticker-file-info').textContent='PNG / JPG，每次一张，最大 5 MB';
+ $('sticker-upload-preview').hidden=true;$('sticker-upload-preview').removeAttribute('src');$('sticker-file-clear').hidden=true;
+}
+function selectStickerFiles(files){
+ if(!files.length)return;
+ if(files.length!==1){toast('请每次拖入一张图片');return;}
+ const file=files[0];
+ if(!['image/png','image/jpeg'].includes(file.type)&&!(/\.(png|jpe?g)$/i).test(file.name)){toast('请选择 PNG 或 JPG 图片');return;}
+ if(file.size>5*1024*1024){toast('图片不能超过 5 MB');return;}
+ selectedStickerFile=file;
+ const name=$('sticker-add').elements.name;if(!name.value.trim())name.value=file.name.replace(/\.[^.]+$/,'').replace(/[\[\]\r\n]/g,'').slice(0,60);
+ $('sticker-file-info').textContent=file.name+' · '+(file.size/1024).toFixed(0)+' KB · 点击添加后上传';$('sticker-file-clear').hidden=false;
+ $('sticker-upload-preview').hidden=true;
+ const reader=new FileReader();reader.onload=()=>{if(selectedStickerFile===file){$('sticker-upload-preview').src=reader.result;$('sticker-upload-preview').hidden=false;}};reader.readAsDataURL(file);
+}
+$('sticker-file').onchange=event=>{selectStickerFiles(event.target.files);};
+$('sticker-file-clear').onclick=clearStickerUpload;
+$('sticker-add').addEventListener('reset',clearStickerUpload);
+const stickerDrop=$('sticker-drop');
+stickerDrop.ondragover=event=>{event.preventDefault();event.dataTransfer.dropEffect='copy';stickerDrop.classList.add('drag-over');};
+stickerDrop.ondragleave=event=>{if(!stickerDrop.contains(event.relatedTarget))stickerDrop.classList.remove('drag-over');};
+stickerDrop.ondrop=event=>{event.preventDefault();stickerDrop.classList.remove('drag-over');selectStickerFiles(event.dataTransfer.files);};
+// Files dropped outside the target should not navigate away from the unsaved form.
+for(const type of ['dragover','drop'])document.addEventListener(type,event=>{if(!$('view-stickers').hidden&&Array.from(event.dataTransfer?.types||[]).includes('Files'))event.preventDefault();});

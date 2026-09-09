@@ -32,3 +32,39 @@ def image_url(path):
 
 def available(c):
     return [dict(r) for r in c.execute('SELECT id,name,path,url,revision FROM stickers WHERE enabled=1 ORDER BY id LIMIT 100')]
+
+
+MAX_UPLOAD = 5 * 1024 * 1024
+
+def save_upload(directory, content):
+    """Use server-generated filenames; never interpret an uploaded filename as a path."""
+    import secrets
+    import struct
+    import zlib
+    if not content or len(content) > MAX_UPLOAD:
+        raise ValueError('图片不能超过 5 MB')
+    if content.startswith(b'\x89PNG\r\n\x1a\n'):
+        offset=8;first=True;ended=False
+        while offset+12 <= len(content):
+            size=struct.unpack('>I',content[offset:offset+4])[0]
+            kind=content[offset+4:offset+8];end=offset+8+size
+            if end+4>len(content):raise ValueError('PNG 文件不完整')
+            if zlib.crc32(content[offset+4:end]) != struct.unpack('>I',content[end:end+4])[0]:raise ValueError('PNG 校验失败')
+            if first:
+                if kind!=b'IHDR' or size!=13:raise ValueError('PNG 文件格式错误')
+                width,height=struct.unpack('>II',content[offset+8:offset+16])
+                if not 0<width<=10000 or not 0<height<=10000 or width*height>25000000:raise ValueError('图片尺寸过大')
+                first=False
+            offset=end+4
+            if kind==b'IEND':ended=True;break
+        if not ended or offset!=len(content):raise ValueError('PNG 文件不完整')
+        extension='png'
+    elif content.startswith(b'\xff\xd8\xff') and content.endswith(b'\xff\xd9'):
+        extension='jpg'
+    else:raise ValueError('请上传 PNG 或 JPG 图片')
+    directory.mkdir(parents=True,exist_ok=True,mode=0o700)
+    if sum(p.stat().st_size for p in directory.iterdir() if p.is_file())+len(content)>250*1024*1024:
+        raise ValueError('表情包目录已达到 250 MB，请先清理不用的图片')
+    target=directory/(secrets.token_hex(16)+'.'+extension)
+    with target.open('xb') as stream:stream.write(content)
+    return target

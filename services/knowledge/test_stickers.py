@@ -38,3 +38,46 @@ class StickerTests(unittest.TestCase):
   with patch.object(answers,'keywords',return_value=[['营业']]),patch.object(answers,'complete',return_value={'supported':True,'answer':'十点营业呀','sticker_name':'开心'}):
    reply=self.api('POST','answer',{'kb_id':kb,'query':'营业时间'})
   self.assertEqual(reply['sticker']['url'],row['url']);self.assertNotIn('sticker_name',reply)
+ def test_upload_and_new_marker(self):
+  import base64
+  raw=base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1sAAAAASUVORK5CYII=')
+  # Generate a structurally valid PNG with verified chunk CRCs.
+  import struct,zlib
+  def chunk(kind,data):return struct.pack('>I',len(data))+kind+data+struct.pack('>I',zlib.crc32(kind+data))
+  raw=b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',1,1,8,2,0,0,0))+chunk(b'IDAT',zlib.compress(b'\x00\xff\x00\x00'))+chunk(b'IEND',b'')
+  file=stickers.save_upload(app.DATA/'stickers',raw)
+  self.assertEqual(file.read_bytes(),raw)
+  self.assertRegex(file.name,r'^[a-f0-9]{32}\.png$')
+  for bad in (b'<svg/>',b'bad',raw[:-5],b'x'*(stickers.MAX_UPLOAD+1)):
+   with self.assertRaises(ValueError):stickers.save_upload(app.DATA/'stickers',bad)
+  cfg={'system_prompt':'客服','stickers':[{'name':'玲纱-开心'},{'name':'收到'}]}
+  with patch.object(answers,'model_call',return_value='好呀[玲纱-开心][收到]') as model:
+   self.assertEqual(answers.complete(cfg,'你好',[]),{'supported':True,'answer':'好呀','sticker_name':'玲纱-开心'})
+   self.assertIn('[玲纱-开心]',model.call_args.args[1][0]['content'])
+  with patch.object(answers,'model_call',return_value='好呀'):
+   self.assertNotIn('sticker_name',answers.complete(cfg,'你好',[]))
+ def test_upload_http_auth_public_download_and_cleanup(self):
+  import threading,struct,zlib
+  from http.server import ThreadingHTTPServer
+  from urllib.request import Request,urlopen
+  from urllib.error import HTTPError
+  import json
+  def chunk(kind,data):return struct.pack('>I',len(data))+kind+data+struct.pack('>I',zlib.crc32(kind+data))
+  raw=b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',1,1,8,2,0,0,0))+chunk(b'IDAT',zlib.compress(b'\x00\xff\x00\x00'))+chunk(b'IEND',b'')
+  http=ThreadingHTTPServer(('127.0.0.1',0),app.Handler)
+  thread=threading.Thread(target=http.serve_forever,daemon=True);thread.start()
+  endpoint='http://127.0.0.1:'+str(http.server_port)
+  try:
+   with patch.object(app,'ADMIN_TOKEN','upload-admin'),patch.object(app,'READ_TOKEN','upload-reader'):
+    for token in ('','upload-reader'):
+     with self.assertRaises(HTTPError) as error:urlopen(Request(endpoint+'/knowledge/api/stickers/upload?name=test',data=raw,headers={'Authorization':'Bearer '+token}))
+     self.assertIn(error.exception.code,(401,403))
+    request=Request(endpoint+'/knowledge/api/stickers/upload?name=test',data=raw,headers={'Authorization':'Bearer upload-admin','Content-Type':'image/png'})
+    with urlopen(request) as response:row=json.load(response)
+    with urlopen(endpoint+row['path']) as response:
+     self.assertEqual(response.headers['Content-Type'],'image/png');self.assertEqual(response.read(),raw)
+    with self.assertRaises(HTTPError) as error:urlopen(request)
+    self.assertEqual(error.exception.code,409)
+    self.assertEqual(len(list((app.DATA/'stickers').iterdir())),1)
+    with self.assertRaises(HTTPError):urlopen(endpoint+'/knowledge/sticker-files/../../knowledge.db')
+  finally:http.shutdown();http.server_close();thread.join()

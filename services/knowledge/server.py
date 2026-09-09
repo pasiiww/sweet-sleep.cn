@@ -906,6 +906,13 @@ class Handler(BaseHTTPRequestHandler):
     def handle_request(self):
         try:
             parsed = urlsplit(self.path)
+            if parsed.path.startswith('/knowledge/sticker-files/'):
+                filename=parsed.path.removeprefix('/knowledge/sticker-files/')
+                if self.command not in ('GET','HEAD') or not re.fullmatch(r'[a-f0-9]{32}\.(png|jpg)',filename):fail(404,'图片不存在')
+                file=DATA/'stickers'/filename
+                if not file.is_file():fail(404,'图片不存在')
+                self.reply(200,file.read_bytes(),'image/png' if filename.endswith('.png') else 'image/jpeg')
+                return
             if not parsed.path.startswith('/knowledge/api/'):
                 assets = {'/knowledge/': ('index.html', 'text/html'), '/knowledge/index.html': ('index.html', 'text/html'),
                           '/knowledge/app.js': ('app.js', 'text/javascript'), '/knowledge/style.css': ('style.css', 'text/css')}
@@ -924,6 +931,20 @@ class Handler(BaseHTTPRequestHandler):
                 fail(403, '学习密钥仅可提交聊天事件')
             if not admin and not learner and not (parsed.path in ('/knowledge/api/retrieve', '/knowledge/api/answer', '/knowledge/api/trace-delivery') and self.command == 'POST'):
                 fail(403, '召回密钥仅可调用检索接口')
+            if parsed.path=='/knowledge/api/stickers/upload' and self.command=='POST':
+                if self.headers.get('Transfer-Encoding'):fail(400,'不支持分块请求体')
+                length=int(self.headers.get('Content-Length',0))
+                if not 0<length<=stickers.MAX_UPLOAD:fail(413,'图片不能超过 5 MB')
+                name=parse_qs(parsed.query).get('name',[''])[0]
+                with WRITE_LOCK:
+                    try:target=stickers.save_upload(DATA/'stickers',self.rfile.read(length))
+                    except ValueError as exc:fail(400,str(exc))
+                try:result=api('POST','/knowledge/api/stickers',{'name':name,'path':'/knowledge/sticker-files/'+target.name},{})
+                except Exception:
+                    target.unlink(missing_ok=True)
+                    raise
+                self.reply(200,result)
+                return
             data = {}
             if self.command in ('POST', 'PUT') or (self.command == 'DELETE' and self.headers.get('Content-Length', '0') != '0'):
                 if self.headers.get('Transfer-Encoding'):

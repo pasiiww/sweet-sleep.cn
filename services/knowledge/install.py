@@ -75,6 +75,10 @@ if 'location ^~ /knowledge/' not in config:
     }
 
 ''' + anchor)
+# Allow binary sticker uploads; other JSON endpoints retain their own 1 MB limit.
+start=config.index('location ^~ /knowledge/')
+end=config.index('}',start)
+config=config[:start]+config[start:end].replace('client_max_body_size 1m;', 'client_max_body_size 6m;')+config[end:]
 config_path.write_text(config)
 try:
     subprocess.run(['nginx', '-t'], check=True)
