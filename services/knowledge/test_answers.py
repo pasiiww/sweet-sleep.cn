@@ -174,7 +174,9 @@ class KeywordTests(unittest.TestCase):
         with patch.object(answers, 'model_call', return_value='{"query_groups":[["凯伊","价格"],["kei","定金"],["价格","凯伊"],["KEI","定金"]]}') as model:
             self.assertEqual(answers.keywords(cfg, '凯伊价格？'), [['凯伊', '价格'], ['kei', '定金']])
             self.assertTrue(model.call_args.kwargs['json_mode'])
-        for values in ([['一个']], [['重复'], ['重复']], list('abcdef'), [1, 2], [[' '], ['x']], [['x'] * 5, ['y']]):
+        with patch.object(answers, 'model_call', return_value='{"query_groups":[["凯伊","定金"]]}'):
+            self.assertEqual(answers.keywords(cfg, '那定金呢'), [['凯伊', '定金']])
+        for values in (list('abcdef'), [1, 2], [[' '], ['x']], [['x'] * 5, ['y']]):
             with patch.object(answers, 'model_call', return_value=json.dumps({'query_groups': values})):
                 with self.assertRaises(answers.ModelError):
                     answers.keywords(cfg, '问题')

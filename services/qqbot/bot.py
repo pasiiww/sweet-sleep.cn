@@ -1,5 +1,6 @@
 """QQ knowledge retrieval demo using Tencent's qq-botpy 1.2.1."""
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -15,7 +16,7 @@ import botpy.gateway
 import botpy.http
 
 LOG = logging.getLogger('knowledge-bot')
-HELP = '我是午觉糖水铺的客服机器人。\n直接发送问题，或输入：/检索 你的问题\n我会根据知识库资料回答，资料不足时请群主或管理员确认。模型不可用时返回最相关文档。\n管理员可在群内发送 /身份，获取后台人工接管配置需要的 OpenID。'
+HELP = '我是午觉糖水铺的客服机器人。\n直接发送问题，或输入：/检索 你的问题\n我会根据知识库资料回答，资料不足时请群主或管理员确认。模型不可用时返回最相关文档。\n同一会话保留最近30分钟的问答，可发送 /新对话 清空。\n管理员可在群内发送 /身份，获取后台人工接管配置需要的 OpenID。'
 
 
 def normalize(text):
@@ -62,6 +63,9 @@ class SeenMessages:
     def __init__(self, path):
         self.conn = sqlite3.connect(path)
         self.conn.execute('CREATE TABLE IF NOT EXISTS seen(id TEXT PRIMARY KEY, expires REAL)')
+        self.conn.execute('CREATE TABLE IF NOT EXISTS dialogue(id INTEGER PRIMARY KEY AUTOINCREMENT, session TEXT NOT NULL, query TEXT NOT NULL, reply TEXT NOT NULL, at REAL NOT NULL)')
+        self.conn.execute('CREATE INDEX IF NOT EXISTS dialogue_session ON dialogue(session,id)')
+        self.conn.execute('CREATE INDEX IF NOT EXISTS dialogue_time ON dialogue(at)')
         self.conn.commit()
 
     def claim(self, key):
@@ -70,15 +74,51 @@ class SeenMessages:
             return self.conn.execute('INSERT OR IGNORE INTO seen VALUES(?,?)', (key, time.time() + 86400)).rowcount == 1
 
 
+    def history(self, session):
+        if not session:
+            return []
+        with self.conn:
+            self.conn.execute('DELETE FROM dialogue WHERE at<=?', (time.time() - 1800,))
+            rows = self.conn.execute('SELECT query,reply FROM dialogue WHERE session=? ORDER BY id DESC LIMIT 10', (session,)).fetchall()
+        selected, used = [], 0
+        for query, reply in rows:
+            if used + len(query) + len(reply) > 12000:
+                break
+            selected.append([{'role': 'user', 'content': query}, {'role': 'assistant', 'content': reply}])
+            used += len(query) + len(reply)
+        return [message for pair in reversed(selected) for message in pair]
+
+    def remember(self, session, query, reply):
+        if not session:
+            return
+        with self.conn:
+            self.conn.execute('DELETE FROM dialogue WHERE at<=?', (time.time() - 1800,))
+            self.conn.execute('INSERT INTO dialogue(session,query,reply,at) VALUES(?,?,?,?)', (session, query, reply, time.time()))
+            self.conn.execute('DELETE FROM dialogue WHERE session=? AND id NOT IN (SELECT id FROM dialogue WHERE session=? ORDER BY id DESC LIMIT 10)', (session, session))
+
+    def clear_history(self, session):
+        with self.conn:
+            self.conn.execute('DELETE FROM dialogue WHERE session=?', (session,))
+
+
+def conversation_key(message, kind, kb_id):
+    author = getattr(message, 'author', None)
+    user = getattr(author, 'member_openid' if kind == 'group' else 'user_openid', '')
+    group = getattr(message, 'group_openid', '') if kind == 'group' else ''
+    if not user or (kind == 'group' and not group):
+        return ''  # Missing identity must never fall into a shared anonymous conversation.
+    return hashlib.sha256(json.dumps([kb_id, kind, group, user]).encode()).hexdigest()
+
+
 class Retriever:
     def __init__(self, url, token, kb_id):
         self.url = url.removesuffix('/retrieve') + '/answer' if url.endswith('/retrieve') else url
         self.token, self.kb_id = token, kb_id
 
-    async def search(self, query, group_id=''):
+    async def search(self, query, group_id='', history=None):
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=55)) as session:
             async with session.post(self.url, headers={'Authorization': 'Bearer ' + self.token},
-                                    json={'kb_id': self.kb_id, 'query': query, 'group_id': group_id}) as response:
+                                    json={'kb_id': self.kb_id, 'query': query, 'group_id': group_id, 'history': history or []}) as response:
                 if response.status != 200:
                     raise RuntimeError(f'Knowledge HTTP {response.status}')
                 return await response.json()
@@ -90,6 +130,7 @@ class KnowledgeBot(botpy.Client):
                          log_level=logging.INFO, ext_handlers=False, **kwargs)
         self.retriever, self.seen = retriever, seen
         self.capacity = asyncio.Semaphore(4)
+        self.conversations = {}
 
     async def on_ready(self):
         LOG.info('QQ_CONNECTED app_id=%s knowledge_id=%s', os.environ.get('QQ_APP_ID'), self.retriever.kb_id)
@@ -113,10 +154,28 @@ class KnowledgeBot(botpy.Client):
             return
         if not message.id or not self.seen.claim(kind + ':' + message.id):
             return
+        session = conversation_key(message, kind, self.retriever.kb_id)
+        # Serialize generation AND delivery for each conversation; release unused locks.
+        lock_key = session or kind + ':' + message.id
+        entry = self.conversations.setdefault(lock_key, [asyncio.Lock(), 0])
+        entry[1] += 1
+        try:
+            async with entry[0]:
+                await self._answer(message, kind, session)
+        finally:
+            entry[1] -= 1
+            if not entry[1]:
+                self.conversations.pop(lock_key, None)
+
+    async def _answer(self, message, kind, session):
         query = normalize(message.content)
+        remember = False
         try:
             if not query or query.lower() in ('帮助', '/帮助', '/help', 'help', '/start'):
                 reply = HELP
+            elif query in ('/新对话', '/清空上下文'):
+                self.seen.clear_history(session)
+                reply = '已清空当前对话的上下文，我们重新开始。'
             elif query in ('/身份', '/whoami'):
                 if kind == 'group':
                     reply = f'群 OpenID：{plain(message.group_openid)}\n你的成员 OpenID：{plain(message.author.member_openid)}\n请由管理员在知识库后台填写人工联系人。此命令不会自动赋予管理员身份。'
@@ -129,10 +188,13 @@ class KnowledgeBot(botpy.Client):
             else:
                 async with self.capacity:
                     group_id = getattr(message, 'group_openid', '') if kind == 'group' else ''
-                    reply = format_reply(await self.retriever.search(query, group_id=group_id), kind)
+                    reply = format_reply(await self.retriever.search(query, group_id=group_id, history=self.seen.history(session)), kind)
+                    remember = True
             response = await message.reply(content=reply, msg_type=0, msg_seq=1)
             if not response:
                 raise RuntimeError('QQ empty response')
+            if remember:
+                self.seen.remember(session, query, reply)
             LOG.info('REPLY_OK kind=%s chars=%s', kind, len(reply))
         except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError) as exc:
             LOG.error('REQUEST_FAILED kind=%s error=%s', kind, type(exc).__name__)

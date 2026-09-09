@@ -18,6 +18,7 @@ async function busy(button, action) {
   finally { button.disabled = false; button.textContent = previous; }
 }
 function logout() {
+  previewTurns.clear();
   state.token = ''; state.bases = []; state.selected = ''; state.context = '';
   $('workspace').hidden = true; $('login').hidden = false; $('token').value = '';
   document.querySelectorAll('dialog[open]').forEach(d => d.close());
@@ -32,7 +33,7 @@ $('login-form').addEventListener('submit', async event => {
   });
 });
 $('logout').onclick = logout;
-const views = { documents: ['知识库', '把分散的信息，变成有据可依的回答。'], retrieve: ['召回测试', '在连接大模型之前，先看看知识是否被准确找到。'], integration: ['API 接入', '把你的知识，接入任意大模型工作流。'], settings: ['模型设置', '为你的知识库，连接语义理解能力。'] };
+const views = { aliases: ['实体别名', '统一名称，让不同称呼都能找到同一份知识。'], documents: ['知识库', '把分散的信息，变成有据可依的回答。'], retrieve: ['召回测试', '在连接大模型之前，先看看知识是否被准确找到。'], integration: ['API 接入', '把你的知识，接入任意大模型工作流。'], settings: ['模型设置', '为你的知识库，连接语义理解能力。'] };
 document.querySelectorAll('[data-view]').forEach(button => button.onclick = () => {
   const view = button.dataset.view;
   document.querySelectorAll('.view').forEach(el => el.hidden = el.id !== 'view-' + view);
@@ -47,12 +48,13 @@ async function refresh() {
   $('stats').innerHTML = [ ['知识库', items.length, '▤'], ['文档总数', items.reduce((s, b) => s + b.document_count, 0), '▧'], ['可检索分段', items.reduce((s, b) => s + b.chunk_count, 0), '⌘'] ].map(([title, count, icon]) => `<div class="stat"><div><small>${title}</small><strong>${count.toLocaleString()}</strong></div><div class="stat-icon">${icon}</div></div>`).join('');
   $('base-list').innerHTML = items.map(b => `<button class="base-card ${b.id === state.selected ? 'selected' : ''}" data-base="${b.id}"><div class="base-card-top"><span class="base-icon">▤</span><span class="badge ${b.vector_count < b.chunk_count ? 'pending' : ''}">${b.chunk_count && b.vector_count === b.chunk_count ? '向量已就绪' : '关键词检索'}</span></div><h3>${esc(b.name)}</h3><p>${esc(b.description || '为大模型准备有来源的知识')}</p><div class="base-card-bottom"><span>${b.document_count} 份文档</span><span>${b.chunk_count} 个分段</span><span>${b.vector_count} 个向量</span></div></button>`).join('');
   $('no-base').hidden = items.length > 0; $('document-panel').hidden = !state.selected;
-  for (const id of ['retrieve-base', 'api-base', 'answer-base']) {
+  for (const id of ['retrieve-base', 'api-base', 'answer-base', 'aliases-base']) {
     const previous = $(id).value;
     $(id).innerHTML = items.map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join('');
     $(id).value = items.some(b => b.id === previous) ? previous : state.selected;
   }
   updateExample();
+  await loadAliases();
   if (state.selected) {
     const selected = items.find(b => b.id === state.selected);
     $('selected-base-name').textContent = selected.name; $('selected-base-description').textContent = selected.description || '管理文档内容与召回索引';
@@ -196,10 +198,50 @@ $('test-answer-model').onclick = () => busy($('test-answer-model'), async () => 
   const cfg = await api('answer-settings');
   if (cfg.last_status) $('answer-status').textContent = answerReasons[cfg.last_status.reason] || cfg.last_status.reason;
 });
+const previewTurns = new Map();
+function previewHistory(kb) {
+  const recent = (previewTurns.get(kb) || []).filter(turn => turn.at > Date.now() - 1800000).slice(-10);
+  let size = 0;
+  const selected = [];
+  for (const turn of recent.reverse()) {
+    if (size + turn.query.length + turn.reply.length > 12000) break;
+    size += turn.query.length + turn.reply.length; selected.unshift(turn);
+  }
+  previewTurns.set(kb, selected);
+  return selected.flatMap(turn => [{role:'user',content:turn.query},{role:'assistant',content:turn.reply}]);
+}
+$('clear-preview-history').onclick = () => { previewTurns.delete($('answer-base').value); $('answer-preview').textContent = '已清空当前知识库的预览对话。'; };
 $('answer-preview-form').onsubmit = event => { event.preventDefault(); busy(event.submitter, async () => {
   $('answer-preview').textContent = '正在检索并生成回复…';
   try {
-    const result = await api('answer', 'POST', {kb_id: $('answer-base').value, query: $('answer-query').value});
-    $('answer-preview').textContent = (answerReasons[result.reason] || result.mode) + '\n检索词：' + (result.search_terms || []).map(group => Array.isArray(group) ? '[' + group.join(' + ') + ']' : group).join(' / ') + '\n\n' + result.answer + (result.handoff ? '\n\n实际群聊会按该群的人工联系人配置尝试艾特；这里仅预览文本。' : '');
+    const kb = $('answer-base').value, query = $('answer-query').value;
+    const result = await api('answer', 'POST', {kb_id: kb, query, history: previewHistory(kb)});
+    previewTurns.set(kb, [...(previewTurns.get(kb) || []), {query, reply: result.answer, at: Date.now()}].slice(-10));
+    $('answer-preview').textContent = (answerReasons[result.reason] || result.mode) + '\n携带历史：' + result.history_turns + ' 轮' + (result.alias_context ? '\n' + result.alias_context : '') + '\n检索词：' + (result.search_terms || []).map(group => Array.isArray(group) ? '[' + group.join(' + ') + ']' : group).join(' / ') + '\n\n' + result.answer + (result.handoff ? '\n\n实际群聊会按该群的人工联系人配置尝试艾特；这里仅预览文本。' : '');
   } catch (error) { $('answer-preview').textContent = error.message; throw error; }
+}); };
+
+let aliasesRequest = 0;
+async function loadAliases() {
+  const kb = $('aliases-base').value, request = ++aliasesRequest;
+  $('aliases-text').disabled = true; $('save-aliases').disabled = true;
+  $('aliases-text').value = ''; $('aliases-status').textContent = kb ? '正在读取…' : '请先创建知识库';
+  if (!kb) return;
+  try {
+    const result = await api(`bases/${kb}/entities`);
+    if (request !== aliasesRequest) return;
+    $('aliases-text').value = result.items.map(item => [item.name, ...item.aliases].join(' | ')).join('\n');
+    $('aliases-status').textContent = `已配置 ${result.items.length} 个实体`;
+    $('aliases-text').disabled = false; $('save-aliases').disabled = false;
+  } catch (error) { if (request === aliasesRequest) $('aliases-status').textContent = error.message; throw error; }
+}
+$('aliases-base').onchange = () => loadAliases().catch(error => toast(error.message));
+$('aliases-form').onsubmit = event => { event.preventDefault(); busy(event.submitter, async () => {
+  const items = $('aliases-text').value.split('\n').filter(line => line.trim()).map(line => {
+    const [name, ...aliases] = (line.includes('|') ? line.split('|') : line.trim().split(/\s+/)).map(value => value.trim());
+    return {name, aliases};
+  });
+  const result = await api(`bases/${$('aliases-base').value}/entities`, 'PUT', {items});
+  $('aliases-status').textContent = `已保存 ${result.items.length} 个实体，下次提问立即生效`;
+  toast('实体别名已保存');
 }); };

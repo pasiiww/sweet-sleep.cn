@@ -18,6 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib import request, error
 from urllib.parse import urlsplit, parse_qs
 import answers
+import entities
 
 DATA = Path(os.environ.get('KB_DATA_DIR', '/var/lib/sweet-knowledge'))
 STATIC = Path(os.environ.get('KB_STATIC_DIR', Path(__file__).resolve().parents[2] / 'knowledge'))
@@ -76,6 +77,7 @@ def initialize():
           DELETE FROM chunk_fts WHERE rowid=old.id;
         END;
         CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS entity_catalog (kb_id TEXT PRIMARY KEY REFERENCES bases(id) ON DELETE CASCADE, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS app_settings (name TEXT PRIMARY KEY, value TEXT NOT NULL);
         ''')
         c.execute('INSERT OR IGNORE INTO settings VALUES(1, ?)', (json.dumps({
@@ -243,6 +245,11 @@ def build_vectors(kb_id):
         VECTOR_LOCK.release()
 
 
+def entity_catalog(c, kb_id):
+    row = c.execute('SELECT value FROM entity_catalog WHERE kb_id=?', (kb_id,)).fetchone()
+    return json.loads(row[0]) if row else []
+
+
 def retrieve(data):
     groups = None
     if 'query_groups' in data:
@@ -264,18 +271,40 @@ def retrieve(data):
     with db() as c:
         kb = base(c, kb_id)
         k = integer(data, 'top_k', kb['top_k'], 1, 20)
+        catalog = entities.Catalog(entity_catalog(c, kb_id))
+        query = catalog.normalize(query)
+        if groups:
+            try:
+                groups = answers.normalize_query_groups([[catalog.normalize(term) for term in group] for group in groups])
+            except ValueError as exc:
+                fail(400, str(exc))
         cfg, keyword, semantic = config(c), [], []
-        ft = list(dict.fromkeys(tokens(query)))[:128]
+        expanded = [variant for name in catalog.referenced(query) for variant in catalog.expand(name)]
+        ft = list(dict.fromkeys(tokens(query) + [token for variant in expanded for token in tokens(variant)]))[:512]
         if mode != 'vector' and groups:
             scores = {}
             for group in groups:
                 # FTS narrows candidates; literal predicates ensure full terms, not scattered CJK characters.
-                parts = [list(dict.fromkeys(tokens(term))) for term in group]
-                if any(not part for part in parts):
+                parts, conditions, values = [], [], []
+                for term in group:
+                    variants = catalog.expand(term)
+                    alternatives, checks = [], []
+                    for variant in variants:
+                        ft_tokens = list(dict.fromkeys(tokens(variant)))
+                        if not ft_tokens:
+                            continue
+                        alternatives.append('(' + ' AND '.join('"' + token + '"' for token in ft_tokens) + ')')
+                        checks.append('(instr(lower(d.title), lower(?)) > 0 OR instr(lower(chunks.content), lower(?)) > 0)')
+                        values.extend([variant, variant])
+                    if not alternatives:
+                        break
+                    parts.append('(' + ' OR '.join(alternatives) + ')')
+                    conditions.append('(' + ' OR '.join(checks) + ')')
+                if len(parts) != len(group):
                     continue
-                match = ' AND '.join('"' + token + '"' for part in parts for token in part)
-                predicates = ' AND '.join('(instr(lower(d.title), lower(?)) > 0 OR instr(lower(chunks.content), lower(?)) > 0)' for _ in group)
-                params = [match, kb_id] + [term for term in group for _ in range(2)] + [k * 4]
+                match = ' AND '.join(parts)
+                predicates = ' AND '.join(conditions)
+                params = [match, kb_id, *values, k * 4]
                 rows = c.execute('''SELECT chunks.id,bm25(chunk_fts,2.0,1.0) AS rank
                     FROM chunk_fts JOIN chunks ON chunks.id=chunk_fts.rowid
                     JOIN documents d ON d.id=chunks.doc_id
@@ -389,14 +418,30 @@ def respond(data):
     with db() as c:
         base(c, kb_id)
         cfg = answer_config(c)
-    terms = [query]
+        catalog = entities.Catalog(entity_catalog(c, kb_id))
+    try:
+        history = entities.history(data.get('history', []))
+    except ValueError as exc:
+        fail(400, str(exc))
+    hints = catalog.hints([m['content'] for m in history] + [query])
+    cfg = cfg | {'conversation_history': history, 'alias_context': entities.context(hints)}
+    terms = [catalog.normalize(query)[:2000]]
     def finish(response):
+        response['alias_context'] = cfg['alias_context']
+        response['matched_aliases'] = hints
+        response['history_turns'] = len(history) // 2
         response['search_terms'] = terms
         response['query_groups'] = [term for term in terms if isinstance(term, list)]
         answer_status(cfg, response['mode'], response['reason'])
         return response
     def fallback(reason, result=None):
-        result = result if result is not None else search_terms(kb_id, [query])
+        nonlocal terms
+        if result is None:
+            groups = entities.fallback_groups(catalog, query, history)
+            if not groups and history and entities.is_followup(query):
+                return finish(answers.handoff(cfg, group_id, 'insufficient_evidence'))
+            terms = groups or [catalog.normalize(query)[:2000]]
+            result = search_terms(kb_id, terms)
         if not result['results']:
             return finish(answers.handoff(cfg, group_id, 'no_results'))
         return finish(answers.fallback(result, reason))
@@ -407,6 +452,10 @@ def respond(data):
     result = None
     try:
         terms = answers.keywords(cfg, query)
+        try:
+            terms = answers.normalize_query_groups([[catalog.normalize(term) for term in group] for group in terms])
+        except ValueError:
+            raise answers.ModelError('invalid_keywords') from None
         result = search_terms(kb_id, terms)
         if not result['results']:
             return finish(answers.handoff(cfg, group_id, 'no_results'))
@@ -509,6 +558,16 @@ def api(method, path, data, params):
                 return base(c, kb_id)
         if len(segments) >= 2 and segments[0] == 'bases':
             kb = base(c, segments[1])
+            if len(segments) == 3 and segments[2] == 'entities':
+                if method == 'PUT':
+                    try:
+                        items = entities.validate(data.get('items'))
+                    except ValueError as exc:
+                        fail(400, str(exc))
+                    c.execute('INSERT OR REPLACE INTO entity_catalog VALUES(?,?)', (kb['id'], json.dumps(items)))
+                elif method != 'GET':
+                    fail(405, '不支持此操作')
+                return {'items': entity_catalog(c, kb['id'])}
             if len(segments) == 2:
                 if method == 'GET':
                     return kb
