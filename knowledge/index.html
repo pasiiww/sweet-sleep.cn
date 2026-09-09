@@ -19,7 +19,7 @@
 <p class="muted">各群 member_role=owner 的群主默认进入监听，绑定管理员 OpenID 全群生效，共享所选知识库。检索文档和 QA 后，有新增或更新才插入新 QA，旧版本保留。置信度≥80%立即生效，低于80%在 QA 界面确认后生效。普通成员消息仅用于理解上下文，不作为知识依据；学习任务不会在群里发言。</p>
 <label>学习知识库<select id="learning-base" required></select></label>
 <div class="form-row"><label class="checkbox"><input id="learning-enabled" type="checkbox">启用持续学习</label><label>每几条管理员消息触发<input id="learning-threshold" type="number" min="2" max="10" value="4" required></label></div>
-<p class="hint">管理员引用回复单条触发，带入被引用内容；管理员 @ 成员也单条触发，带入每位被 @ 成员此前2条发言。普通发言同群合计4条（可调整），或同群管理员静默10分钟触发；每条普通发言取之前10条其他成员消息并去重。闲聊会跳过入库。</p>
+<p class="hint">管理员引用回复和 @ 成员均单条触发：读取管理员与对方在本群最近1小时内、触发前的10条消息（两人合计），再附本次发言与引用原文；多位对方分别取上文后去重。普通发言同群合计4条（可调整），或同群管理员静默10分钟触发；每条普通发言取之前10条其他成员消息并去重。闲聊会跳过入库。</p>
 <h3>管理员 OpenID 绑定</h3><p class="hint">群主无需绑定；其他管理员可在群里 @机器人发送 /身份，将成员 OpenID 填在对应行，所有群通用。普通成员仅提供上文，机器人消息不处理。</p>
 <div class="table-wrap"><table class="aliases-table"><thead><tr><th>QQ 号</th><th>成员 OpenID（全群通用）</th><th>操作</th></tr></thead><tbody id="learning-bindings"></tbody></table></div>
 <button id="learning-add-binding" type="button">＋ 添加绑定行</button>

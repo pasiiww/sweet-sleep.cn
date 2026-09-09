@@ -151,16 +151,16 @@ class LearningTests(unittest.TestCase):
         d=self.api('GET','learning/jobs/'+job)['details']
         self.assertEqual(d['batch_source_ids'],['a','b','c','d'])
 
-    def test_mention_targets_last_two_each_dedup_and_quote_together(self):
+    def test_mention_pair_context_dedup_and_quote_together(self):
         for i in range(3):self.event('g'+str(i),'凯伊价格？',member='visitor1',at=self.at+i)
         self.event('h','定金多少？',member='visitor2',at=self.at+3)
         self.event('future','不要读未来',member='visitor1',at=self.at+20)
         self.event('noise','无关聊天',member='visitor3',at=self.at+4)
         job=self.event('reply','凯伊售价100元',at=self.at+5,mentions=['visitor1','visitor1','visitor2','missing1'],is_reply=True,reference={'message_id':'g0'})['job_id']
         d=self.api('GET','learning/jobs/'+job)['details']
-        self.assertEqual(d['context_by_source']['reply'],['g1','g2','h'])
-        self.assertEqual(d['mention_context_by_source']['reply'],{'visitor1':['g1','g2'],'visitor2':['h'],'missing1':[]})
-        self.assertEqual([r['message_id'] for r in d['context']],['g1','g2','h','reply'])
+        self.assertEqual(d['context_by_source']['reply'],['g0','g1','g2','h'])
+        self.assertEqual(d['mention_context_by_source']['reply'],{'visitor1':['g0','g1','g2'],'visitor2':['h'],'missing1':[]})
+        self.assertEqual([r['message_id'] for r in d['context']],['g0','g1','g2','h','reply'])
         self.assertEqual(d['context'][-1]['reference']['quotes'][0]['message_id'],'g0')
         row=self.run_job(job,[self.fact('reply')]);self.assertEqual(row['status'],'completed')
         payload=json.loads(row['details']['model_calls'][0]['messages'][-1]['content'])
@@ -244,3 +244,30 @@ class LearningTests(unittest.TestCase):
         fact=self.fact('unknown');fact.pop('confidence')
         row=self.run_job(self.event('unknown','凯伊售价100元',is_reply=True)['job_id'],[fact])
         self.assertEqual(row['details']['changes'][0]['after']['publication'],'pending')
+
+    def test_reply_and_mention_use_same_two_person_last_ten(self):
+        self.api('PUT',f'bases/{self.kb}/learning',self.cfg|{'threshold':10})
+        for n in range(12):self.event('pair'+str(n),'上下文'+str(n),member='owner001' if n%2 else 'visitor1',at=self.at+n)
+        self.event('noise','其他成员消息',member='visitor2',at=self.at+15)
+        self.event('future','未来消息',member='visitor1',at=self.at+50)
+        expected=['pair'+str(n) for n in range(2,12)]
+        quoted=self.event('quoted','凯伊售价100元',at=self.at+20,is_reply=True,reference={'message_id':'pair0'})['job_id']
+        q=self.api('GET','learning/jobs/'+quoted)['details']
+        self.assertEqual(q['context_by_source']['quoted'],expected)
+        self.assertEqual(len(q['context']),11)
+        self.assertEqual(q['pair_context_by_source']['quoted']['partners']['visitor1'],expected)
+        with app.db() as c:c.execute("DELETE FROM learning_events WHERE message_id='quoted'")
+        mentioned=self.event('mentioned','凯伊售价100元',at=self.at+20,mentions=['visitor1'])['job_id']
+        m=self.api('GET','learning/jobs/'+mentioned)['details']
+        self.assertEqual(m['context_by_source']['mentioned'],expected)
+
+    def test_hour_window_includes_45_minutes_excludes_older_and_other_group(self):
+        for mid,group in [('old','group001'),('within','group001'),('boundary','group001'),('wrong-group','group002')]:
+            self.event(mid,'凯伊价格？',member='visitor1',group=group)
+        with app.db() as c:
+            for mid,age in [('old',3601),('within',2700),('boundary',3600)]:
+                c.execute('UPDATE learning_events SET at=? WHERE message_id=?',(self.at-age,mid))
+        result=self.event('reply','100元',is_reply=True,reference={'message_id':'within'})
+        d=self.api('GET','learning/jobs/'+result['job_id'])['details']
+        self.assertEqual(d['context_by_source']['reply'],['boundary','within'])
+        self.assertEqual(d['pair_context_by_source']['reply']['window_seconds'],3600)
