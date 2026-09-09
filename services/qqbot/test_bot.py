@@ -51,7 +51,7 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(api.post_group_message.call_args.kwargs['content'],'仍然保留文字')
         self.assertEqual(trace['sticker_delivery']['status'],'failed')
 
-    async def test_sticker_cooldown_persists_and_resumes_after_text(self):
+    async def test_sticker_state_persists_without_blocking_selection(self):
         api=SimpleNamespace(post_group_file=AsyncMock(return_value={'file_info':'media'}))
         message=self.message('价格');message._api=api;message.group_openid='g'
         def trace():return {'sticker':{'name':'开心','url':'https://example.com/a.jpg'}}
@@ -60,11 +60,11 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
         other=SeenMessages(Path(self.temp.name)/'seen.db')
         self.assertTrue(other.last_sticker_sent('s'));other.conn.close()
         await self.bot.send_answer(message,'group','回答',trace(),'s')
-        self.assertEqual(api.post_group_file.await_count,1)
-        self.assertEqual(message.reply.call_args.kwargs['msg_type'],0)
-        self.assertFalse(self.seen.last_sticker_sent('s'))
-        await self.bot.send_answer(message,'group','回答',trace(),'s')
         self.assertEqual(api.post_group_file.await_count,2)
+        self.assertEqual(message.reply.call_args.kwargs['msg_type'],7)
+        self.assertTrue(self.seen.last_sticker_sent('s'))
+        await self.bot.send_answer(message,'group','回答',trace(),'s')
+        self.assertEqual(api.post_group_file.await_count,3)
         self.assertFalse(self.seen.last_sticker_sent('other-user'))
         self.seen.clear_history('s');self.assertFalse(self.seen.last_sticker_sent('s'))
 

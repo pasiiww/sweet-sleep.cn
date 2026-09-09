@@ -210,7 +210,6 @@ class KnowledgeBot(botpy.Client):
 
     async def send_answer(self, message, kind, reply, trace, session=''):
         sticker = (trace or {}).get('sticker')
-        if self.seen.last_sticker_sent(session):sticker=None
         if sticker:
             try:
                 if kind == 'group':

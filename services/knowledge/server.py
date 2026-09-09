@@ -535,8 +535,8 @@ def respond_pipeline(data, details):
         hint_ids=[r[0] for r in ranking]
         hint_ids += [r[0] for r in c.execute("SELECT id FROM qa_entries WHERE kb_id=? AND publication='active' AND superseded_by IS NULL ORDER BY updated_at DESC,id DESC LIMIT 8",(kb_id,)) if r[0] not in hint_ids]
         qa_hints=[c.execute('SELECT question FROM qa_entries WHERE id=?',(qid,)).fetchone()[0][:300] for qid in hint_ids[:8]]
-    cfg = cfg | {'sticker_allowed':not previous_sticker_sent,'current_date':answers.current_date(),'qa_hints':qa_hints,'conversation_history': history, 'alias_context': entities.context(hints), '_trace': details}
-    details['sticker_policy']={'allowed':not previous_sticker_sent,'reason':'previous_reply_had_sticker' if previous_sticker_sent else 'optional'}
+    cfg = cfg | {'previous_sticker_sent':previous_sticker_sent,'current_date':answers.current_date(),'qa_hints':qa_hints,'conversation_history': history, 'alias_context': entities.context(hints), '_trace': details}
+    details['sticker_policy']={'mode':'advisory','previous_sticker_sent':previous_sticker_sent,'guidance':'频率建议：店铺咨询类问题控制在1/2以下。'}
     details.update(current_date=cfg['current_date'],qa_hints=qa_hints,history=history, model=cfg['model'], system_prompt=cfg['system_prompt'], keyword_prompt=cfg['keyword_prompt'])
     def search(terms):
         started = time.monotonic()
@@ -547,8 +547,6 @@ def respond_pipeline(data, details):
     def finish(response):
         selected_name=response.pop('sticker_name',None)
         selected=next((s for s in cfg.get('stickers',[]) if s['name']==selected_name),None)
-        if selected and not cfg.get('sticker_allowed',True):
-            details['sticker_suppressed']=selected_name;selected=None
         if selected:response['sticker']={k:selected[k] for k in ('id','name','url','revision')}
         details['sticker']=response.get('sticker')
         response['alias_context'] = cfg['alias_context']

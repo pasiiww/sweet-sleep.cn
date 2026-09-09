@@ -38,7 +38,7 @@ class StickerTests(unittest.TestCase):
   with patch.object(answers,'keywords',return_value=[['营业']]),patch.object(answers,'complete',return_value={'supported':True,'answer':'十点营业呀','sticker_name':'开心'}):
    reply=self.api('POST','answer',{'kb_id':kb,'query':'营业时间'})
    limited=self.api('POST','answer',{'kb_id':kb,'query':'营业时间','previous_sticker_sent':True})
-   self.assertNotIn('sticker',limited)
+   self.assertEqual(limited['sticker']['name'],'开心')
    self.assertEqual(limited['answer'],'十点营业呀')
   self.assertEqual(reply['sticker']['url'],row['url']);self.assertNotIn('sticker_name',reply)
  def test_upload_and_new_marker(self):
@@ -98,3 +98,14 @@ class StickerTests(unittest.TestCase):
    self.assertEqual(model.call_args.args[0]['model'],'deepseek-v4-flash-vision-exp')
   with patch.object(answers,'model_call',side_effect=answers.ModelError('invalid_key')):
    with self.assertRaises(ValueError):stickers.generate_name({'api_key':'test'},'https://example.com/a.gif')
+
+ def test_single_system_sticker_context_advisory(self):
+  cfg={'system_prompt':'客服','previous_sticker_sent':True,'stickers':[{'name':'独特表情'}]}
+  with patch.object(answers,'model_call',return_value='好的[独特表情]') as model:
+   result=answers.complete(cfg,'问题',[])
+   self.assertEqual(result['sticker_name'],'独特表情')
+   messages=model.call_args.args[1]
+   self.assertEqual(sum(m['content'].count('[独特表情]') for m in messages),1)
+   self.assertIn('频率建议：店铺咨询类问题控制在1/2以下。',messages[0]['content'])
+   self.assertNotIn('available_stickers',messages[-1]['content'])
+   self.assertNotIn('sticker_allowed',messages[-1]['content'])
