@@ -18,7 +18,7 @@ from learner import Learner
 import compat
 
 LOG = logging.getLogger('knowledge-bot')
-HELP = '我是午觉糖水铺的客服机器人。\n直接发送问题，或输入：/检索 你的问题\n我会根据知识库资料回答，资料不足时请群主或管理员确认。模型不可用时返回最相关文档。\n同一会话保留最近30分钟的问答，可发送 /新对话 清空。\n管理员可在群内发送 /身份，获取后台人工接管配置需要的 OpenID。'
+HELP = '我是午觉糖水铺的客服机器人。\n直接发送问题，或输入：/检索 你的问题\n我会根据知识库资料回答，资料不足时请群主或管理员确认。模型不可用时返回最相关文档。\n同一会话保留最近30分钟的问答，可发送 /新对话 清空。\n每天共20次咨询额度，群聊和私聊共享，北京时间零点恢复。\n管理员可在群内发送 /身份，获取后台人工接管配置需要的 OpenID。'
 
 
 def normalize(text):
@@ -219,7 +219,7 @@ class KnowledgeBot(botpy.Client):
                             'user_id': getattr(author, 'member_openid' if kind == 'group' else 'user_openid', ''), 'session_id': session}
                     trace = await self.retriever.search(query, group_id=group_id, history=self.seen.history(session), trace_meta=meta)
                     reply = format_reply(trace, kind)
-                    remember = True
+                    remember = trace.get('mode') != 'quota'
             response = await message.reply(content=reply, msg_type=0, msg_seq=1)
             if not response:
                 raise RuntimeError('QQ empty response')

@@ -14,6 +14,7 @@ import socket
 import sqlite3
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib import request, error
 from urllib.parse import urlsplit, parse_qs
@@ -83,6 +84,7 @@ def initialize():
         END;
         CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS entity_catalog (kb_id TEXT PRIMARY KEY REFERENCES bases(id) ON DELETE CASCADE, value TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS daily_queries (user_id TEXT NOT NULL, day TEXT NOT NULL, used INTEGER NOT NULL, PRIMARY KEY(user_id,day));
         CREATE TABLE IF NOT EXISTS app_settings (name TEXT PRIMARY KEY, value TEXT NOT NULL);
         ''')
         c.execute('INSERT OR IGNORE INTO settings VALUES(1, ?)', (json.dumps({
@@ -439,6 +441,17 @@ def search_terms(kb_id, terms):
     return {'results': selected, 'searches': searches}
 
 
+def reserve_daily_query(user_id):
+    # Identity only: channels, groups, knowledge bases and cleared sessions share this counter.
+    day=datetime.fromtimestamp(time.time(),timezone(timedelta(hours=8))).date().isoformat()
+    with WRITE_LOCK,db() as c:
+        c.execute('DELETE FROM daily_queries WHERE day<?',(day,))
+        c.execute('INSERT OR IGNORE INTO daily_queries VALUES(?,?,0)',(user_id,day))
+        allowed=c.execute('UPDATE daily_queries SET used=used+1 WHERE user_id=? AND day=? AND used<20',(user_id,day)).rowcount==1
+        used=c.execute('SELECT used FROM daily_queries WHERE user_id=? AND day=?',(user_id,day)).fetchone()[0]
+    return {'allowed':allowed,'used':used,'limit':20,'remaining':20-used,'day':day,'timezone':'Asia/Shanghai'}
+
+
 def respond(data):
     query = string(data, 'query', 2000, True)
     kb_id = string(data, 'kb_id', 80, True)
@@ -447,13 +460,22 @@ def respond(data):
         fail(400, 'origin 格式不正确')
     meta = {key: string(data, key, 128) for key in ('user_id', 'group_id', 'session_id')}
     meta['origin'] = origin
+    if origin.startswith('qq_') and not meta['user_id']:fail(400,'缺少用户身份，无法核验每日额度')
+    try:entities.history(data.get('history', []))
+    except ValueError as exc:fail(400,str(exc))
     with WRITE_LOCK, db() as c:
         base(c, kb_id)
         secrets_to_hide = [ADMIN_TOKEN, READ_TOKEN, LEARN_TOKEN, answer_config(c)['api_key'], config(c)['api_key']]
         trace_id, receipt = traces.create(c, kb_id, traces.redact(query, secrets_to_hide), meta)
     details, started = {'model_calls': [], 'retrievals': []}, time.monotonic()
     try:
-        response = respond_pipeline(data, details)
+        quota=reserve_daily_query(meta['user_id']) if meta['user_id'] else None
+        if quota:details['quota']=quota
+        if quota and not quota['allowed']:
+            response={'mode':'quota','reason':'daily_quota_exhausted','answer':'今天的20次咨询额度已经用完啦～明天零点恢复，再来找我聊呀 ♡','handoff':False,'mention_openids':[],'results':[]}
+        else:
+            response = respond_pipeline(data, details)
+        if quota:response['quota']=quota
     except Exception as exc:
         details['error_type'] = type(exc).__name__
         with WRITE_LOCK, db() as c:
@@ -491,7 +513,7 @@ def respond_pipeline(data, details):
     except ValueError as exc:
         fail(400, str(exc))
     hints = catalog.hints([m['content'] for m in history] + [query])
-    cfg = cfg | {'conversation_history': history, 'alias_context': entities.context(hints), 'keyword_alias_context': entities.context(catalog.hints([query])), '_trace': details}
+    cfg = cfg | {'conversation_history': history, 'alias_context': entities.context(hints), '_trace': details}
     details.update(history=history, model=cfg['model'], system_prompt=cfg['system_prompt'], keyword_prompt=cfg['keyword_prompt'])
     def search(terms):
         started = time.monotonic()
@@ -535,7 +557,7 @@ def respond_pipeline(data, details):
             if str(exc) in ('invalid_key', 'insufficient_balance', 'access_denied'):
                 return fallback(str(exc))
             # A planning failure must not skip the independent answer stage.
-            terms = entities.fallback_groups(catalog, query, []) or [catalog.normalize(query)[:2000]]
+            terms = entities.fallback_groups(catalog, query, history) or [catalog.normalize(query)[:2000]]
         result = search(terms)
         model = answers.complete(cfg, query, result['results'])
         if not model['supported']:

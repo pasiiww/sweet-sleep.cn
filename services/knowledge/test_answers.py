@@ -37,7 +37,7 @@ class AnswerTests(unittest.TestCase):
 
     def test_defaults_secret_preservation_and_embedding_isolation(self):
         cfg = self.call('GET', 'answer-settings')
-        self.assertEqual(cfg['model'], 'deepseek-v4-flash')
+        self.assertEqual(cfg['model'], 'deepseek-v4.1-flash-expires-on-0910')
         self.assertFalse(cfg['has_key'])
         with app.db() as c:
             embedding_before = app.config(c)
@@ -212,9 +212,11 @@ class KeywordTests(unittest.TestCase):
             answers.keywords(cfg, 'kei')
             answers.complete(cfg, 'kei', [])
         first, second = [call.args[1] for call in model.call_args_list]
-        self.assertEqual(len(first),2)
+        self.assertEqual(len(first),4)
+        self.assertEqual(first[1:3],second[1:3])
         self.assertIn('检索阶段自定义',first[0]['content'])
-        self.assertIn(cfg['keyword_alias_context'],first[0]['content'])
+        self.assertIn(cfg['alias_context'],json.loads(first[-1]['content'])['alias_context'])
+        self.assertNotIn(cfg['alias_context'],first[0]['content'])
         self.assertNotIn('日本語で回答',first[0]['content'])
         self.assertTrue(second[0]['content'].startswith('日本語で回答'))
         self.assertNotIn('给用户的中文回复',second[0]['content'])
