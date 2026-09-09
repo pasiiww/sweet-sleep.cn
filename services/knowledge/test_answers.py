@@ -15,7 +15,7 @@ class AnswerTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         app.DATA = Path(self.temp.name)
         app.initialize()
-        self.keyword_mock = patch.object(answers, 'keywords', side_effect=lambda cfg, q: [q, q + 'xyz']).start()
+        self.keyword_mock = patch.object(answers, 'keywords', side_effect=lambda cfg, q: [[q], [q + 'xyz']]).start()
         self.addCleanup(patch.stopall)
         self.kb = self.call('POST', 'bases', {'name': '测试'})['id']
         self.call('POST', f'bases/{self.kb}/documents', {'title': '营业说明', 'content': '营业时间为每天上午十点至晚上八点。', 'source': '已确认资料'})
@@ -97,6 +97,42 @@ class AnswerTests(unittest.TestCase):
         self.assertEqual(result['answer'], '根据资料，请查看营业说明。')
         self.assertEqual(len(result['search_terms']), 2)
 
+    def test_grouped_retrieval_requires_entity_and_intent(self):
+        def add(title, content):
+            return self.call('POST', f'bases/{self.kb}/documents', {'title': title, 'content': content})['id']
+        target = add('凯伊', '价格为100元。')
+        alias = add('KEI预订', '定金为20元。')
+        add('其他角色', '价格为999元，定金为999元。')
+        add('凯伊介绍', '角色介绍，欢迎咨询。')
+        add('散字', '凯旋而归，伊始的物价，格外优惠。')
+        other_kb = self.call('POST', 'bases', {'name': '隔离'})['id']
+        self.call('POST', f'bases/{other_kb}/documents', {'title': '凯伊', 'content': '价格不能跨库召回。'})
+        result = self.call('POST', 'retrieve', {'kb_id': self.kb,
+            'query_groups': [['凯伊', '价格'], ['kei', '定金'], ['价格', '凯伊']]})
+        self.assertEqual({r['document_id'] for r in result['results']}, {target, alias})
+        self.assertEqual(len(result['query_groups']), 2)
+        self.assertEqual(result['score_type'], 'rrf')
+        self.assertFalse(self.call('POST', 'retrieve', {'kb_id': self.kb,
+            'query_groups': [['不存在的角色', '价格']]})['results'])
+        # FTS operators and quotes are literal user data, never query syntax.
+        self.assertFalse(self.call('POST', 'retrieve', {'kb_id': self.kb,
+            'query_groups': [['凯伊" OR *', '价格']]})['results'])
+        for groups in ([], '凯伊', [['']], [['a'] * 5], [[1]], [['a']] * 6):
+            with self.subTest(groups=groups), self.assertRaises(app.Problem):
+                self.call('POST', 'retrieve', {'kb_id': self.kb, 'query_groups': groups})
+
+    def test_grouped_answer_pipeline_and_failure_preserves_results(self):
+        self.configure()
+        self.keyword_mock.return_value = None
+        self.keyword_mock.side_effect = lambda cfg, q: [['营业', '时间'], ['配送', '规则']]
+        with patch.object(answers, 'complete', side_effect=answers.ModelError('insufficient_balance')):
+            result = self.ask()
+        self.assertEqual(result['mode'], 'document')
+        self.assertEqual(result['query_groups'], [['营业', '时间'], ['配送', '规则']])
+        self.assertEqual(len(result['results']), 1)
+        with patch.object(answers, 'keywords', side_effect=answers.ModelError('invalid_keywords')):
+            self.assertEqual(self.ask()['reason'], 'invalid_keywords')
+
     def test_output_validation_and_http_error_mapping(self):
         rows = [{'citation': 1, 'title': '营业说明', 'content': '上午十点营业。'}]
         cfg = answers.defaults() | {'api_key': 'test-key'}
@@ -135,11 +171,11 @@ class AnswerTests(unittest.TestCase):
 class KeywordTests(unittest.TestCase):
     def test_keyword_count_uniqueness_and_json_mode(self):
         cfg = answers.defaults()
-        with patch.object(answers, 'model_call', return_value='{"keywords":["营业时间","几点开门","营业时间"]}') as model:
-            self.assertEqual(answers.keywords(cfg, '几点营业？'), ['营业时间', '几点开门'])
+        with patch.object(answers, 'model_call', return_value='{"query_groups":[["凯伊","价格"],["kei","定金"],["价格","凯伊"],["KEI","定金"]]}') as model:
+            self.assertEqual(answers.keywords(cfg, '凯伊价格？'), [['凯伊', '价格'], ['kei', '定金']])
             self.assertTrue(model.call_args.kwargs['json_mode'])
-        for values in (['一个'], ['重复', '重复'], list('abcdef'), [1, 2], [' ', 'x']):
-            with patch.object(answers, 'model_call', return_value=json.dumps({'keywords': values})):
+        for values in ([['一个']], [['重复'], ['重复']], list('abcdef'), [1, 2], [[' '], ['x']], [['x'] * 5, ['y']]):
+            with patch.object(answers, 'model_call', return_value=json.dumps({'query_groups': values})):
                 with self.assertRaises(answers.ModelError):
                     answers.keywords(cfg, '问题')
 

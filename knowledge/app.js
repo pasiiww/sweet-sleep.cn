@@ -134,7 +134,13 @@ $('retrieve-base').onchange = () => { $('retrieve-top-k').value = state.bases.fi
 $('retrieve-form').onsubmit = event => { event.preventDefault(); busy(event.submitter, async () => {
   state.context = ''; $('context-actions').hidden = true; $('result-meta').textContent = '查询中'; $('results').innerHTML = '<div class="empty">正在检索知识库…</div>';
   try {
-    const result = await api('retrieve', 'POST', { kb_id: $('retrieve-base').value, query: $('retrieve-query').value, mode: $('retrieve-mode').value, top_k: +$('retrieve-top-k').value, max_context_chars: +$('context-budget').value });
+    const grouped = $('retrieve-groups').value.trim();
+    let groups;
+    if (grouped) {
+      try { groups = JSON.parse(grouped); } catch { throw new Error('关键词组格式错误，例如 [["凯伊","价格"],["kei","定金"]]'); }
+      if ($('retrieve-mode').value !== 'keyword') throw new Error('分组关键词请选择关键词检索模式');
+    }
+    const result = await api('retrieve', 'POST', { ...(grouped ? {query_groups: groups} : {}), kb_id: $('retrieve-base').value, query: $('retrieve-query').value, mode: $('retrieve-mode').value, top_k: +$('retrieve-top-k').value, max_context_chars: +$('context-budget').value });
     $('result-meta').textContent = `${result.results.length} 个片段 · ${result.elapsed_ms} ms`;
     $('results').innerHTML = result.results.length ? result.results.map(r => `<article class="result-card"><div class="result-title"><strong>[${r.citation}] ${esc(r.title)}</strong><span class="badge">${esc(result.score_type.toUpperCase())} ${Number(r.score).toPrecision(4)}</span></div><p>${esc(r.content)}</p><small>来源：${esc(r.source || r.title)} · 分段 ${r.ordinal + 1}${r.truncated ? ' · 已按上下文预算截断' : ''}</small></article>`).join('') : '<div class="empty"><h3>没有找到相关片段</h3><p>试试不同关键词，或为知识库补充相关内容。</p></div>';
     state.context = result.context; $('context-actions').hidden = !result.context;
@@ -194,6 +200,6 @@ $('answer-preview-form').onsubmit = event => { event.preventDefault(); busy(even
   $('answer-preview').textContent = '正在检索并生成回复…';
   try {
     const result = await api('answer', 'POST', {kb_id: $('answer-base').value, query: $('answer-query').value});
-    $('answer-preview').textContent = (answerReasons[result.reason] || result.mode) + '\n检索词：' + (result.search_terms || []).join(' / ') + '\n\n' + result.answer + (result.handoff ? '\n\n实际群聊会按该群的人工联系人配置尝试艾特；这里仅预览文本。' : '');
+    $('answer-preview').textContent = (answerReasons[result.reason] || result.mode) + '\n检索词：' + (result.search_terms || []).map(group => Array.isArray(group) ? '[' + group.join(' + ') + ']' : group).join(' / ') + '\n\n' + result.answer + (result.handoff ? '\n\n实际群聊会按该群的人工联系人配置尝试艾特；这里仅预览文本。' : '');
   } catch (error) { $('answer-preview').textContent = error.message; throw error; }
 }); };

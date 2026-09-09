@@ -244,11 +244,21 @@ def build_vectors(kb_id):
 
 
 def retrieve(data):
-    query = string(data, 'query', 2000, True)
+    groups = None
+    if 'query_groups' in data:
+        try:
+            groups = answers.normalize_query_groups(data['query_groups'])
+        except ValueError as exc:
+            fail(400, str(exc))
+    query = string(data, 'query', 2000, not groups)
+    if not query:
+        query = ' / '.join(' '.join(group) for group in groups)
     kb_id = string(data, 'kb_id', 80, True)
     mode = data.get('mode', 'keyword')
     if mode not in ('keyword', 'vector', 'hybrid'):
         fail(400, 'mode 必须为 keyword、vector 或 hybrid')
+    if groups and mode != 'keyword':
+        fail(400, 'query_groups 当前支持 keyword 模式；向量和混合召回请使用 query')
     budget = integer(data, 'max_context_chars', 12000, 100, 40000)
     started = time.monotonic()
     with db() as c:
@@ -256,7 +266,25 @@ def retrieve(data):
         k = integer(data, 'top_k', kb['top_k'], 1, 20)
         cfg, keyword, semantic = config(c), [], []
         ft = list(dict.fromkeys(tokens(query)))[:128]
-        if mode != 'vector' and ft:
+        if mode != 'vector' and groups:
+            scores = {}
+            for group in groups:
+                # FTS narrows candidates; literal predicates ensure full terms, not scattered CJK characters.
+                parts = [list(dict.fromkeys(tokens(term))) for term in group]
+                if any(not part for part in parts):
+                    continue
+                match = ' AND '.join('"' + token + '"' for part in parts for token in part)
+                predicates = ' AND '.join('(instr(lower(d.title), lower(?)) > 0 OR instr(lower(chunks.content), lower(?)) > 0)' for _ in group)
+                params = [match, kb_id] + [term for term in group for _ in range(2)] + [k * 4]
+                rows = c.execute('''SELECT chunks.id,bm25(chunk_fts,2.0,1.0) AS rank
+                    FROM chunk_fts JOIN chunks ON chunks.id=chunk_fts.rowid
+                    JOIN documents d ON d.id=chunks.doc_id
+                    WHERE chunk_fts MATCH ? AND chunks.kb_id=? AND ''' + predicates +
+                    ' ORDER BY rank, chunks.id LIMIT ?', params)
+                for rank, row in enumerate(rows, 1):
+                    scores[row['id']] = scores.get(row['id'], 0) + 1 / (60 + rank)
+            keyword = sorted(scores.items(), key=lambda row: (-row[1], row[0]))
+        elif mode != 'vector' and ft:
             keyword = [(r['id'], -r['rank']) for r in c.execute('''
                 SELECT chunks.id,bm25(chunk_fts,2.0,1.0) AS rank FROM chunk_fts
                 JOIN chunks ON chunks.id=chunk_fts.rowid
@@ -308,7 +336,8 @@ def retrieve(data):
             results.append(result)
         return {'query': query, 'kb_id': kb_id, 'mode': mode, 'results': results,
                 'context': '\n\n'.join(context), 'elapsed_ms': round((time.monotonic() - started) * 1000),
-                'score_type': {'keyword': 'bm25', 'vector': 'cosine', 'hybrid': 'rrf'}[mode]}
+                'query_groups': groups or [],
+                'score_type': 'rrf' if groups and mode == 'keyword' else {'keyword': 'bm25', 'vector': 'cosine', 'hybrid': 'rrf'}[mode]}
 
 
 def answer_config(c):
@@ -326,7 +355,8 @@ def search_terms(kb_id, terms):
     # Fuse rankings, deduplicate chunk IDs and identical text, then apply a shared budget.
     candidates = {}
     for term in terms:
-        result = retrieve({'kb_id': kb_id, 'query': term, 'mode': 'keyword',
+        search = {'query_groups': [term]} if isinstance(term, list) else {'query': term}
+        result = retrieve({'kb_id': kb_id, **search, 'mode': 'keyword',
                            'top_k': 5, 'max_context_chars': 12000})
         for rank, row in enumerate(result['results'], 1):
             key = row['chunk_id']
@@ -362,6 +392,7 @@ def respond(data):
     terms = [query]
     def finish(response):
         response['search_terms'] = terms
+        response['query_groups'] = [term for term in terms if isinstance(term, list)]
         answer_status(cfg, response['mode'], response['reason'])
         return response
     def fallback(reason, result=None):
