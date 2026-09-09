@@ -26,7 +26,7 @@ class LearningTests(unittest.TestCase):
         self.event(prefix+'2','哈哈',member='admin001',at=at)
         return self.event(prefix+'3','今天很开心',at=at)['job_id']
     def fact(self,mid,answer='凯伊售价100元。',**more):
-        return {'subject':'凯伊','attribute':'价格','scope':'','question':'凯伊多少钱？','answer':answer,'source_id':mid,'quote':'凯伊售价100元','existing_qa_id':None,**more}
+        return {'subject':'凯伊','attribute':'价格','scope':'','question':'凯伊多少钱？','answer':answer,'source_id':mid,'quote':'凯伊售价100元','existing_qa_id':None,'confidence':95,**more}
     def run_job(self,job,facts):
         with patch.object(answers,'_model_call',return_value=json.dumps({'facts':facts})):self.assertTrue(learning.run_once(app))
         return self.api('GET','learning/jobs/'+job)
@@ -218,3 +218,29 @@ class LearningTests(unittest.TestCase):
         with app.db() as c:
             c.execute('DELETE FROM learning_jobs');c.execute('DELETE FROM learning_events')
         self.assertEqual(self.api('GET','qa/'+str(created['id']))['source_context'],created['source_context'])
+
+    def test_confidence_threshold_and_review(self):
+        for confidence,status in [(80,'active'),(79.9,'pending')]:
+            job=self.event('confidence'+str(confidence),'凯伊售价100元',is_reply=True)['job_id']
+            row=self.run_job(job,[self.fact('confidence'+str(confidence),scope=str(confidence),question='凯伊价格'+str(confidence),confidence=confidence)])
+            qa=row['details']['changes'][0]['after'];self.assertEqual(qa['publication'],status)
+            if status=='pending':
+                qid=qa['id']
+                hits=self.api('POST','retrieve',{'kb_id':self.kb,'query':'凯伊价格'})['results'];self.assertNotIn(qid,[h.get('qa_id') for h in hits])
+                self.api('POST',f'learning/reviews/{qid}/approve')
+                self.assertEqual(self.api('GET',f'qa/{qid}')['publication'],'active')
+                with self.assertRaises(app.Problem):self.api('POST',f'learning/reviews/{qid}/approve')
+
+    def test_pending_update_does_not_replace_until_approval_and_stale_block(self):
+        active=self.run_job(self.event('active','凯伊售价100元',is_reply=True)['job_id'],[self.fact('active')])['details']['changes'][0]['after']
+        pending=self.run_job(self.event('pending','凯伊售价200元',at=self.at+5,is_reply=True)['job_id'],[self.fact('pending',answer='凯伊售价200元',quote='凯伊售价200元',confidence=70)])['details']['changes'][0]['after']
+        self.assertIsNone(self.api('GET','qa/'+str(active['id']))['superseded_by'])
+        self.api('PUT','qa/'+str(active['id']),{'question':active['question'],'answer':'人工确认的新价格'})
+        with self.assertRaises(app.Problem):self.api('POST',f"learning/reviews/{pending['id']}/approve")
+        self.api('POST',f"learning/reviews/{pending['id']}/reject")
+        self.assertEqual(self.api('GET','qa/'+str(pending['id']))['publication'],'rejected')
+
+    def test_missing_confidence_defaults_to_review(self):
+        fact=self.fact('unknown');fact.pop('confidence')
+        row=self.run_job(self.event('unknown','凯伊售价100元',is_reply=True)['job_id'],[fact])
+        self.assertEqual(row['details']['changes'][0]['after']['publication'],'pending')

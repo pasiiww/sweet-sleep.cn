@@ -118,7 +118,7 @@ class Retriever:
         self.token, self.kb_id = token, kb_id
 
     async def search(self, query, group_id='', history=None, trace_meta=None):
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=55)) as session:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=80)) as session:
             async with session.post(self.url, headers={'Authorization': 'Bearer ' + self.token},
                                     json={'kb_id': self.kb_id, 'query': query, 'group_id': group_id, 'history': history or [], **(trace_meta or {})}) as response:
                 if response.status != 200:

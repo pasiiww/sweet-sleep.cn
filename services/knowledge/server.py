@@ -513,8 +513,14 @@ def respond_pipeline(data, details):
     except ValueError as exc:
         fail(400, str(exc))
     hints = catalog.hints([m['content'] for m in history] + [query])
-    cfg = cfg | {'conversation_history': history, 'alias_context': entities.context(hints), '_trace': details}
-    details.update(history=history, model=cfg['model'], system_prompt=cfg['system_prompt'], keyword_prompt=cfg['keyword_prompt'])
+    with db() as c:
+        hint_query=catalog.normalize(query+' '+' '.join(m['content'] for m in history[-4:] if m['role']=='user'))
+        ranking=qa.search(c,kb_id,hint_query,None,catalog,tokens,8)
+        hint_ids=[r[0] for r in ranking]
+        hint_ids += [r[0] for r in c.execute("SELECT id FROM qa_entries WHERE kb_id=? AND publication='active' AND superseded_by IS NULL ORDER BY updated_at DESC,id DESC LIMIT 8",(kb_id,)) if r[0] not in hint_ids]
+        qa_hints=[c.execute('SELECT question FROM qa_entries WHERE id=?',(qid,)).fetchone()[0][:300] for qid in hint_ids[:8]]
+    cfg = cfg | {'current_date':answers.current_date(),'qa_hints':qa_hints,'conversation_history': history, 'alias_context': entities.context(hints), '_trace': details}
+    details.update(current_date=cfg['current_date'],qa_hints=qa_hints,history=history, model=cfg['model'], system_prompt=cfg['system_prompt'], keyword_prompt=cfg['keyword_prompt'])
     def search(terms):
         started = time.monotonic()
         result = search_terms(kb_id, terms)
@@ -559,6 +565,14 @@ def respond_pipeline(data, details):
             # A planning failure must not skip the independent answer stage.
             terms = entities.fallback_groups(catalog, query, history) or [catalog.normalize(query)[:2000]]
         result = search(terms)
+        if not result['results']:
+            retry_cfg=cfg|{'empty_retrieval':{'question':query,'failed_query_groups':terms,'result_count':0},'_stage':'keywords_retry'}
+            try:
+                retry_terms=answers.keywords(retry_cfg,query)
+                terms=answers.normalize_query_groups([[catalog.normalize(t) for t in group] for group in retry_terms])
+                result=search(terms)
+            except answers.ModelError as exc:details['retry_error']=str(exc)
+            except ValueError:details['retry_error']='invalid_keywords'
         model = answers.complete(cfg, query, result['results'])
         if not model['supported']:
             response = answers.handoff(cfg, group_id, 'insufficient_evidence' if result['results'] else 'no_results')
@@ -599,6 +613,9 @@ def api(method, path, data, params):
         v = embed(['连接测试'], cfg)
         return {'dimensions': len(v[0]), 'ok': True}
     with WRITE_LOCK, db() as c:
+        if len(segments)==4 and segments[:2]==['learning','reviews'] and method=='POST':
+            try:return learning.review(c,segments[2],segments[3])
+            except ValueError as exc:fail(409,str(exc))
         if segments == ['learning', 'events'] and method == 'POST':
             kb_id = string(data, 'kb_id', 80, True)
             base(c, kb_id)
@@ -718,8 +735,11 @@ def api(method, path, data, params):
                     query = params.get('q',[''])[0][:200]
                     try: offset = max(0,int(params.get('offset',['0'])[0]))
                     except ValueError: fail(400,'分页参数不正确')
-                    total = c.execute('SELECT count(*) FROM qa_entries WHERE kb_id=? AND instr(lower(question),lower(?))>0',(kb['id'],query)).fetchone()[0]
-                    items = [dict(row) for row in c.execute('SELECT * FROM qa_entries WHERE kb_id=? AND instr(lower(question),lower(?))>0 ORDER BY id DESC LIMIT 20 OFFSET ?',(kb['id'],query,offset))]
+                    publication=params.get('publication',[''])[0]
+                    predicate=' AND publication=?' if publication else ''
+                    args=[kb['id'],query]+([publication] if publication else [])
+                    total=c.execute('SELECT count(*) FROM qa_entries WHERE kb_id=? AND instr(lower(question),lower(?))>0'+predicate,args).fetchone()[0]
+                    items=[dict(row) for row in c.execute('SELECT * FROM qa_entries WHERE kb_id=? AND instr(lower(question),lower(?))>0'+predicate+' ORDER BY id DESC LIMIT 20 OFFSET ?',[*args,offset])]
                     return {'items':items,'total':total,'offset':offset,'limit':20}
                 if method == 'POST':
                     if c.execute('SELECT count(*) FROM qa_entries WHERE kb_id=?',(kb['id'],)).fetchone()[0] >= 1000:
