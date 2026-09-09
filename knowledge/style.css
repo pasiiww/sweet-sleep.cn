@@ -15,3 +15,6 @@
 .learning-panel table input, .learning-panel table select { width: 100%; min-width: 150px; }
 .learning-panel h3 { margin-top: 24px; }
 #learning-jobs td { overflow-wrap: anywhere; }
+
+.sticker-preview{display:block;width:88px;height:88px;object-fit:contain;border-radius:10px}.sticker-table input:not([type=checkbox]){min-width:140px;width:100%}.sticker-table td:nth-child(3){width:45%}.sticker-table small{display:block;color:var(--muted)}#sticker-add{max-width:720px;margin:20px 0}#sticker-add label{display:block;margin:14px 0}#sticker-add input{width:100%}
+.sticker-table{min-width:850px;width:100%}.sticker-table th:first-child{width:120px}.sticker-table th:nth-child(2){width:20%}.sticker-table th:nth-child(3){width:40%}.sticker-table th:nth-child(4){width:70px}.sticker-table th:last-child{width:150px}.sticker-table input[type=checkbox]{width:18px;height:18px;padding:0}.sticker-table td{padding:14px 12px}.sticker-table td:last-child button{padding:8px;margin:2px}

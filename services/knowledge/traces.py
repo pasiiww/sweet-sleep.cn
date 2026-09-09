@@ -55,13 +55,16 @@ def finish(c, trace_id, response, details, elapsed):
                json.dumps(details, ensure_ascii=False), trace_id))
 
 
-def delivery(c, trace_id, receipt, status, content, error):
+def delivery(c, trace_id, receipt, status, content, error, sticker=None):
     row = c.execute('SELECT receipt_hash,details,delivery FROM answer_traces WHERE id=? AND created>?', (trace_id, time.time() - RETENTION)).fetchone()
     if not row or not hmac.compare_digest(row['receipt_hash'], hashlib.sha256(receipt.encode()).hexdigest()):
         raise ValueError('trace 回执无效或已过期')
     if row['delivery'] == 'not_applicable':
         raise ValueError('此记录不是 QQ 消息')
     details = json.loads(row['details'])
+    if sticker is not None:
+        if not isinstance(sticker,dict) or sticker.get('status') not in ('sent','failed'):raise ValueError('表情包回执格式错误')
+        details['sticker_delivery']={key:str(sticker.get(key,''))[:100] for key in ('name','status','error')}
     details['delivery'] = {'status': status, 'content': content, 'error': error, 'at': time.time()}
     c.execute('UPDATE answer_traces SET delivery=?,details=? WHERE id=?', (status, json.dumps(details, ensure_ascii=False), trace_id))
     return {'ok': True}

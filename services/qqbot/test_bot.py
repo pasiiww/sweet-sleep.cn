@@ -25,6 +25,32 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
     def message(self, content, id='m1'):
         return SimpleNamespace(id=id, content=content, reply=AsyncMock(return_value={'id': 'reply1'}))
 
+    async def test_sticker_real_sdk_routing_and_fallback(self):
+        api = SimpleNamespace(post_group_file=AsyncMock(return_value={'file_info':'media'}),
+            post_c2c_file=AsyncMock(return_value={'file_info':'media'}),
+            post_group_message=AsyncMock(return_value={'id':'r'}),post_c2c_message=AsyncMock(return_value={'id':'r'}))
+        group=GroupMessage(api,'e',{'id':'m','group_openid':'g','author':{'member_openid':'u'}})
+        private=C2CMessage(api,'e',{'id':'m2','author':{'user_openid':'u2'}})
+        for kind,msg in [('group',group),('c2c',private)]:
+            trace={'sticker':{'name':'开心','url':'https://example.com/a.jpg'}}
+            await self.bot.send_answer(msg,kind,'好呀',trace)
+            self.assertEqual(trace['sticker_delivery']['status'],'sent')
+        self.assertFalse(api.post_group_file.call_args.kwargs['srv_send_msg'])
+        self.assertEqual(api.post_c2c_file.call_args.kwargs['openid'],'u2')
+        self.assertEqual(api.post_group_message.call_args.kwargs['msg_type'],7)
+        self.assertEqual(api.post_group_message.call_args.kwargs['media'],{'file_info':'media'})
+        self.assertEqual(api.post_group_message.call_args.kwargs['msg_id'],'m')
+        api.post_group_file.side_effect=RuntimeError('upload failed')
+        await self.bot.send_answer(group,'group','保留文字',trace)
+        self.assertEqual(trace['sticker_delivery']['status'],'failed')
+        self.assertEqual(api.post_group_message.call_args.kwargs['content'],'保留文字')
+        self.assertEqual(api.post_group_message.call_args.kwargs['msg_type'],0)
+        api.post_group_file.side_effect=None
+        api.post_group_message.side_effect=[RuntimeError('media failed'),{'id':'r'}]
+        await self.bot.send_answer(group,'group','仍然保留文字',trace)
+        self.assertEqual(api.post_group_message.call_args.kwargs['content'],'仍然保留文字')
+        self.assertEqual(trace['sticker_delivery']['status'],'failed')
+
     async def test_private_message_retrieval(self):
         message = self.message('/检索 机器人怎么使用')
         await self.bot.on_c2c_message_create(message)

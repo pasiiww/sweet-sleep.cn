@@ -183,3 +183,9 @@ QA 的 FTS 索引严格只写 Q，A 从不参与匹配。关键词召回同时�
 管理接口：`GET/PUT /bases/:id/learning`、`GET /learning/jobs?kb_id=...`、`GET /learning/jobs/:id`、`POST /learning/jobs/:id/retry`。学习 Trace 位于「持续学习」页面下方。
 
 回归测试运行 `python3 services/knowledge/run_tests.py`。此运行器禁止访问外部 API，只允许本机 HTTP 测试服务；模型结果由 mock 提供。真实模型验收单独在临时知识库中进行，不放入回归测试。
+
+## 表情包库
+
+后台「表情包库」全局维护名称、图片路径、启用状态，支持逐行编辑与删除，最多 100 条。图片必须已存在，可填写公开 HTTPS PNG/JPG 地址、本站 `/stickers/开心.png` 或 `/www/wwwroot/myweb/` 下的路径；此功能保存映射，不上传文件。
+
+PE2 只接收启用名称列表，以 `[[STICKER:名称]]` 选择最多一张，服务端校验后移除标记并返回 `sticker` 描述。群聊与私聊通过 QQ 文件上传接口（`file_type=1, srv_send_msg=false`）取得 `file_info`，再用 `msg_type=7` 随文字被动回复。图片上传或发送失败会尝试保留原文字回复；Trace 记录选图与发送状态，不保存临时 `file_info`。模型不可用时原文回退不附图。

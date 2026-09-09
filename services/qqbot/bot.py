@@ -134,7 +134,7 @@ class Retriever:
                 async with session.post(self.url.rsplit('/', 1)[0] + '/trace-delivery',
                     headers={'Authorization': 'Bearer ' + self.token},
                     json={'trace_id': trace['trace_id'], 'receipt': trace['trace_receipt'], 'status': status,
-                          'content': content[:3000], 'error': error[:80]}) as response:
+                          'content': content[:3000], 'error': error[:80], 'sticker': trace.get('sticker_delivery')}) as response:
                     if response.status != 200:
                         LOG.warning('TRACE_REPORT_FAILED status=%s', response.status)
         except Exception as exc:
@@ -195,6 +195,31 @@ class KnowledgeBot(botpy.Client):
             if not entry[1]:
                 self.conversations.pop(lock_key, None)
 
+    async def send_answer(self, message, kind, reply, trace):
+        sticker = (trace or {}).get('sticker')
+        if sticker:
+            try:
+                if kind == 'group':
+                    upload = message._api.post_group_file(group_openid=message.group_openid,
+                        file_type=1, url=sticker['url'], srv_send_msg=False)
+                else:
+                    upload = message._api.post_c2c_file(openid=message.author.user_openid,
+                        file_type=1, url=sticker['url'], srv_send_msg=False)
+                media = await asyncio.wait_for(upload, timeout=15)
+                if not media or not media.get('file_info'):
+                    raise RuntimeError('QQ empty media response')
+                result = await message.reply(content=reply, msg_type=7,
+                    media={'file_info': media['file_info']}, msg_seq=1)
+                if not result:
+                    raise RuntimeError('QQ empty response')
+                trace['sticker_delivery'] = {'name': sticker['name'], 'status': 'sent'}
+                return result
+            except Exception as exc:
+                trace['sticker_delivery'] = {'name': sticker['name'], 'status': 'failed', 'error': type(exc).__name__}
+                LOG.warning('STICKER_FAILED error=%s', type(exc).__name__)
+        # Preserve the generated answer when an optional image cannot be sent.
+        return await message.reply(content=reply, msg_type=0, msg_seq=1)
+
     async def _answer(self, message, kind, session):
         query = normalize(message.content)
         remember = False
@@ -223,7 +248,7 @@ class KnowledgeBot(botpy.Client):
                     trace = await self.retriever.search(query, group_id=group_id, history=self.seen.history(session), trace_meta=meta)
                     reply = format_reply(trace, kind)
                     remember = trace.get('mode') != 'quota'
-            response = await message.reply(content=reply, msg_type=0, msg_seq=1)
+            response = await self.send_answer(message, kind, reply, trace)
             if not response:
                 raise RuntimeError('QQ empty response')
             delivery, sent = 'delivered', reply

@@ -23,6 +23,7 @@ import entities
 import traces
 import qa
 import learning
+import stickers
 import sys
 
 DATA = Path(os.environ.get('KB_DATA_DIR', '/var/lib/sweet-knowledge'))
@@ -93,6 +94,7 @@ def initialize():
         traces.initialize(c)
         qa.initialize(c)
         learning.initialize(c)
+        stickers.initialize(c)
 
 
 def now():
@@ -518,7 +520,7 @@ def respond_pipeline(data, details):
     kb_id = string(data, 'kb_id', 80, True)
     with db() as c:
         base(c, kb_id)
-        cfg = answer_config(c)
+        cfg = answer_config(c) | {'stickers':stickers.available(c)}
         catalog = entities.Catalog(entity_catalog(c, kb_id))
     try:
         history = entities.history(data.get('history', []))
@@ -540,6 +542,10 @@ def respond_pipeline(data, details):
         return result
     terms = [catalog.normalize(query)[:2000]]
     def finish(response):
+        selected_name=response.pop('sticker_name',None)
+        selected=next((s for s in cfg.get('stickers',[]) if s['name']==selected_name),None)
+        if selected:response['sticker']={k:selected[k] for k in ('id','name','url','revision')}
+        details['sticker']=response.get('sticker')
         response['alias_context'] = cfg['alias_context']
         response['matched_aliases'] = hints
         response['history_turns'] = len(history) // 2
@@ -590,9 +596,10 @@ def respond_pipeline(data, details):
             response = answers.handoff(cfg, group_id, 'insufficient_evidence' if result['results'] else 'no_results')
             if model.get('answer'):
                 response['answer'] = answers.plain(model['answer'])
+            if model.get('sticker_name'):response['sticker_name']=model['sticker_name']
             return finish(response)
         return finish({'mode': 'model', 'reason': 'ok', 'handoff': False, 'mention_openids': [],
-                       'answer': answers.plain(model['answer']), 'results': result['results']})
+                       'answer': answers.plain(model['answer']), 'sticker_name':model.get('sticker_name'), 'results': result['results']})
     except answers.ModelError as exc:
         return fallback(str(exc), result)
     finally:
@@ -628,6 +635,26 @@ def api(method, path, data, params):
         if len(segments)==4 and segments[:2]==['learning','reviews'] and method=='POST':
             try:return learning.review(c,segments[2],segments[3])
             except ValueError as exc:fail(409,str(exc))
+        if segments==['stickers'] and method=='GET':
+            return {'items':[dict(r) for r in c.execute('SELECT * FROM stickers ORDER BY id')]}
+        if segments and segments[0]=='stickers' and (len(segments)==1 or len(segments)==2):
+            existing=c.execute('SELECT * FROM stickers WHERE id=?',(segments[1],)).fetchone() if len(segments)==2 else None
+            if len(segments)==2 and not existing:fail(404,'表情包不存在')
+            if method=='DELETE' and existing:
+                c.execute('DELETE FROM stickers WHERE id=?',(existing['id'],));return {'deleted':True}
+            if method not in ('POST','PUT') or (method=='PUT' and not existing):fail(405,'不支持此操作')
+            if existing and data.get('revision')!=existing['revision']:fail(409,'表情包已被修改，请刷新后重试')
+            name=string(data,'name',60,True);path=string(data,'path',2000,True)
+            if any(ch in name for ch in '[]\n\r'):fail(400,'名称不能包含方括号或换行')
+            if type(data.get('enabled',True)) is not bool:fail(400,'启用状态格式错误')
+            try:url=stickers.image_url(path)
+            except ValueError as exc:fail(400,str(exc))
+            if c.execute('SELECT 1 FROM stickers WHERE name=? AND id<>?',(name,existing['id'] if existing else -1)).fetchone():fail(409,'表情包名称不能重复')
+            if not existing and c.execute('SELECT count(*) FROM stickers').fetchone()[0]>=100:fail(400,'最多100个表情包')
+            if existing:
+                sid=existing['id'];c.execute('UPDATE stickers SET name=?,path=?,url=?,enabled=?,revision=?,updated_at=? WHERE id=?',(name,path,url,int(data.get('enabled',True)),secrets.token_hex(8),now(),sid))
+            else:sid=c.execute('INSERT INTO stickers(name,path,url,enabled,revision,updated_at) VALUES(?,?,?,?,?,?)',(name,path,url,int(data.get('enabled',True)),secrets.token_hex(8),now())).lastrowid
+            return dict(c.execute('SELECT * FROM stickers WHERE id=?',(sid,)).fetchone())
         if segments == ['learning', 'events'] and method == 'POST':
             kb_id = string(data, 'kb_id', 80, True)
             base(c, kb_id)
@@ -661,7 +688,7 @@ def api(method, path, data, params):
                 fail(400, 'status 必须为 delivered 或 failed')
             try:
                 return traces.delivery(c, string(data, 'trace_id', 64, True), string(data, 'receipt', 100, True), status,
-                                       traces.redact(string(data, 'content', 3000), [ADMIN_TOKEN, READ_TOKEN, LEARN_TOKEN, answer_config(c)['api_key'], config(c)['api_key']]), string(data, 'error', 80))
+                                       traces.redact(string(data, 'content', 3000), [ADMIN_TOKEN, READ_TOKEN, LEARN_TOKEN, answer_config(c)['api_key'], config(c)['api_key']]), string(data, 'error', 80), data.get('sticker'))
             except ValueError as exc:
                 fail(403, str(exc))
         if segments and segments[0] == 'traces' and method == 'GET':
@@ -871,7 +898,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Cache-Control', 'no-store')
         self.send_header('X-Content-Type-Options', 'nosniff')
         self.send_header('Referrer-Policy', 'no-referrer')
-        self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+        self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
         self.end_headers()
         if self.command != 'HEAD':
             self.wfile.write(body)
