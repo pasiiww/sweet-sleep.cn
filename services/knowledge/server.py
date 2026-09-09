@@ -560,6 +560,8 @@ def api(method, path, data, params):
             kb = base(c, segments[1])
             if len(segments) == 3 and segments[2] == 'entities':
                 if method == 'PUT':
+                    if 'expected_items' in data and data['expected_items'] != entity_catalog(c, kb['id']):
+                        fail(409, '别名表已在其他页面更新，请重试以保留最新修改')
                     try:
                         items = entities.validate(data.get('items'))
                     except ValueError as exc:

@@ -26,6 +26,10 @@ class EntityTests(unittest.TestCase):
 
     def test_catalog_crud_conflicts_and_isolation(self):
         before = self.call('GET', self.path)
+        with self.assertRaises(app.Problem) as conflict:
+            self.call('PUT', self.path, {'items': [], 'expected_items': []})
+        self.assertEqual(conflict.exception.status, 409)
+        self.assertEqual(self.call('PUT', self.path, {'items': before['items'], 'expected_items': before['items']}), before)
         with self.assertRaises(app.Problem):
             self.call('PUT', self.path, {'items': before['items'] + [{'name': '其他', 'aliases': ['KEI']}]})
         self.assertEqual(self.call('GET', self.path), before)

@@ -221,27 +221,90 @@ $('answer-preview-form').onsubmit = event => { event.preventDefault(); busy(even
   } catch (error) { $('answer-preview').textContent = error.message; throw error; }
 }); };
 
-let aliasesRequest = 0;
+let aliasesRequest = 0, aliasSequence = 0, aliasSaving = false, aliasRows = [], aliasesKb = '';
+const aliasValue = row => ({name: row.name.trim(), aliases: row.aliases.split(/[,，;；|\n]+/).map(value => value.trim()).filter(Boolean)});
+const aliasDirty = row => !row.original || JSON.stringify(aliasValue(row)) !== JSON.stringify(row.original);
+function renderAliases() {
+  $('alias-rows').innerHTML = aliasRows.map(row => `<tr data-alias-row="${row.id}"><td><input data-field="name" aria-label="实体标准名 ${row.id}" maxlength="80" placeholder="例如：凯伊" value="${esc(row.name)}"></td><td><textarea data-field="aliases" aria-label="别名 ${row.id}" rows="2" maxlength="2000" placeholder="例如：kei，小凯">${esc(row.aliases)}</textarea></td><td><span class="badge" data-row-status></span></td><td><div class="alias-row-actions"><button data-alias-action="save" class="row-button">保存</button><button data-alias-action="reset" class="row-button">撤销</button><button data-alias-action="delete" class="row-button delete">删除</button></div></td></tr>`).join('');
+  updateAliasRows();
+}
+function updateAliasRows() {
+  const filter = $('alias-search').value.trim().toLocaleLowerCase();
+  for (const tr of $('alias-rows').children) {
+    const row = aliasRows.find(item => item.id === tr.dataset.aliasRow), dirty = aliasDirty(row);
+    tr.hidden = !!filter && ![row.name, row.aliases].join(' ').toLocaleLowerCase().includes(filter);
+    tr.classList.toggle('alias-dirty', dirty);
+    const status = tr.querySelector('[data-row-status]');
+    status.textContent = !row.original ? '新增' : dirty ? '未保存' : '已保存';
+    status.classList.toggle('pending', dirty);
+    tr.querySelector('[data-alias-action="save"]').disabled = aliasSaving || !dirty;
+    tr.querySelector('[data-alias-action="reset"]').disabled = aliasSaving || !dirty;
+    tr.querySelector('[data-alias-action="delete"]').disabled = aliasSaving;
+    tr.querySelectorAll('input,textarea').forEach(input => { input.disabled = aliasSaving; });
+  }
+  $('aliases-base').disabled = aliasSaving;
+  $('add-alias').disabled = aliasSaving || !aliasesKb || aliasRows.length >= 200;
+  $('aliases-empty').hidden = aliasRows.length > 0;
+  const changed = aliasRows.filter(aliasDirty).length;
+  $('aliases-status').textContent = `共 ${aliasRows.length} 个实体${changed ? ` · ${changed} 行未保存` : ' · 修改后逐行保存'}`;
+}
 async function loadAliases() {
   const kb = $('aliases-base').value, request = ++aliasesRequest;
-  $('aliases-text').disabled = true; $('save-aliases').disabled = true;
-  $('aliases-text').value = ''; $('aliases-status').textContent = kb ? '正在读取…' : '请先创建知识库';
+  aliasesKb = ''; aliasRows = []; $('alias-search').value = ''; renderAliases();
+  $('aliases-status').textContent = kb ? '正在读取…' : '请先创建知识库';
   if (!kb) return;
   try {
     const result = await api(`bases/${kb}/entities`);
     if (request !== aliasesRequest) return;
-    $('aliases-text').value = result.items.map(item => [item.name, ...item.aliases].join(' | ')).join('\n');
-    $('aliases-status').textContent = `已配置 ${result.items.length} 个实体`;
-    $('aliases-text').disabled = false; $('save-aliases').disabled = false;
+    aliasesKb = kb;
+    aliasRows = result.items.map(item => ({id: String(++aliasSequence), original: item, name: item.name, aliases: item.aliases.join('，')}));
+    renderAliases();
   } catch (error) { if (request === aliasesRequest) $('aliases-status').textContent = error.message; throw error; }
 }
 $('aliases-base').onchange = () => loadAliases().catch(error => toast(error.message));
-$('aliases-form').onsubmit = event => { event.preventDefault(); busy(event.submitter, async () => {
-  const items = $('aliases-text').value.split('\n').filter(line => line.trim()).map(line => {
-    const [name, ...aliases] = (line.includes('|') ? line.split('|') : line.trim().split(/\s+/)).map(value => value.trim());
-    return {name, aliases};
-  });
-  const result = await api(`bases/${$('aliases-base').value}/entities`, 'PUT', {items});
-  $('aliases-status').textContent = `已保存 ${result.items.length} 个实体，下次提问立即生效`;
-  toast('实体别名已保存');
-}); };
+$('alias-search').oninput = updateAliasRows;
+$('add-alias').onclick = () => {
+  $('alias-search').value = '';
+  aliasRows.push({id: String(++aliasSequence), original: null, name: '', aliases: ''});
+  renderAliases(); $('alias-rows').lastElementChild.querySelector('input').focus();
+};
+$('alias-rows').oninput = event => {
+  const field = event.target.dataset.field, tr = event.target.closest('[data-alias-row]');
+  if (!field || !tr) return;
+  aliasRows.find(row => row.id === tr.dataset.aliasRow)[field] = event.target.value;
+  updateAliasRows();
+};
+$('alias-rows').onclick = async event => {
+  const button = event.target.closest('[data-alias-action]');
+  if (!button || button.disabled || aliasSaving) return;
+  const action = button.dataset.aliasAction, row = aliasRows.find(item => item.id === button.closest('tr').dataset.aliasRow);
+  if (action === 'reset') {
+    if (row.original) { row.name = row.original.name; row.aliases = row.original.aliases.join('，'); }
+    else aliasRows = aliasRows.filter(item => item !== row);
+    renderAliases(); return;
+  }
+  const kb = aliasesKb;
+  if (action === 'delete' && row.original && !await confirmDelete(`删除实体「${row.original.name}」及其全部别名？`)) return;
+  if (kb !== aliasesKb || !aliasRows.includes(row)) return;
+  if (action === 'delete' && !row.original) { aliasRows = aliasRows.filter(item => item !== row); renderAliases(); return; }
+  const value = aliasValue(row);
+  if (action === 'save' && !value.name) { toast('请填写实体标准名'); return; }
+  aliasSaving = true; updateAliasRows(); button.textContent = '处理中…';
+  try {
+    // Merge only this row with the latest catalog; other unsaved rows stay in the editor.
+    const latest = await api(`bases/${kb}/entities`), items = [...latest.items];
+    const index = row.original ? items.findIndex(item => item.name === row.original.name) : -1;
+    if (row.original && (index < 0 || JSON.stringify(items[index]) !== JSON.stringify(row.original))) throw new Error('此实体已在其他页面修改，请重新选择知识库后再编辑');
+    if (action === 'delete') items.splice(index, 1);
+    else if (index >= 0) items[index] = value;
+    else items.push(value);
+    const result = await api(`bases/${kb}/entities`, 'PUT', {items, expected_items: latest.items});
+    if (action === 'delete') aliasRows = aliasRows.filter(item => item !== row);
+    else {
+      row.original = result.items.find(item => item.name === value.name);
+      row.name = row.original.name; row.aliases = row.original.aliases.join('，');
+    }
+    toast(action === 'delete' ? '实体已删除' : `「${value.name}」已保存，下次提问生效`);
+  } catch (error) { toast(error.message); }
+  finally { aliasSaving = false; renderAliases(); }
+};
