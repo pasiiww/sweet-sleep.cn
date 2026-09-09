@@ -10,6 +10,7 @@ Static website for `sweet-sleep.cn`.
 - `/menu/` - interactive character menu page
 - `/gacha/` - pure frontend Blue Archive gacha simulator
 - `/knowledge/` - authenticated knowledge management and retrieval, with a separate Python backend; see [service documentation](services/knowledge/README.md)
+- QQ retrieval bot - official `botpy` service that replies to private messages and group mentions with knowledge excerpts; see [bot documentation](services/qqbot/README.md)
 
 ## Deploy
 

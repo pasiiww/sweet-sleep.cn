@@ -1,0 +1,29 @@
+[Unit]
+Description=Sweet Sleep QQ knowledge retrieval bot
+Wants=network-online.target sweet-knowledge.service
+After=network-online.target sweet-knowledge.service
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=sweet-qqbot
+Group=sweet-qqbot
+WorkingDirectory=/opt/sweet-qqbot
+EnvironmentFile=/etc/sweet-qqbot.env
+ExecStart=/opt/sweet-qqbot/venv/bin/python /opt/sweet-qqbot/bot.py
+Restart=always
+RestartSec=30
+StateDirectory=sweet-qqbot
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/sweet-qqbot
+MemoryMax=200M
+TasksMax=32
+
+[Install]
+WantedBy=multi-user.target
