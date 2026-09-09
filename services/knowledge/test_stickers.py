@@ -81,3 +81,17 @@ class StickerTests(unittest.TestCase):
     self.assertEqual(len(list((app.DATA/'stickers').iterdir())),1)
     with self.assertRaises(HTTPError):urlopen(endpoint+'/knowledge/sticker-files/../../knowledge.db')
   finally:http.shutdown();http.server_close();thread.join()
+ def test_gif_and_auto_name(self):
+  import base64
+  raw=base64.b64decode('R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==')
+  file=stickers.save_upload(app.DATA/'stickers',raw);self.assertEqual(file.suffix,'.gif');self.assertEqual(file.read_bytes(),raw)
+  with self.assertRaises(ValueError):stickers.save_upload(app.DATA/'stickers',raw[:-1])
+  with patch.object(stickers,'generate_name',return_value='玲纱-开心') as model:
+   a=self.api('POST',d={'path':'/a.gif'});b=self.api('POST',d={'name':'','path':'/b.gif'})
+   self.assertEqual(a['name'],'玲纱-开心');self.assertEqual(b['name'],'玲纱-开心-2');self.assertEqual(model.call_count,2)
+   self.api('POST',d={'name':'手动','path':'/c.gif'});self.assertEqual(model.call_count,2)
+  with patch.object(answers,'model_call',return_value='玲纱-开心') as model:
+   self.assertEqual(stickers.generate_name({'api_key':'test'},'https://example.com/a.gif'),'玲纱-开心')
+   self.assertEqual(model.call_args.args[0]['model'],'deepseek-v4-flash-vision-exp')
+  with patch.object(answers,'model_call',side_effect=answers.ModelError('invalid_key')):
+   with self.assertRaises(ValueError):stickers.generate_name({'api_key':'test'},'https://example.com/a.gif')

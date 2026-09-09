@@ -186,6 +186,8 @@ QA 的 FTS 索引严格只写 Q，A 从不参与匹配。关键词召回同时�
 
 ## 表情包库
 
-后台「表情包库」全局维护名称、图片路径、启用状态，支持逐行编辑与删除，最多 100 条。图片必须已存在，可填写公开 HTTPS PNG/JPG 地址、本站 `/stickers/开心.png` 或 `/www/wwwroot/myweb/` 下的路径；也可直接选择 PNG/JPG 上传（单张最大 5 MB），保存到 `/var/lib/sweet-knowledge/stickers/`，自动生成随机文件名与 `/knowledge/sticker-files/` 公开图片地址。上传需管理密钥，图片可供 QQ 拉取；删除库条目保留文件，避免在途消息失效。目录总容量 250 MB。
+后台「表情包库」全局维护名称、图片路径、启用状态，支持逐行编辑与删除，最多 100 条。图片必须已存在，可填写公开 HTTPS PNG/JPG/GIF 地址、本站 `/stickers/开心.png` 或 `/www/wwwroot/myweb/` 下的路径；也可直接选择 PNG/JPG/GIF 上传（单张最大 5 MB），保存到 `/var/lib/sweet-knowledge/stickers/`，自动生成随机文件名与 `/knowledge/sticker-files/` 公开图片地址。上传需管理密钥，图片可供 QQ 拉取；删除库条目保留文件，避免在途消息失效。目录总容量 250 MB。
 
 PE2 只接收启用名称列表，提示词列出 `[名称]` 表情上下文，模型以 `[玲纱-开心]` 等精确名称选择 0 或 1 张（兼容旧标记），服务端校验后移除标记并返回 `sticker` 描述。群聊与私聊通过 QQ 文件上传接口（`file_type=1, srv_send_msg=false`）取得 `file_info`，再用 `msg_type=7` 随文字被动回复。图片上传或发送失败会尝试保留原文字回复；Trace 记录选图与发送状态，不保存临时 `file_info`。模型不可用时原文回退不附图。
+
+上传或添加时名称可留空，使用现有回答 API Key 调用 `deepseek-v4-flash-vision-exp` 看图命名；手动名称不调用模型。同名自动追加序号，失败提示手动命名或重试。GIF 保留动画原文件，以 `image/gif` 提供下载并交给 QQ 富媒体接口，QQ 拒绝图片时仍保留文字回复。

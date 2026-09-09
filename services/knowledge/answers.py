@@ -80,7 +80,7 @@ def _model_call(cfg, messages, json_mode=False, max_tokens=1000):
                           data=json.dumps(payload).encode(),
                           headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg['api_key']})
     try:
-        with request.build_opener(NoRedirect).open(req, timeout=20) as response:
+        with request.build_opener(NoRedirect).open(req, timeout=cfg.get('_timeout',20)) as response:
             raw = response.read(200001)
             if len(raw) > 200000:
                 raise ModelError('invalid_response')

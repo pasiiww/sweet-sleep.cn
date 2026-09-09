@@ -631,6 +631,23 @@ def api(method, path, data, params):
             cfg = config(c)
         v = embed(['连接测试'], cfg)
         return {'dimensions': len(v[0]), 'ok': True}
+    auto_sticker_name=False
+    if segments==['stickers'] and method=='POST' and not string(data,'name',60).strip():
+        try:
+            url=stickers.image_url(string(data,'path',2000,True))
+            with db() as c:
+                cfg=answer_config(c)
+                if c.execute('SELECT count(*) FROM stickers').fetchone()[0]>=100:fail(400,'最多100个表情包')
+            naming_image=url
+            local=re.fullmatch(r'https://sweet-sleep.cn/knowledge/sticker-files/([a-f0-9]{32}\.(png|jpg|gif))',url)
+            if local:
+                import base64
+                file=DATA/'stickers'/local.group(1)
+                if not file.is_file():fail(400,'图片不存在')
+                mime={'png':'image/png','jpg':'image/jpeg','gif':'image/gif'}[local.group(2)]
+                naming_image='data:'+mime+';base64,'+base64.b64encode(file.read_bytes()).decode()
+            data=dict(data,name=stickers.generate_name(cfg,naming_image));auto_sticker_name=True
+        except ValueError as exc:fail(400,str(exc))
     with WRITE_LOCK, db() as c:
         if len(segments)==4 and segments[:2]==['learning','reviews'] and method=='POST':
             try:return learning.review(c,segments[2],segments[3])
@@ -649,6 +666,10 @@ def api(method, path, data, params):
             if type(data.get('enabled',True)) is not bool:fail(400,'启用状态格式错误')
             try:url=stickers.image_url(path)
             except ValueError as exc:fail(400,str(exc))
+            if auto_sticker_name:
+                stem=name;number=2
+                while c.execute('SELECT 1 FROM stickers WHERE name=?',(name,)).fetchone():
+                    name=f'{stem}-{number}';number+=1
             if c.execute('SELECT 1 FROM stickers WHERE name=? AND id<>?',(name,existing['id'] if existing else -1)).fetchone():fail(409,'表情包名称不能重复')
             if not existing and c.execute('SELECT count(*) FROM stickers').fetchone()[0]>=100:fail(400,'最多100个表情包')
             if existing:
@@ -908,10 +929,10 @@ class Handler(BaseHTTPRequestHandler):
             parsed = urlsplit(self.path)
             if parsed.path.startswith('/knowledge/sticker-files/'):
                 filename=parsed.path.removeprefix('/knowledge/sticker-files/')
-                if self.command not in ('GET','HEAD') or not re.fullmatch(r'[a-f0-9]{32}\.(png|jpg)',filename):fail(404,'图片不存在')
+                if self.command not in ('GET','HEAD') or not re.fullmatch(r'[a-f0-9]{32}\.(png|jpg|gif)',filename):fail(404,'图片不存在')
                 file=DATA/'stickers'/filename
                 if not file.is_file():fail(404,'图片不存在')
-                self.reply(200,file.read_bytes(),'image/png' if filename.endswith('.png') else 'image/jpeg')
+                self.reply(200,file.read_bytes(),'image/gif' if filename.endswith('.gif') else 'image/png' if filename.endswith('.png') else 'image/jpeg')
                 return
             if not parsed.path.startswith('/knowledge/api/'):
                 assets = {'/knowledge/': ('index.html', 'text/html'), '/knowledge/index.html': ('index.html', 'text/html'),

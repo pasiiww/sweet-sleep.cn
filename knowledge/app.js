@@ -478,6 +478,7 @@ async function loadStickers() {
 }
 $('sticker-add').onsubmit=event=>{event.preventDefault();busy(event.submitter,async()=>{
  const form=event.target;const file=selectedStickerFile;
+ if(!form.elements.name.value.trim())event.submitter.textContent='正在看图命名并保存…';
  if(file){
    if(file.size>5*1024*1024)throw new Error('图片不能超过 5 MB');
    const response=await fetch('/knowledge/api/stickers/upload?name='+encodeURIComponent(form.elements.name.value),{method:'POST',headers:{Authorization:'Bearer '+state.token,'Content-Type':file.type||'application/octet-stream'},body:file});
@@ -487,17 +488,16 @@ $('sticker-add').onsubmit=event=>{event.preventDefault();busy(event.submitter,as
 
 let selectedStickerFile=null;
 function clearStickerUpload(){
- selectedStickerFile=null;$('sticker-file').value='';$('sticker-file-info').textContent='PNG / JPG，每次一张，最大 5 MB';
+ selectedStickerFile=null;$('sticker-file').value='';$('sticker-file-info').textContent='PNG / JPG / GIF，每次一张，最大 5 MB';
  $('sticker-upload-preview').hidden=true;$('sticker-upload-preview').removeAttribute('src');$('sticker-file-clear').hidden=true;
 }
 function selectStickerFiles(files){
  if(!files.length)return;
  if(files.length!==1){toast('请每次拖入一张图片');return;}
  const file=files[0];
- if(!['image/png','image/jpeg'].includes(file.type)&&!(/\.(png|jpe?g)$/i).test(file.name)){toast('请选择 PNG 或 JPG 图片');return;}
+ if(!['image/png','image/jpeg','image/gif'].includes(file.type)&&!(/\.(png|jpe?g|gif)$/i).test(file.name)){toast('请选择 PNG、JPG 或 GIF 图片');return;}
  if(file.size>5*1024*1024){toast('图片不能超过 5 MB');return;}
  selectedStickerFile=file;
- const name=$('sticker-add').elements.name;if(!name.value.trim())name.value=file.name.replace(/\.[^.]+$/,'').replace(/[\[\]\r\n]/g,'').slice(0,60);
  $('sticker-file-info').textContent=file.name+' · '+(file.size/1024).toFixed(0)+' KB · 点击添加后上传';$('sticker-file-clear').hidden=false;
  $('sticker-upload-preview').hidden=true;
  const reader=new FileReader();reader.onload=()=>{if(selectedStickerFile===file){$('sticker-upload-preview').src=reader.result;$('sticker-upload-preview').hidden=false;}};reader.readAsDataURL(file);
