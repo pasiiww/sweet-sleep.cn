@@ -158,13 +158,14 @@ $('settings-form').onsubmit = event => { event.preventDefault(); busy(event.subm
 }); };
 $('test-model').onclick = () => busy($('test-model'), async () => { const result = await api('settings/test', 'POST', {}); $('model-test-result').textContent = `连接成功 · ${result.dimensions} 维向量`; });
 
-const answerReasons = {ok:'模型工作正常',missing_key:'尚未填写 API Key，将返回最相关文档',disabled:'模型已关闭，将返回最相关文档',invalid_key:'API Key 无效，将返回最相关文档',insufficient_balance:'余额不足，将返回最相关文档',access_denied:'模型无访问权限，将返回最相关文档',rate_limited:'模型限流，已回退原文',network_error:'模型网络异常或超时，已回退原文',upstream_error:'模型服务异常，已回退原文',invalid_response:'模型响应异常，已回退原文',invalid_evidence:'模型引用证据未通过校验，已回退原文',no_results:'没有检索命中，已转人工',insufficient_evidence:'资料不足以回答，已转人工',busy:'模型请求较多，已回退原文'};
+const answerReasons = {ok:'模型工作正常',missing_key:'尚未填写 API Key，将返回最相关文档',disabled:'模型已关闭，将返回最相关文档',invalid_key:'API Key 无效，将返回最相关文档',insufficient_balance:'余额不足，将返回最相关文档',access_denied:'模型无访问权限，将返回最相关文档',rate_limited:'模型限流，已回退原文',network_error:'模型网络异常或超时，已回退原文',upstream_error:'模型服务异常，已回退原文',invalid_response:'模型响应异常，已回退原文',invalid_keywords:'检索词生成失败，已用原问题检索并回退原文',no_results:'没有检索命中，已转人工',insufficient_evidence:'资料不足以回答，已转人工',busy:'模型请求较多，已回退原文'};
 let answerDefaults = '';
 async function loadAnswerSettings() {
   const cfg = await api('answer-settings');
   answerDefaults = cfg.default_prompt;
   $('answer-enabled').checked = cfg.enabled;
   $('answer-model').value = cfg.model;
+  $('admin-qq').value = cfg.admin_qq;
   $('answer-key').value = '';
   $('answer-clear-key').checked = false;
   $('answer-prompt').value = cfg.system_prompt;
@@ -180,12 +181,12 @@ $('answer-settings-form').onsubmit = event => { event.preventDefault(); busy(eve
     if (Object.hasOwn(groups, group)) throw new Error('同一个群请写在同一行');
     groups[group] = ids;
   }
-  await api('answer-settings', 'PUT', { enabled: $('answer-enabled').checked, model: $('answer-model').value, api_key: $('answer-key').value, clear_key: $('answer-clear-key').checked, system_prompt: $('answer-prompt').value, handoff_groups: groups });
+  await api('answer-settings', 'PUT', { enabled: $('answer-enabled').checked, model: $('answer-model').value, api_key: $('answer-key').value, clear_key: $('answer-clear-key').checked, system_prompt: $('answer-prompt').value, admin_qq: $('admin-qq').value, handoff_groups: groups });
   await loadAnswerSettings(); $('answer-test-status').textContent = ''; toast('客服配置已保存，下次提问立即生效');
 }); };
 $('test-answer-model').onclick = () => busy($('test-answer-model'), async () => {
   try { const result = await api('answer-settings/test', 'POST', {}); $('answer-test-status').textContent = `连接成功 · ${result.model}`; }
-  catch (error) { $('answer-test-status').textContent = error.message.replace(/invalid_key|insufficient_balance|access_denied|rate_limited|network_error|upstream_error|invalid_response|invalid_evidence/g, key => answerReasons[key]); }
+  catch (error) { $('answer-test-status').textContent = error.message.replace(/invalid_key|insufficient_balance|access_denied|rate_limited|network_error|upstream_error|invalid_response|invalid_keywords/g, key => answerReasons[key]); }
   const cfg = await api('answer-settings');
   if (cfg.last_status) $('answer-status').textContent = answerReasons[cfg.last_status.reason] || cfg.last_status.reason;
 });
@@ -193,6 +194,6 @@ $('answer-preview-form').onsubmit = event => { event.preventDefault(); busy(even
   $('answer-preview').textContent = '正在检索并生成回复…';
   try {
     const result = await api('answer', 'POST', {kb_id: $('answer-base').value, query: $('answer-query').value});
-    $('answer-preview').textContent = (answerReasons[result.reason] || result.mode) + '\n\n' + result.answer + (result.handoff ? '\n\n实际群聊会按该群的人工联系人配置尝试艾特；这里仅预览文本。' : '');
+    $('answer-preview').textContent = (answerReasons[result.reason] || result.mode) + '\n检索词：' + (result.search_terms || []).join(' / ') + '\n\n' + result.answer + (result.handoff ? '\n\n实际群聊会按该群的人工联系人配置尝试艾特；这里仅预览文本。' : '');
   } catch (error) { $('answer-preview').textContent = error.message; throw error; }
 }); };

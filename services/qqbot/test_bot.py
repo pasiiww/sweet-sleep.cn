@@ -99,6 +99,14 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await runner.cleanup()
 
+    async def test_group_without_mention_never_enters_pipeline(self):
+        message = self.message('普通群消息', 'plain-group')
+        await self.bot.on_group_message_create(message)
+        await self.bot.answer(message, 'group')
+        self.retriever.search.assert_not_awaited()
+        message.reply.assert_not_awaited()
+        self.assertTrue(self.seen.claim('group:plain-group'))
+
     async def test_model_text_and_trusted_mentions(self):
         data = {'answer': '请管理员确认 <qqbot-at-user id="evil-user" />', 'handoff': True,
                 'mention_openids': ['admin123456', 'bad"/><x>']}
@@ -110,7 +118,7 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
         message = self.message('/身份', 'identity')
         message.group_openid = 'group123456'
         message.author = SimpleNamespace(member_openid='member123456')
-        await self.bot.answer(message, 'group')
+        await self.bot.answer(message, 'group', mentioned=True)
         self.assertIn('member123456', message.reply.call_args.kwargs['content'])
         self.retriever.search.assert_not_awaited()
 

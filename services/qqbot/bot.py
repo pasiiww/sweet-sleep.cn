@@ -76,7 +76,7 @@ class Retriever:
         self.token, self.kb_id = token, kb_id
 
     async def search(self, query, group_id=''):
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=35)) as session:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=55)) as session:
             async with session.post(self.url, headers={'Authorization': 'Bearer ' + self.token},
                                     json={'kb_id': self.kb_id, 'query': query, 'group_id': group_id}) as response:
                 if response.status != 200:
@@ -101,9 +101,16 @@ class KnowledgeBot(botpy.Client):
         await self.answer(message, 'c2c')
 
     async def on_group_at_message_create(self, message):
-        await self.answer(message, 'group')
+        # The platform event certifies this bot was mentioned; text may omit the tag.
+        await self.answer(message, 'group', mentioned=True)
 
-    async def answer(self, message, kind):
+    async def on_group_message_create(self, message):
+        # Ordinary group messages must not enter deduplication, retrieval or model calls.
+        return
+
+    async def answer(self, message, kind, mentioned=False):
+        if kind == 'group' and not mentioned:
+            return
         if not message.id or not self.seen.claim(kind + ':' + message.id):
             return
         query = normalize(message.content)

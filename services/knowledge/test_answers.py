@@ -15,6 +15,8 @@ class AnswerTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         app.DATA = Path(self.temp.name)
         app.initialize()
+        self.keyword_mock = patch.object(answers, 'keywords', side_effect=lambda cfg, q: [q, q + 'xyz']).start()
+        self.addCleanup(patch.stopall)
         self.kb = self.call('POST', 'bases', {'name': '测试'})['id']
         self.call('POST', f'bases/{self.kb}/documents', {'title': '营业说明', 'content': '营业时间为每天上午十点至晚上八点。', 'source': '已确认资料'})
         self.call('POST', f'bases/{self.kb}/documents', {'title': '其他说明', 'content': '可在线查询营业时间和配送规则。'})
@@ -74,7 +76,7 @@ class AnswerTests(unittest.TestCase):
 
     def test_model_failure_modes_fallback_and_status(self):
         self.configure()
-        for code in ('invalid_key', 'insufficient_balance', 'network_error', 'rate_limited', 'invalid_response', 'invalid_evidence'):
+        for code in ('invalid_key', 'insufficient_balance', 'network_error', 'rate_limited', 'invalid_response', 'invalid_keywords'):
             with self.subTest(code=code), patch.object(answers, 'complete', side_effect=answers.ModelError(code)):
                 result = self.ask()
                 self.assertEqual(result['mode'], 'document')
@@ -92,12 +94,11 @@ class AnswerTests(unittest.TestCase):
         with patch.object(answers, 'complete', side_effect=model):
             result = self.ask()
         self.assertEqual(result['mode'], 'model')
-        self.assertIn('参考资料', result['answer'])
+        self.assertEqual(result['answer'], '根据资料，请查看营业说明。')
+        self.assertEqual(len(result['search_terms']), 2)
 
     def test_output_validation_and_http_error_mapping(self):
         rows = [{'citation': 1, 'title': '营业说明', 'content': '上午十点营业。'}]
-        with self.assertRaises(answers.ModelError):
-            answers.validate_answer({'supported': True, 'answer': '八点开门', 'evidence': [{'citation': 1, 'quote': '八点开门'}]}, rows)
         cfg = answers.defaults() | {'api_key': 'test-key'}
         for status, code in ((401, 'invalid_key'), (402, 'insufficient_balance'), (429, 'rate_limited')):
             with patch.object(answers.request, 'build_opener') as opener:
@@ -107,8 +108,7 @@ class AnswerTests(unittest.TestCase):
 
     def test_real_protocol_payload_and_response(self):
         rows = [{'citation': 1, 'title': '营业说明', 'content': '上午十点营业。'}]
-        response = {'choices': [{'finish_reason': 'stop', 'message': {'content': json.dumps({
-            'supported': True, 'answer': '上午十点营业。', 'evidence': [{'citation': 1, 'quote': '上午十点营业'}]})}}]}
+        response = {'choices': [{'finish_reason': 'stop', 'message': {'content': '上午十点营业。'}}]}
         class Response:
             def __enter__(self): return self
             def __exit__(self, *args): pass
@@ -120,7 +120,8 @@ class AnswerTests(unittest.TestCase):
             payload = json.loads(req.data)
             self.assertEqual(req.full_url, 'https://api.deepseek.com/chat/completions')
             self.assertEqual(payload['thinking'], {'type': 'disabled'})
-            self.assertEqual(payload['response_format'], {'type': 'json_object'})
+            self.assertNotIn('response_format', payload)
+            self.assertEqual(result['answer'], '上午十点营业。')
             self.assertIn(answers.OUTPUT_RULE, payload['messages'][0]['content'])
             self.assertTrue(result['supported'])
 
@@ -129,6 +130,34 @@ class AnswerTests(unittest.TestCase):
             self.configure(handoff_groups={'group123456': ['bad\"/><x>']})
         with self.assertRaises(app.Problem):
             self.configure(system_prompt='')
+
+
+class KeywordTests(unittest.TestCase):
+    def test_keyword_count_uniqueness_and_json_mode(self):
+        cfg = answers.defaults()
+        with patch.object(answers, 'model_call', return_value='{"keywords":["营业时间","几点开门","营业时间"]}') as model:
+            self.assertEqual(answers.keywords(cfg, '几点营业？'), ['营业时间', '几点开门'])
+            self.assertTrue(model.call_args.kwargs['json_mode'])
+        for values in (['一个'], ['重复', '重复'], list('abcdef'), [1, 2], [' ', 'x']):
+            with patch.object(answers, 'model_call', return_value=json.dumps({'keywords': values})):
+                with self.assertRaises(answers.ModelError):
+                    answers.keywords(cfg, '问题')
+
+    def test_multisearch_deduplicates_ids_and_repeated_content(self):
+        row = {'chunk_id': 1, 'document_id': 'doc1', 'title': '标题', 'content': '十点开门', 'ordinal': 0}
+        with patch.object(app, 'retrieve', side_effect=[
+            {'results': [row, row | {'chunk_id': 2, 'content': '八点关门'}]},
+            {'results': [row, row | {'chunk_id': 3, 'document_id': 'doc2'}]}]) as retriever:
+            result = app.search_terms('kb1', ['营业时间', '几点开门'])
+        self.assertEqual(retriever.call_count, 2)
+        self.assertEqual([r['content'] for r in result['results']], ['十点开门', '八点关门'])
+
+    def test_handoff_marker_and_no_evidence_contract(self):
+        with patch.object(answers, 'model_call', return_value='你好，这里直接回复。'):
+            result = answers.complete(answers.defaults(), '问题', [])
+            self.assertEqual(result, {'supported': True, 'answer': '你好，这里直接回复。'})
+        with patch.object(answers, 'model_call', return_value='[[HANDOFF]]'):
+            self.assertFalse(answers.complete(answers.defaults(), '问题', [])['supported'])
 
 
 if __name__ == '__main__':

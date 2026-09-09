@@ -322,33 +322,70 @@ def answer_status(cfg, mode, reason):
                       ('answer_status', json.dumps({'mode': mode, 'reason': reason, 'at': now()})))
 
 
+def search_terms(kb_id, terms):
+    # Fuse rankings, deduplicate chunk IDs and identical text, then apply a shared budget.
+    candidates = {}
+    for term in terms:
+        result = retrieve({'kb_id': kb_id, 'query': term, 'mode': 'keyword',
+                           'top_k': 5, 'max_context_chars': 12000})
+        for rank, row in enumerate(result['results'], 1):
+            key = row['chunk_id']
+            if key not in candidates:
+                candidates[key] = {'row': row, 'rank': 0}
+            candidates[key]['rank'] += 1 / (60 + rank)
+    selected, seen, remaining = [], set(), 6000
+    for item in sorted(candidates.values(), key=lambda x: x['rank'], reverse=True):
+        row = dict(item['row'])
+        key = hashlib.sha256(' '.join(row['content'].split()).encode()).hexdigest()
+        if key in seen:
+            continue
+        seen.add(key)
+        text = row['content'][:remaining]
+        if not text:
+            break
+        row.update(content=text, citation=len(selected) + 1,
+                   truncated=row.get('truncated', False) or len(text) < len(row['content']))
+        remaining -= len(text)
+        selected.append(row)
+        if len(selected) >= 8:
+            break
+    return {'results': selected}
+
+
 def respond(data):
-    # Keep retrieval and model credentials server-side; callers cannot supply a prompt/key.
     query = string(data, 'query', 2000, True)
     group_id = string(data, 'group_id', 128)
-    result = retrieve({'kb_id': string(data, 'kb_id', 80, True), 'query': query,
-                       'mode': 'keyword', 'top_k': 3, 'max_context_chars': 6000})
+    kb_id = string(data, 'kb_id', 80, True)
     with db() as c:
+        base(c, kb_id)
         cfg = answer_config(c)
+    terms = [query]
     def finish(response):
+        response['search_terms'] = terms
         answer_status(cfg, response['mode'], response['reason'])
         return response
-    if not result['results']:
-        return finish(answers.handoff(cfg, group_id, 'no_results'))
+    def fallback(reason, result=None):
+        result = result if result is not None else search_terms(kb_id, [query])
+        if not result['results']:
+            return finish(answers.handoff(cfg, group_id, 'no_results'))
+        return finish(answers.fallback(result, reason))
     if not cfg['enabled'] or not cfg['api_key']:
-        return finish(answers.fallback(result, 'disabled' if not cfg['enabled'] else 'missing_key'))
+        return fallback('disabled' if not cfg['enabled'] else 'missing_key')
     if not ANSWER_SLOTS.acquire(blocking=False):
-        return finish(answers.fallback(result, 'busy'))
+        return fallback('busy')
+    result = None
     try:
+        terms = answers.keywords(cfg, query)
+        result = search_terms(kb_id, terms)
+        if not result['results']:
+            return finish(answers.handoff(cfg, group_id, 'no_results'))
         model = answers.complete(cfg, query, result['results'])
         if not model['supported']:
             return finish(answers.handoff(cfg, group_id, 'insufficient_evidence'))
-        sources = [r for r in result['results'] if r['citation'] in model['citations']]
-        refs = '\n'.join(f'[{r["citation"]}] {answers.plain(r["title"])[:100]}' for r in sources)
         return finish({'mode': 'model', 'reason': 'ok', 'handoff': False, 'mention_openids': [],
-                       'answer': answers.plain(model['answer']) + '\n\n参考资料：\n' + refs, 'results': sources})
+                       'answer': answers.plain(model['answer']), 'results': result['results']})
     except answers.ModelError as exc:
-        return finish(answers.fallback(result, str(exc)))
+        return fallback(str(exc), result)
     finally:
         ANSWER_SLOTS.release()
 
@@ -394,7 +431,10 @@ def api(method, path, data, params):
                 key = string(data, 'api_key', 2000)
                 if any(ord(ch) < 33 or ord(ch) > 126 for ch in key):
                     fail(400, 'API Key 必须为不含空格的可打印 ASCII 字符')
-                cfg = {'enabled': data['enabled'], 'model': model,
+                admin_qq = string(data, 'admin_qq', 12) or cfg['admin_qq']
+                if not re.fullmatch(r'[1-9][0-9]{4,11}', admin_qq):
+                    fail(400, '管理员QQ号格式不正确')
+                cfg = {'enabled': data['enabled'], 'model': model, 'admin_qq': admin_qq,
                        'system_prompt': string(data, 'system_prompt', 12000, True),
                        'api_key': key or ('' if data.get('clear_key') else cfg['api_key']),
                        'handoff_groups': groups, 'revision': secrets.token_hex(8)}
