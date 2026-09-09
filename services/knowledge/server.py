@@ -293,7 +293,8 @@ def retrieve(data):
         ft = list(dict.fromkeys(tokens(query) + [token for variant in expanded for token in tokens(variant)]))[:512]
         if mode != 'vector' and groups:
             scores = {}
-            for group in groups:
+            for term in dict.fromkeys(term for group in groups for term in group):
+                group=[term]
                 # FTS narrows candidates; literal predicates ensure full terms, not scattered CJK characters.
                 parts, conditions, values = [], [], []
                 for term in group:
@@ -321,7 +322,7 @@ def retrieve(data):
                     WHERE chunk_fts MATCH ? AND chunks.kb_id=? AND ''' + predicates +
                     ' ORDER BY rank, chunks.id LIMIT ?', params)
                 for rank, row in enumerate(rows, 1):
-                    scores[row['id']] = scores.get(row['id'], 0) + 1 / (60 + rank)
+                    scores[row['id']] = scores.get(row['id'], 0) + 1 + 1 / (60 + rank)
             keyword = sorted(scores.items(), key=lambda row: (-row[1], row[0]))
         elif mode != 'vector' and ft:
             keyword = [(r['id'], -r['rank']) for r in c.execute('''
@@ -358,8 +359,8 @@ def retrieve(data):
         score_type = 'rrf' if groups and mode == 'keyword' else {'keyword':'bm25','vector':'cosine','hybrid':'rrf'}[mode]
         if qa_ranking:
             # Separate corpora have incomparable BM25 values; merge their ranks, not raw scores.
-            combined = {('document', chunk_id): 1/(60+rank) for rank,(chunk_id,_) in enumerate(ranking,1)}
-            combined.update({('qa', qa_id): 1/(60+rank) for rank,(qa_id,_) in enumerate(qa_ranking,1)})
+            combined = {('document', chunk_id): score if groups else 1/(60+rank) for rank,(chunk_id,score) in enumerate(ranking,1)}
+            combined.update({('qa', qa_id): score if groups else 1/(60+rank) for rank,(qa_id,score) in enumerate(qa_ranking,1)})
             ranking = sorted(combined.items(),key=lambda item:(-item[1],item[0]))
             score_type = 'rrf'
         else:
@@ -408,21 +409,32 @@ def answer_status(cfg, mode, reason):
                       ('answer_status', json.dumps({'mode': mode, 'reason': reason, 'at': now()})))
 
 
-def search_terms(kb_id, terms):
+def search_terms(kb_id, terms, original_query=''):
     # Fuse rankings, deduplicate chunk IDs and identical text, then apply a shared budget.
     candidates, searches = {}, []
-    for term in terms:
+    searches_to_run=([original_query] if original_query else [])+list(terms)
+    unique=[]
+    for term in searches_to_run:
+        if term not in unique:unique.append(term)
+    for term in unique:
         search = {'query_groups': [term]} if isinstance(term, list) else {'query': term}
         result = retrieve({'kb_id': kb_id, **search, 'mode': 'keyword',
-                           'top_k': 5, 'max_context_chars': 12000})
-        searches.append({'query': term, 'elapsed_ms': result.get('elapsed_ms', 0), 'hits': [{'chunk_id': row['chunk_id'], 'title': row['title'], 'source_type': row.get('source_type','document'), 'score': row.get('score')} for row in result['results']]})
+                           'top_k': 12, 'max_context_chars': 12000})
+        searches.append({'query': term, 'kind':'original' if isinstance(term,str) and term==original_query else 'generated', 'elapsed_ms': result.get('elapsed_ms', 0), 'hits': [{'chunk_id': row['chunk_id'], 'title': row['title'], 'source_type': row.get('source_type','document'), 'score': row.get('score')} for row in result['results']]})
         for rank, row in enumerate(result['results'], 1):
             key = row['chunk_id']
             if key not in candidates:
                 candidates[key] = {'row': row, 'rank': 0}
             candidates[key]['rank'] += 1 / (60 + rank)
+    catalog=entities.Catalog([])
+    if original_query:
+        with db() as c:catalog=entities.Catalog(entity_catalog(c,kb_id))
+    generated=list(dict.fromkeys(t for group in terms if isinstance(group,list) for t in group))
+    for item in candidates.values():
+        row=item['row'];text=(row.get('question','') if row.get('source_type')=='qa' else row.get('title','')+' '+row['content']).casefold()
+        item['matched_terms']=[term for term in generated if any(v.casefold() in text for v in catalog.expand(term))]
     selected, seen, remaining = [], set(), 6000
-    for item in sorted(candidates.values(), key=lambda x: x['rank'], reverse=True):
+    for item in sorted(candidates.values(), key=lambda x:(len(x['matched_terms']),x['rank']), reverse=True):
         row = dict(item['row'])
         identity = ((row.get('question','') + '\n') if row.get('source_type') == 'qa' else '') + ' '.join(row['content'].split())
         key = hashlib.sha256(identity.encode()).hexdigest()
@@ -432,7 +444,7 @@ def search_terms(kb_id, terms):
         text = row['content'][:remaining]
         if not text:
             break
-        row.update(content=text, citation=len(selected) + 1,
+        row.update(content=text, matched_terms=item['matched_terms'], citation=len(selected) + 1,
                    truncated=row.get('truncated', False) or len(text) < len(row['content']))
         remaining -= len(text)
         selected.append(row)
@@ -523,8 +535,8 @@ def respond_pipeline(data, details):
     details.update(current_date=cfg['current_date'],qa_hints=qa_hints,history=history, model=cfg['model'], system_prompt=cfg['system_prompt'], keyword_prompt=cfg['keyword_prompt'])
     def search(terms):
         started = time.monotonic()
-        result = search_terms(kb_id, terms)
-        details['retrievals'].append({'terms': terms, 'elapsed_ms': round((time.monotonic() - started) * 1000), **result})
+        result = search_terms(kb_id, terms, original_query=query)
+        details['retrievals'].append({'original_query':query,'terms': terms, 'elapsed_ms': round((time.monotonic() - started) * 1000), **result})
         return result
     terms = [catalog.normalize(query)[:2000]]
     def finish(response):

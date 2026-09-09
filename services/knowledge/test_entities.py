@@ -63,7 +63,7 @@ class EntityTests(unittest.TestCase):
         for name in ['凯伊', '小凯', 'kei']:
             result = self.call('POST', 'retrieve', {'kb_id': self.kb, 'query_groups': [[name, '价格']]})
             self.assertEqual(result['query_groups'], [['凯伊', '价格']])
-            self.assertEqual([row['title'] for row in result['results']], ['KEI'])
+            self.assertEqual(result['results'][0]['title'], 'KEI')
 
     def test_history_reaches_both_stages(self):
         self.call('POST', f'bases/{self.kb}/documents', {'title': 'KEI', 'content': '价格100元，定金20元。'})

@@ -19,7 +19,8 @@ def initialize(c):
 
 def search(c, kb_id, query, groups, catalog, tokenize, limit):
     rankings = []
-    for group in groups or [None]:
+    search_groups=[[term] for term in dict.fromkeys(t for group in groups for t in group)] if groups else [None]
+    for group in search_groups:
         conditions, args = [], []
         if group:
             expressions = []
@@ -54,5 +55,5 @@ def search(c, kb_id, query, groups, catalog, tokenize, limit):
     scores = {}
     for ranking in rankings:
         for rank,(qa_id,_) in enumerate(ranking,1):
-            scores[qa_id] = scores.get(qa_id,0) + 1/(60+rank)
+            scores[qa_id] = scores.get(qa_id,0) + 1 + 1/(60+rank)
     return sorted(scores.items(),key=lambda pair:(-pair[1],pair[0]))[:limit]

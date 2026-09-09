@@ -28,7 +28,8 @@ class QATests(unittest.TestCase):
     def test_only_question_is_indexed_and_crud_updates_index(self):
         item=self.api('POST',self.path,{'question':'凯伊价格','answer':'答案专有词 answeronlytoken'})
         self.assertFalse(self.retrieve(query='answeronlytoken')['results'])
-        self.assertFalse(self.retrieve(query_groups=[['凯伊','answeronlytoken']])['results'])
+        self.assertFalse(self.retrieve(query_groups=[['answeronlytoken']])['results'])
+        self.assertTrue(self.retrieve(query_groups=[['凯伊','answeronlytoken']])['results'])
         result=self.retrieve(query_groups=[['kei','价格']])['results']
         self.assertEqual(result[0]['source_type'],'qa')
         self.assertEqual(result[0]['content'],'答案专有词 answeronlytoken')

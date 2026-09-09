@@ -101,7 +101,7 @@ class AnswerTests(unittest.TestCase):
         self.assertEqual(result['answer'], '根据资料，请查看营业说明。')
         self.assertEqual(len(result['search_terms']), 2)
 
-    def test_grouped_retrieval_requires_entity_and_intent(self):
+    def test_grouped_retrieval_accepts_partial_terms(self):
         def add(title, content):
             return self.call('POST', f'bases/{self.kb}/documents', {'title': title, 'content': content})['id']
         target = add('凯伊', '价格为100元。')
@@ -113,15 +113,15 @@ class AnswerTests(unittest.TestCase):
         self.call('POST', f'bases/{other_kb}/documents', {'title': '凯伊', 'content': '价格不能跨库召回。'})
         result = self.call('POST', 'retrieve', {'kb_id': self.kb,
             'query_groups': [['凯伊', '价格'], ['kei', '定金'], ['价格', '凯伊']]})
-        self.assertEqual({r['document_id'] for r in result['results']}, {target, alias})
+        self.assertTrue({target,alias}.issubset({r['document_id'] for r in result['results']}))
         self.assertEqual(len(result['query_groups']), 2)
         self.assertEqual(result['score_type'], 'rrf')
-        self.assertFalse(self.call('POST', 'retrieve', {'kb_id': self.kb,
+        self.assertTrue(self.call('POST', 'retrieve', {'kb_id': self.kb,
             'query_groups': [['不存在的角色', '价格']]})['results'])
         # FTS operators and quotes are literal user data, never query syntax.
         self.assertFalse(self.call('POST', 'retrieve', {'kb_id': self.kb,
-            'query_groups': [['凯伊" OR *', '价格']]})['results'])
-        for groups in ([], '凯伊', [['']], [['a'] * 5], [[1]], [['a']] * 6):
+            'query_groups': [['凯伊" OR *']]})['results'])
+        for groups in ([], '凯伊', [['']], [['a'] * 7], [[1]], [['a']] * 6):
             with self.subTest(groups=groups), self.assertRaises(app.Problem):
                 self.call('POST', 'retrieve', {'kb_id': self.kb, 'query_groups': groups})
 
@@ -190,7 +190,7 @@ class KeywordTests(unittest.TestCase):
             self.assertTrue(model.call_args.kwargs['json_mode'])
         with patch.object(answers, 'model_call', return_value='{"query_groups":[["凯伊","定金"]]}'):
             self.assertEqual(answers.keywords(cfg, '那定金呢'), [['凯伊', '定金']])
-        for values in (list('abcdef'), [1, 2], [[' '], ['x']], [['x'] * 5, ['y']]):
+        for values in (list('abcdef'), [1, 2], [[' '], ['x']], [['x'] * 7, ['y']]):
             with patch.object(answers, 'model_call', return_value=json.dumps({'query_groups': values})):
                 with self.assertRaises(answers.ModelError):
                     answers.keywords(cfg, '问题')

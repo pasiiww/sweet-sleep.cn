@@ -14,7 +14,7 @@ class RetryTests(unittest.TestCase):
     def tearDown(self):self.temp.cleanup()
     def test_retry_empty_case_qa_hints_and_same_date_for_both_stages(self):
         with patch.object(answers,'_model_call',side_effect=['{"query_groups":[["不存在的词"]]}','{"query_groups":[["凯伊","定金"]]}','定金20元']) as model:
-            r=app.respond({'kb_id':self.kb,'query':'凯伊预付多少'})
+            r=app.respond({'kb_id':self.kb,'query':'付款途径'})
         self.assertEqual(r['mode'],'model');self.assertEqual(model.call_count,3)
         payloads=[json.loads(call.args[1][-1]['content']) for call in model.call_args_list]
         self.assertEqual(payloads[0]['qa_hints'],['凯伊定金是多少'])
