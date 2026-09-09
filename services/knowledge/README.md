@@ -9,7 +9,7 @@
 - 向量：OpenAI 兼容 Embeddings API；分段向量持久化到 SQLite，查询时精确余弦检索。
 - 混合：两路候选以 RRF（k=60）融合；Top K 1–20，上下文预算 100–40000 字符。
 - 文档、分段配置或模型更新后旧向量失效；手动生成向量，每请求处理最多 32 个分段，浏览器持续调用到完成。关闭页面可中断后续批次，再次点击续传。上游失败不影响文档和关键词索引。
-- 默认空知识库，没有虚构业务文档。单文档最多 10 万字符，单知识库最多 10000 分段；适合小规模私有知识库，向量为线性扫描，未实现 ANN、ES、PDF/Word 解析、多人角色、版本历史或大模型生成回答。
+- 默认空知识库，没有虚构业务文档。单文档最多 10 万字符，单知识库最多 10000 分段；适合小规模私有知识库，向量为线性扫描，未实现 ANN、ES、PDF/Word 解析、多人角色、版本历史。
 - 模型服务需配置公网 HTTPS 地址。保存地址和模型名后，可测试连接，再回到知识库生成向量。密钥服务端保存，读接口不返回。变更服务地址不会复用旧地址的密钥。
 - 召回内容视作不可信参考数据，应由调用方控制系统指令并引用结果来源。BM25、cosine 和 RRF 的分数不可相互比较。
 
@@ -103,3 +103,21 @@ curl https://sweet-sleep.cn/knowledge/api/retrieve \
 ## 备份与恢复
 
 使用 SQLite backup API 备份正在运行的数据库，不能仅复制 WAL 模式下的 `.db` 文件。备份中含模型 API Key，必须存放在私有目录。恢复时先停服务，再使用已验证备份替换数据库，恢复服务用户权限，然后启动服务。环境文件需要另行私密备份；服务密钥轮换后需重启服务。
+
+## DeepSeek 客服回答
+
+`/knowledge/` →「模型设置」新增独立的客服配置：启用开关、API Key、模型名（默认 `deepseek-v4-flash`）、System Prompt、按群的人工联系人，以及不发 QQ 消息的回答预览。Embedding 配置独立保存，修改客服模型不会清空向量。客服配置保存在 SQLite `app_settings` 中，读取不返回 API Key；空密钥保留，勾选清除后移除。配置每请求读取，保存立即生效。
+
+- `GET/PUT /knowledge/api/answer-settings`：仅管理密钥可读写；PUT 字段 `enabled`、`model`、`api_key`、`clear_key`、`system_prompt`、`handoff_groups`（群 OpenID 到最多3个成员 OpenID 的映射）。
+- `POST /knowledge/api/answer-settings/test`：管理者用已保存配置发送一条测试请求，会产生服务商调用费用。
+- `POST /knowledge/api/answer`：管理密钥或召回密钥可调用，参数 `kb_id`、`query`、可选 `group_id`。配置了模型后，此接口可产生调用费用。机器人不能修改提示词或模型配置。
+
+响应字段 `answer`（可展示文本）、`mode`（model/document/handoff）、`reason`（机器可读状态）、`handoff`、`mention_openids`（仅群聊转人工且配置匹配时返回）、`results`。密钥和上游完整错误不返回；后台可查看最近一次模型或回退状态。
+
+回答流程固定检索 BM25 Top 3，再向 DeepSeek 官方 `https://api.deepseek.com/chat/completions` 发送问题和片段。使用非思考模式、JSON 输出和1000输出token上限。固定输出约束要求模型判断是否有依据，并提供可逐字匹配到原片段的证据；引用校验能拦截不存在的引用，不能保证模型语义判断绝对正确。资料冲突、无关或不足时要求转人工。用户和资料中的指令均作为不可信输入处理。
+
+无命中不调用模型，直接转人工。没有密钥、关闭模型、401、402、403、429、5xx、网络超时、无效JSON、错误引用、输出截断等均只返回最相关文档的片段（最长1000字符，带来源）。模型不可用时不进行语义相关性判断；显示的是检索原文，不是生成答案。上游错误不暴露给 QQ 用户。最多4个并发模型请求，超限回退原文。
+
+测试覆盖模拟的余额不足/失效密钥/超时、无命中、资料不足、引用校验、热更新和鉴权。真实模型质量需填入有效 DeepSeek Key 后测试；实际群内艾特需填写该群成员 OpenID 后验证。
+
+参考：[DeepSeek Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion/)。

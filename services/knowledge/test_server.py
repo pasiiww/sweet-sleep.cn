@@ -135,8 +135,13 @@ class KnowledgeTests(unittest.TestCase):
         try:
             self.assertEqual(req('api/bases')[0], 401)
             self.assertEqual(req('api/bases', app.READ_TOKEN)[0], 403)
+            self.assertEqual(req('api/answer-settings', app.READ_TOKEN)[0], 403)
+            self.assertEqual(req('api/answer-settings')[0], 401)
             self.assertEqual(req('api/bases', app.ADMIN_TOKEN)[0], 200)
             self.assertEqual(req('api/retrieve', app.READ_TOKEN, {'kb_id': self.kb, 'query': '退款'})[0], 200)
+            status, body = req('api/answer', app.READ_TOKEN, {'kb_id': self.kb, 'query': '退款'})
+            self.assertEqual(status, 200)
+            self.assertEqual(json.loads(body)['reason'], 'missing_key')
             self.assertEqual(req('../services/knowledge/server.py')[0], 404)
             self.assertEqual(req('knowledge.db')[0], 404)
             self.assertEqual(req('')[0], 200)

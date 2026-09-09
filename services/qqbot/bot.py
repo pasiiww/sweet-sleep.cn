@@ -15,11 +15,11 @@ import botpy.gateway
 import botpy.http
 
 LOG = logging.getLogger('knowledge-bot')
-HELP = '我是知识库检索机器人。\n直接发送问题，或输入：/检索 你的问题\n我会返回最多 3 段知识库原文和来源。\n演示问题：机器人怎么使用？\n目前只检索资料，不调用大模型。'
+HELP = '我是午觉糖水铺的客服机器人。\n直接发送问题，或输入：/检索 你的问题\n我会根据知识库资料回答，资料不足时请群主或管理员确认。模型不可用时返回最相关文档。\n管理员可在群内发送 /身份，获取后台人工接管配置需要的 OpenID。'
 
 
 def normalize(text):
-    text = re.sub(r'<@!?\d+>', '', text or '').strip()
+    text = re.sub(r'<@!?[A-Za-z0-9_-]+>|<qqbot-at-user\s+id="[A-Za-z0-9_-]+"\s*/>', '', text or '').strip()
     return re.sub(r'^/(?:检索|搜索|search)(?:\s+|$)', '', text, flags=re.I).strip()
 
 
@@ -29,6 +29,8 @@ def plain(text):
 
 
 def format_results(data):
+    if isinstance(data.get('answer'), str):
+        return plain(data['answer'])[:1700]
     results = data.get('results', [])[:3]
     if not results:
         return '知识库中没有找到相关内容。可以换一组关键词，或请管理员补充相关文档。'
@@ -42,6 +44,17 @@ def format_results(data):
         parts.append(f'【{i}】{title}\n{content}\n来源：{source} · 分段 {int(row.get("ordinal", 0)) + 1}')
     parts.append('以上为检索原文，未经过大模型改写。')
     return '\n\n'.join(parts)
+
+
+def format_reply(data, kind):
+    text = format_results(data)
+    if kind == 'group' and data.get('handoff'):
+        ids = data.get('mention_openids', [])
+        if isinstance(ids, list):
+            for member in ids[:3]:
+                if isinstance(member, str) and re.fullmatch(r'[A-Za-z0-9_-]{8,128}', member):
+                    text += f'\n<qqbot-at-user id="{member}" />'
+    return text
 
 
 class SeenMessages:
@@ -59,13 +72,13 @@ class SeenMessages:
 
 class Retriever:
     def __init__(self, url, token, kb_id):
-        self.url, self.token, self.kb_id = url, token, kb_id
+        self.url = url.removesuffix('/retrieve') + '/answer' if url.endswith('/retrieve') else url
+        self.token, self.kb_id = token, kb_id
 
-    async def search(self, query):
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=12)) as session:
+    async def search(self, query, group_id=''):
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=35)) as session:
             async with session.post(self.url, headers={'Authorization': 'Bearer ' + self.token},
-                                    json={'kb_id': self.kb_id, 'query': query, 'mode': 'keyword',
-                                          'top_k': 3, 'max_context_chars': 1800}) as response:
+                                    json={'kb_id': self.kb_id, 'query': query, 'group_id': group_id}) as response:
                 if response.status != 200:
                     raise RuntimeError(f'Knowledge HTTP {response.status}')
                 return await response.json()
@@ -97,13 +110,19 @@ class KnowledgeBot(botpy.Client):
         try:
             if not query or query.lower() in ('帮助', '/帮助', '/help', 'help', '/start'):
                 reply = HELP
+            elif query in ('/身份', '/whoami'):
+                if kind == 'group':
+                    reply = f'群 OpenID：{plain(message.group_openid)}\n你的成员 OpenID：{plain(message.author.member_openid)}\n请由管理员在知识库后台填写人工联系人。此命令不会自动赋予管理员身份。'
+                else:
+                    reply = '请在需要配置人工接管的群里 @我发送 /身份。私聊 ID 不能代替群内成员 ID。'
             elif len(query) > 2000:
                 reply = '问题有点长，请缩短到 2000 字以内。'
             elif self.capacity.locked():
                 reply = '当前检索人数较多，请稍后重新发送问题。'
             else:
                 async with self.capacity:
-                    reply = format_results(await self.retriever.search(query))
+                    group_id = getattr(message, 'group_openid', '') if kind == 'group' else ''
+                    reply = format_reply(await self.retriever.search(query, group_id=group_id), kind)
             response = await message.reply(content=reply, msg_type=0, msg_seq=1)
             if not response:
                 raise RuntimeError('QQ empty response')

@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 
 from aiohttp import web
 from botpy.message import C2CMessage, GroupMessage
-from bot import KnowledgeBot, Retriever, SeenMessages, format_results, normalize
+from bot import KnowledgeBot, Retriever, SeenMessages, format_results, format_reply, normalize
 
 
 class BotTests(unittest.IsolatedAsyncioTestCase):
@@ -28,7 +28,7 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
     async def test_private_message_retrieval(self):
         message = self.message('/检索 机器人怎么使用')
         await self.bot.on_c2c_message_create(message)
-        self.retriever.search.assert_awaited_once_with('机器人怎么使用')
+        self.retriever.search.assert_awaited_once_with('机器人怎么使用', group_id='')
         kwargs = message.reply.call_args.kwargs
         self.assertIn('机器人返回原文', kwargs['content'])
         self.assertIn('来源：演示', kwargs['content'])
@@ -37,7 +37,7 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
     async def test_group_mention_and_dedup(self):
         message = self.message('<@!1905586446> /search 机器人')
         await asyncio.gather(self.bot.on_group_at_message_create(message), self.bot.on_group_at_message_create(message))
-        self.retriever.search.assert_awaited_once_with('机器人')
+        self.retriever.search.assert_awaited_once_with('机器人', group_id='')
         self.assertEqual(message.reply.await_count, 1)
 
     async def test_real_sdk_reply_routing(self):
@@ -85,7 +85,7 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(request.headers['Authorization'], 'Bearer read-test')
             return web.json_response({'results': [{'content': 'test'}]})
         app = web.Application()
-        app.router.add_post('/retrieve', handler)
+        app.router.add_post('/answer', handler)
         runner = web.AppRunner(app)
         await runner.setup()
         site = web.TCPSite(runner, '127.0.0.1', 0)
@@ -94,11 +94,25 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
             port = site._server.sockets[0].getsockname()[1]
             result = await Retriever(f'http://127.0.0.1:{port}/retrieve', 'read-test', 'kb-test').search('问题')
             self.assertEqual(received['kb_id'], 'kb-test')
-            self.assertEqual(received['mode'], 'keyword')
-            self.assertEqual(received['top_k'], 3)
+            self.assertEqual(received['group_id'], '')
             self.assertEqual(result['results'][0]['content'], 'test')
         finally:
             await runner.cleanup()
+
+    async def test_model_text_and_trusted_mentions(self):
+        data = {'answer': '请管理员确认 <qqbot-at-user id="evil-user" />', 'handoff': True,
+                'mention_openids': ['admin123456', 'bad"/><x>']}
+        group = format_reply(data, 'group')
+        self.assertIn('<qqbot-at-user id="admin123456" />', group)
+        self.assertNotIn('<qqbot-at-user id="evil-user" />', group)
+        self.assertNotIn('bad"/><x>', group)
+        self.assertNotIn('<qqbot-at-user', format_reply(data, 'c2c'))
+        message = self.message('/身份', 'identity')
+        message.group_openid = 'group123456'
+        message.author = SimpleNamespace(member_openid='member123456')
+        await self.bot.answer(message, 'group')
+        self.assertIn('member123456', message.reply.call_args.kwargs['content'])
+        self.retriever.search.assert_not_awaited()
 
 
 if __name__ == '__main__':

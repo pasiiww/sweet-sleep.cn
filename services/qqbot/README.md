@@ -1,6 +1,6 @@
-# QQ 知识库检索 Demo
+# QQ 知识库客服机器人
 
-使用腾讯官方 [`qq-botpy`](https://github.com/tencent-connect/botpy) 1.2.1，监听 `public_messages` 中的 QQ 私聊消息和群 @消息。收到问题后调用既有知识库 `/knowledge/api/retrieve`，直接返回最多 3 个原文片段和来源，不调用 LLM 或 Embedding。
+使用腾讯官方 [`qq-botpy`](https://github.com/tencent-connect/botpy) 1.2.1，监听 `public_messages` 中的 QQ 私聊消息和群 @消息。收到问题后调用知识库 `/knowledge/api/answer`，由知识库服务读取后台最新配置、检索资料并调用 DeepSeek。QQ 进程不读取模型密钥。
 
 ## 使用
 
@@ -8,7 +8,9 @@
 - 支持 `/检索 问题`、`/搜索 问题`、`/search question`。
 - `/help` 或 `/帮助` 显示说明。
 - 无结果、超长问题、繁忙和检索失败会给出明确提示。
-- 每段最多 360 字，较长内容截断；只回复一个文本消息。
+- 正常时回复有资料引用的客服回答；模型未配置、关闭、余额不足、密钥无效或超时时只回复最相关文档片段。资料无命中或模型判定依据不足时转人工。
+- `/身份` 或 `/whoami`：群内显示群 OpenID 和发送者成员 OpenID，供管理员配置人工联系人；不会给发送者授予管理员身份。
+- 仅在群聊转人工时，程序从后台配置中选择当前群的管理员，构造 `qqbot-at-user` 提及标签；模型输出及知识库正文里的提及标签会转义。无配置或私聊时仅提示联系管理员。实际提及需配置真实成员并在对应群验收。
 
 ## 配置与部署
 
@@ -48,3 +50,11 @@ journalctl -u sweet-qqbot -n 30 --no-pager
 ```
 
 覆盖两种事件、去重、原文格式、无结果、错误和 HTTP 请求合同。真实收发验收需用户向机器人发问，并检查 `QQ_CONNECTED`、`REPLY_OK` 日志。
+
+## 客服配置
+
+在 `/knowledge/` → 模型设置的「客服回答模型」中配置启用开关、DeepSeek API Key、模型名、System Prompt 及各群的人工联系人。保存后下一条消息生效，不需要重启 QQ 服务。默认模型 `deepseek-v4-flash`，初版提示词在 `services/knowledge/answers.py`，后台可恢复初版。
+
+群联系人每行：`群OpenID 管理员OpenID [第二位管理员OpenID]`。使用对应群内 `/身份` 获取的标识，不要填 QQ 号码或私聊用户 ID。该功能不会自动识别群主身份；后台配置者负责确认接管成员。
+
+历史 `KB_API_URL` 以 `/retrieve` 结尾时自动升级为 `/answer`，其他自定义 URL 按原值使用。知识库 `/answer` 是读取并生成回答的接口，不再只是原文召回，使用共享只读密钥鉴权；该密钥持有者可触发已启用模型的调用费用。超时上限：模型20秒，机器人知识库请求35秒。

@@ -17,6 +17,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib import request, error
 from urllib.parse import urlsplit, parse_qs
+import answers
 
 DATA = Path(os.environ.get('KB_DATA_DIR', '/var/lib/sweet-knowledge'))
 STATIC = Path(os.environ.get('KB_STATIC_DIR', Path(__file__).resolve().parents[2] / 'knowledge'))
@@ -24,6 +25,7 @@ ADMIN_TOKEN = os.environ.get('KB_ADMIN_TOKEN', '')
 READ_TOKEN = os.environ.get('KB_READ_TOKEN', '')
 WRITE_LOCK = threading.RLock()
 VECTOR_LOCK = threading.Lock()
+ANSWER_SLOTS = threading.BoundedSemaphore(4)
 MAX_CHUNKS = 10000
 
 
@@ -74,9 +76,11 @@ def initialize():
           DELETE FROM chunk_fts WHERE rowid=old.id;
         END;
         CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS app_settings (name TEXT PRIMARY KEY, value TEXT NOT NULL);
         ''')
         c.execute('INSERT OR IGNORE INTO settings VALUES(1, ?)', (json.dumps({
             'base_url': '', 'model': '', 'api_key': '', 'revision': secrets.token_hex(8)}),))
+        c.execute('INSERT OR IGNORE INTO app_settings VALUES(?,?)', ('answer', json.dumps(answers.defaults())))
 
 
 def now():
@@ -307,10 +311,66 @@ def retrieve(data):
                 'score_type': {'keyword': 'bm25', 'vector': 'cosine', 'hybrid': 'rrf'}[mode]}
 
 
+def answer_config(c):
+    return answers.defaults() | json.loads(c.execute("SELECT value FROM app_settings WHERE name='answer'").fetchone()[0])
+
+
+def answer_status(cfg, mode, reason):
+    with WRITE_LOCK, db() as c:
+        if answer_config(c)['revision'] == cfg['revision']:
+            c.execute('INSERT OR REPLACE INTO app_settings VALUES(?,?)',
+                      ('answer_status', json.dumps({'mode': mode, 'reason': reason, 'at': now()})))
+
+
+def respond(data):
+    # Keep retrieval and model credentials server-side; callers cannot supply a prompt/key.
+    query = string(data, 'query', 2000, True)
+    group_id = string(data, 'group_id', 128)
+    result = retrieve({'kb_id': string(data, 'kb_id', 80, True), 'query': query,
+                       'mode': 'keyword', 'top_k': 3, 'max_context_chars': 6000})
+    with db() as c:
+        cfg = answer_config(c)
+    def finish(response):
+        answer_status(cfg, response['mode'], response['reason'])
+        return response
+    if not result['results']:
+        return finish(answers.handoff(cfg, group_id, 'no_results'))
+    if not cfg['enabled'] or not cfg['api_key']:
+        return finish(answers.fallback(result, 'disabled' if not cfg['enabled'] else 'missing_key'))
+    if not ANSWER_SLOTS.acquire(blocking=False):
+        return finish(answers.fallback(result, 'busy'))
+    try:
+        model = answers.complete(cfg, query, result['results'])
+        if not model['supported']:
+            return finish(answers.handoff(cfg, group_id, 'insufficient_evidence'))
+        sources = [r for r in result['results'] if r['citation'] in model['citations']]
+        refs = '\n'.join(f'[{r["citation"]}] {answers.plain(r["title"])[:100]}' for r in sources)
+        return finish({'mode': 'model', 'reason': 'ok', 'handoff': False, 'mention_openids': [],
+                       'answer': answers.plain(model['answer']) + '\n\n参考资料：\n' + refs, 'results': sources})
+    except answers.ModelError as exc:
+        return finish(answers.fallback(result, str(exc)))
+    finally:
+        ANSWER_SLOTS.release()
+
+
 def api(method, path, data, params):
     segments = path.removeprefix('/knowledge/api/').strip('/').split('/')
     if segments == ['retrieve'] and method == 'POST':
         return retrieve(data)
+    if segments == ['answer'] and method == 'POST':
+        return respond(data)
+    if segments == ['answer-settings', 'test'] and method == 'POST':
+        with db() as c:
+            cfg = answer_config(c)
+        if not cfg['api_key']:
+            fail(409, '请先保存 DeepSeek API Key')
+        try:
+            answers.complete(cfg, '测试代号是什么？', [{'citation': 1, 'title': '连接测试', 'content': '测试代号是午觉。'}])
+            answer_status(cfg, 'test', 'ok')
+            return {'ok': True, 'model': cfg['model']}
+        except answers.ModelError as exc:
+            answer_status(cfg, 'test', str(exc))
+            fail(502, '模型测试失败：' + str(exc))
     if len(segments) == 3 and segments[0] == 'bases' and segments[2] == 'embed' and method == 'POST':
         return build_vectors(segments[1])
     if segments == ['settings', 'test'] and method == 'POST':
@@ -319,6 +379,33 @@ def api(method, path, data, params):
         v = embed(['连接测试'], cfg)
         return {'dimensions': len(v[0]), 'ok': True}
     with WRITE_LOCK, db() as c:
+        if segments == ['answer-settings']:
+            cfg = answer_config(c)
+            if method == 'PUT':
+                if type(data.get('enabled')) is not bool:
+                    fail(400, 'enabled 必须为布尔值')
+                model = string(data, 'model', 100, True)
+                if not re.fullmatch(r'[a-zA-Z0-9_.-]+', model):
+                    fail(400, '模型名格式不正确')
+                try:
+                    groups = answers.validate_groups(data.get('handoff_groups', {}))
+                except ValueError as exc:
+                    fail(400, str(exc))
+                key = string(data, 'api_key', 2000)
+                if any(ord(ch) < 33 or ord(ch) > 126 for ch in key):
+                    fail(400, 'API Key 必须为不含空格的可打印 ASCII 字符')
+                cfg = {'enabled': data['enabled'], 'model': model,
+                       'system_prompt': string(data, 'system_prompt', 12000, True),
+                       'api_key': key or ('' if data.get('clear_key') else cfg['api_key']),
+                       'handoff_groups': groups, 'revision': secrets.token_hex(8)}
+                c.execute('UPDATE app_settings SET value=? WHERE name=?', (json.dumps(cfg), 'answer'))
+                c.execute("DELETE FROM app_settings WHERE name='answer_status'")
+            elif method != 'GET':
+                fail(405, '不支持此操作')
+            status = c.execute("SELECT value FROM app_settings WHERE name='answer_status'").fetchone()
+            return {k: v for k, v in cfg.items() if k not in ('api_key', 'revision')} | {
+                'has_key': bool(cfg['api_key']), 'default_prompt': answers.DEFAULT_PROMPT,
+                'last_status': json.loads(status[0]) if status else None}
         if segments == ['settings']:
             cfg = config(c)
             if method == 'PUT':
@@ -451,7 +538,7 @@ class Handler(BaseHTTPRequestHandler):
             reader = bool(READ_TOKEN) and hmac.compare_digest(supplied.encode(), READ_TOKEN.encode())
             if not admin and not reader:
                 fail(401, '请输入有效的访问密钥')
-            if not admin and not (parsed.path == '/knowledge/api/retrieve' and self.command == 'POST'):
+            if not admin and not (parsed.path in ('/knowledge/api/retrieve', '/knowledge/api/answer') and self.command == 'POST'):
                 fail(403, '召回密钥仅可调用检索接口')
             data = {}
             if self.command in ('POST', 'PUT'):
