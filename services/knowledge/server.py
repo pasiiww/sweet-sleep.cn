@@ -515,6 +515,8 @@ def trace_cleanup():
 
 
 def respond_pipeline(data, details):
+    previous_sticker_sent=data.get('previous_sticker_sent',False)
+    if type(previous_sticker_sent) is not bool:fail(400,'previous_sticker_sent 必须为布尔值')
     query = string(data, 'query', 2000, True)
     group_id = string(data, 'group_id', 128)
     kb_id = string(data, 'kb_id', 80, True)
@@ -533,7 +535,8 @@ def respond_pipeline(data, details):
         hint_ids=[r[0] for r in ranking]
         hint_ids += [r[0] for r in c.execute("SELECT id FROM qa_entries WHERE kb_id=? AND publication='active' AND superseded_by IS NULL ORDER BY updated_at DESC,id DESC LIMIT 8",(kb_id,)) if r[0] not in hint_ids]
         qa_hints=[c.execute('SELECT question FROM qa_entries WHERE id=?',(qid,)).fetchone()[0][:300] for qid in hint_ids[:8]]
-    cfg = cfg | {'current_date':answers.current_date(),'qa_hints':qa_hints,'conversation_history': history, 'alias_context': entities.context(hints), '_trace': details}
+    cfg = cfg | {'sticker_allowed':not previous_sticker_sent,'current_date':answers.current_date(),'qa_hints':qa_hints,'conversation_history': history, 'alias_context': entities.context(hints), '_trace': details}
+    details['sticker_policy']={'allowed':not previous_sticker_sent,'reason':'previous_reply_had_sticker' if previous_sticker_sent else 'optional'}
     details.update(current_date=cfg['current_date'],qa_hints=qa_hints,history=history, model=cfg['model'], system_prompt=cfg['system_prompt'], keyword_prompt=cfg['keyword_prompt'])
     def search(terms):
         started = time.monotonic()
@@ -544,6 +547,8 @@ def respond_pipeline(data, details):
     def finish(response):
         selected_name=response.pop('sticker_name',None)
         selected=next((s for s in cfg.get('stickers',[]) if s['name']==selected_name),None)
+        if selected and not cfg.get('sticker_allowed',True):
+            details['sticker_suppressed']=selected_name;selected=None
         if selected:response['sticker']={k:selected[k] for k in ('id','name','url','revision')}
         details['sticker']=response.get('sticker')
         response['alias_context'] = cfg['alias_context']

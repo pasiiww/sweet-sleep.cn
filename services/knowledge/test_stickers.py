@@ -37,6 +37,9 @@ class StickerTests(unittest.TestCase):
   self.api('PUT','answer-settings',{'enabled':True,'api_key':'mock-key','model':'mock-model','system_prompt':'客服'})
   with patch.object(answers,'keywords',return_value=[['营业']]),patch.object(answers,'complete',return_value={'supported':True,'answer':'十点营业呀','sticker_name':'开心'}):
    reply=self.api('POST','answer',{'kb_id':kb,'query':'营业时间'})
+   limited=self.api('POST','answer',{'kb_id':kb,'query':'营业时间','previous_sticker_sent':True})
+   self.assertNotIn('sticker',limited)
+   self.assertEqual(limited['answer'],'十点营业呀')
   self.assertEqual(reply['sticker']['url'],row['url']);self.assertNotIn('sticker_name',reply)
  def test_upload_and_new_marker(self):
   import base64

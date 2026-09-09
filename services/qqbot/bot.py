@@ -66,6 +66,7 @@ class SeenMessages:
         self.conn = sqlite3.connect(path)
         self.conn.execute('CREATE TABLE IF NOT EXISTS seen(id TEXT PRIMARY KEY, expires REAL)')
         self.conn.execute('CREATE TABLE IF NOT EXISTS dialogue(id INTEGER PRIMARY KEY AUTOINCREMENT, session TEXT NOT NULL, query TEXT NOT NULL, reply TEXT NOT NULL, at REAL NOT NULL)')
+        self.conn.execute('CREATE TABLE IF NOT EXISTS sticker_state(session TEXT PRIMARY KEY, sent INTEGER NOT NULL, at REAL NOT NULL)')
         self.conn.execute('CREATE INDEX IF NOT EXISTS dialogue_session ON dialogue(session,id)')
         self.conn.execute('CREATE INDEX IF NOT EXISTS dialogue_time ON dialogue(at)')
         self.conn.commit()
@@ -98,9 +99,21 @@ class SeenMessages:
             self.conn.execute('INSERT INTO dialogue(session,query,reply,at) VALUES(?,?,?,?)', (session, query, reply, time.time()))
             self.conn.execute('DELETE FROM dialogue WHERE session=? AND id NOT IN (SELECT id FROM dialogue WHERE session=? ORDER BY id DESC LIMIT 10)', (session, session))
 
+    def last_sticker_sent(self, session):
+        if not session:return False
+        row=self.conn.execute('SELECT sent FROM sticker_state WHERE session=? AND at>?',(session,time.time()-1800)).fetchone()
+        return bool(row and row[0])
+
+    def record_sticker(self, session, sent):
+        if not session:return
+        with self.conn:
+            self.conn.execute('DELETE FROM sticker_state WHERE at<=?',(time.time()-1800,))
+            self.conn.execute('INSERT OR REPLACE INTO sticker_state VALUES(?,?,?)',(session,int(sent),time.time()))
+
     def clear_history(self, session):
         with self.conn:
             self.conn.execute('DELETE FROM dialogue WHERE session=?', (session,))
+            self.conn.execute('DELETE FROM sticker_state WHERE session=?',(session,))
 
 
 def conversation_key(message, kind, kb_id):
@@ -195,8 +208,9 @@ class KnowledgeBot(botpy.Client):
             if not entry[1]:
                 self.conversations.pop(lock_key, None)
 
-    async def send_answer(self, message, kind, reply, trace):
+    async def send_answer(self, message, kind, reply, trace, session=''):
         sticker = (trace or {}).get('sticker')
+        if self.seen.last_sticker_sent(session):sticker=None
         if sticker:
             try:
                 if kind == 'group':
@@ -213,12 +227,15 @@ class KnowledgeBot(botpy.Client):
                 if not result:
                     raise RuntimeError('QQ empty response')
                 trace['sticker_delivery'] = {'name': sticker['name'], 'status': 'sent'}
+                self.seen.record_sticker(session,True)
                 return result
             except Exception as exc:
                 trace['sticker_delivery'] = {'name': sticker['name'], 'status': 'failed', 'error': type(exc).__name__}
                 LOG.warning('STICKER_FAILED error=%s', type(exc).__name__)
         # Preserve the generated answer when an optional image cannot be sent.
-        return await message.reply(content=reply, msg_type=0, msg_seq=1)
+        result=await message.reply(content=reply, msg_type=0, msg_seq=1)
+        if result:self.seen.record_sticker(session,False)
+        return result
 
     async def _answer(self, message, kind, session):
         query = normalize(message.content)
@@ -245,10 +262,11 @@ class KnowledgeBot(botpy.Client):
                     author = getattr(message, 'author', None)
                     meta = {'origin': 'qq_group' if kind == 'group' else 'qq_private',
                             'user_id': getattr(author, 'member_openid' if kind == 'group' else 'user_openid', ''), 'session_id': session}
+                    if self.seen.last_sticker_sent(session):meta['previous_sticker_sent']=True
                     trace = await self.retriever.search(query, group_id=group_id, history=self.seen.history(session), trace_meta=meta)
                     reply = format_reply(trace, kind)
                     remember = trace.get('mode') != 'quota'
-            response = await self.send_answer(message, kind, reply, trace)
+            response = await self.send_answer(message, kind, reply, trace, session)
             if not response:
                 raise RuntimeError('QQ empty response')
             delivery, sent = 'delivered', reply
