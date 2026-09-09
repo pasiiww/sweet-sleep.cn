@@ -71,3 +71,26 @@ class LearningBotTests(unittest.IsolatedAsyncioTestCase):
         data={'mentions':[{'id':'own_bot'},{'id':'other_bot','bot':True},{'id':'guest001'},{'member_openid':'guest002','id':'different'},{'id':'guest001'}]}
         self.assertEqual(compat.reference_metadata(data,{'own_bot'})['mentions'],['guest001','guest002'])
         self.assertEqual(compat.reference_metadata({'content':'@guest001 hello'})['mentions'],[])
+
+    async def test_bot_authors_never_reply_search_or_enqueue(self):
+        from unittest.mock import Mock
+        learner=Learner(self.seen.conn,'http://unused','token','kb')
+        observed=Mock();self.bot.learner=SimpleNamespace(observe=observed)
+        for kind in ('group','c2c'):
+            msg=self.message('bot-'+kind);msg.sweet_author_bot=True;msg.sweet_mentioned=True
+            learner.observe(msg)
+            if kind=='group':
+                await self.bot.on_group_at_message_create(msg);await self.bot.on_group_message_create(msg)
+            else:await self.bot.on_c2c_message_create(msg)
+            msg.reply.assert_not_awaited()
+        observed.assert_not_called();self.retriever.search.assert_not_awaited()
+        self.assertEqual(self.seen.conn.execute('SELECT count(*) FROM learning_outbox').fetchone()[0],0)
+        self.assertEqual(self.seen.conn.execute('SELECT count(*) FROM seen').fetchone()[0],0)
+
+    def test_sdk_preserves_bot_flag_and_owner_role(self):
+        dispatched=[];state=ConnectionState(lambda e,m:dispatched.append((e,m)),None);state.robot=SimpleNamespace(id='own_bot')
+        data={'id':'m','content':'售价100元','group_openid':'group001','author':{'member_openid':'owner001','user_openid':'owner001','bot':True,'member_role':'owner'}}
+        for event in ('group_message_create','group_at_message_create','c2c_message_create'):
+            state.parsers[event]({'id':'event','d':data});m=dispatched[-1][1]
+            self.assertTrue(compat.is_bot(m))
+            if event!='c2c_message_create':self.assertEqual(m.sweet_learning['member_role'],'owner')

@@ -793,7 +793,7 @@ def save_qa(c, kb_id, data, qa_id=None):
     if qa_id is None:
         qa_id = c.execute('INSERT INTO qa_entries(kb_id,question,answer,revision,updated_at) VALUES(?,?,?,?,?)',(kb_id,question,answer,revision,now())).lastrowid
     else:
-        c.execute('UPDATE qa_entries SET question=?,answer=?,revision=?,updated_at=? WHERE id=?',(question,answer,revision,now(),qa_id))
+        c.execute("UPDATE qa_entries SET question=?,answer=?,revision=?,updated_at=?,updated_by='manual' WHERE id=?",(question,answer,revision,now(),qa_id))
         c.execute('DELETE FROM qa_fts WHERE rowid=?',(qa_id,))
     # Never index A, including when updating or rebuilding a question.
     c.execute('INSERT INTO qa_fts(rowid,question) VALUES(?,?)',(qa_id,' '.join(tokens(question))))

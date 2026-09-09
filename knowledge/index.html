@@ -16,15 +16,15 @@
     <section id="view-learning" class="view" hidden>
 <form id="learning-form" class="panel form-panel learning-panel">
 <div class="section-kicker">LEARNING / SHOP KNOWLEDGE</div><h2>持续学习</h2>
-<p class="muted">从已绑定群主和管理员的发言中整理店铺知识，自动新增或更新 QA。普通成员消息仅用于理解上下文，不作为知识依据；学习任务不会在群里发言。</p>
+<p class="muted">各群 member_role=owner 的群主默认进入监听，绑定管理员 OpenID 全群生效，共享所选知识库。检索文档和 QA 后，有新增或更新才插入新 QA，旧版本保留。普通成员消息仅用于理解上下文，不作为知识依据；学习任务不会在群里发言。</p>
 <label>学习知识库<select id="learning-base" required></select></label>
 <div class="form-row"><label class="checkbox"><input id="learning-enabled" type="checkbox">启用持续学习</label><label>每几条管理员消息触发<input id="learning-threshold" type="number" min="2" max="10" value="4" required></label></div>
 <p class="hint">管理员引用回复单条触发，带入被引用内容；管理员 @ 成员也单条触发，带入每位被 @ 成员此前2条发言。普通发言同群合计4条（可调整），或同群管理员静默10分钟触发；每条普通发言取之前10条其他成员消息并去重。闲聊会跳过入库。</p>
-<h3>管理员 OpenID 绑定</h3><p class="hint">让两位管理员分别在群里 @机器人发送 /身份，将群及成员 OpenID 填在对应行。未绑定的成员不会触发学习。</p>
-<div class="table-wrap"><table class="aliases-table"><thead><tr><th>QQ 号</th><th>群 OpenID</th><th>成员 OpenID</th><th>操作</th></tr></thead><tbody id="learning-bindings"></tbody></table></div>
+<h3>管理员 OpenID 绑定</h3><p class="hint">群主无需绑定；其他管理员可在群里 @机器人发送 /身份，将成员 OpenID 填在对应行，所有群通用。普通成员仅提供上文，机器人消息不处理。</p>
+<div class="table-wrap"><table class="aliases-table"><thead><tr><th>QQ 号</th><th>成员 OpenID（全群通用）</th><th>操作</th></tr></thead><tbody id="learning-bindings"></tbody></table></div>
 <button id="learning-add-binding" type="button">＋ 添加绑定行</button>
 <label>学习提示词<textarea id="learning-prompt" rows="9" maxlength="12000" required></textarea></label>
-<p class="hint">自动知识按条保存为 QA，原有文档保留。相同实体、属性、适用范围的冲突优先采用更新时间较新的资料。学习历史保留7天，可查看新增和更新前后的内容。</p>
+<p class="hint">自动知识按条保存为新 QA，原有文档与旧 QA 保留，旧版本不再参加 QA 召回。QA 界面区分人工与模型写入，模型来源原文随 QA 长期保留用于 Debug。相同实体、属性、适用范围的冲突优先采用更新时间较新的资料。学习历史保留7天，可查看新增和更新前后的内容。</p>
 <div class="info-box">加群后，请群主在手机 QQ 的机器人设置中，把「机器人可获取的群聊消息范围」设为「获取群内全部消息」。客服仍只在被 @ 时回复。</div>
 <div class="actions"><button class="primary" type="submit">保存学习配置</button><button id="learning-restore" type="button">恢复学习提示词</button></div><p id="learning-status" class="hint" role="status"></p>
 </form>

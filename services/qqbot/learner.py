@@ -7,6 +7,7 @@ import re
 import time
 
 import aiohttp
+import compat
 
 LOG = logging.getLogger('knowledge-bot')
 
@@ -19,6 +20,7 @@ class Learner:
         self.conn.commit()
 
     def observe(self, message):
+        if compat.is_bot(message):return
         group = getattr(message,'group_openid','')
         member = getattr(getattr(message,'author',None),'member_openid','')
         mid, content = getattr(message,'id',''), getattr(message,'content','')
@@ -28,7 +30,7 @@ class Learner:
         at = getattr(message,'timestamp',None)
         try: at = datetime.fromisoformat(str(at).replace('Z','+00:00')).timestamp() if at else time.time()
         except (ValueError,TypeError): return
-        payload={'kb_id':self.kb_id,'group_id':group,'member_id':member,'message_id':mid,'content':content[:2000],'at':at, **getattr(message,'sweet_learning',{})}
+        payload={'kb_id':self.kb_id,'group_id':group,'member_id':member,'message_id':mid,'content':content[:2000],'raw_content':getattr(message,'content','')[:4000],'at':at, **getattr(message,'sweet_learning',{})}
         with self.conn:
             self.conn.execute('DELETE FROM learning_outbox WHERE created<?',(time.time()-1800,))
             if self.conn.execute('SELECT count(*) FROM learning_outbox').fetchone()[0]>=1000:

@@ -12,6 +12,10 @@ def initialize(c):
         END;
     ''')
 
+    columns={r[1] for r in c.execute('PRAGMA table_info(qa_entries)')}
+    for name,definition in [('origin',"TEXT NOT NULL DEFAULT 'manual'"),('updated_by',"TEXT NOT NULL DEFAULT 'manual'"),('source_context',"TEXT NOT NULL DEFAULT '{}'"),('superseded_by','INTEGER REFERENCES qa_entries(id) ON DELETE SET NULL')]:
+        if name not in columns:c.execute(f'ALTER TABLE qa_entries ADD COLUMN {name} {definition}')
+
 
 def search(c, kb_id, query, groups, catalog, tokenize, limit):
     rankings = []
@@ -44,7 +48,7 @@ def search(c, kb_id, query, groups, catalog, tokenize, limit):
         predicate = ' AND ' + ' AND '.join(conditions) if conditions else ''
         rankings.append([(row['id'], -row['score']) for row in c.execute('''
             SELECT q.id,bm25(qa_fts) AS score FROM qa_fts JOIN qa_entries q ON q.id=qa_fts.rowid
-            WHERE qa_fts MATCH ? AND q.kb_id=?''' + predicate + ' ORDER BY score,q.id LIMIT ?', [match,kb_id,*args,limit])])
+            WHERE qa_fts MATCH ? AND q.kb_id=? AND q.superseded_by IS NULL''' + predicate + ' ORDER BY score,q.id LIMIT ?', [match,kb_id,*args,limit])])
     if not groups:
         return rankings[0] if rankings else []
     scores = {}

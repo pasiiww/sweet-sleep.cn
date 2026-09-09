@@ -31,7 +31,7 @@ class LearningTests(unittest.TestCase):
         with patch.object(answers,'_model_call',return_value=json.dumps({'facts':facts})):self.assertTrue(learning.run_once(app))
         return self.api('GET','learning/jobs/'+job)
     def test_threshold_group_identity_and_dedup(self):
-        self.assertFalse(self.event('othergroup',group='group002')['accepted'])
+        self.assertTrue(self.event('othergroup',group='group002')['accepted'])
         for n in range(5):self.event('guest'+str(n),member='visitor1')
         self.event('a');self.assertFalse(self.event('a')['accepted']);self.event('b',member='admin001')
         with app.db() as c:self.assertEqual(c.execute('SELECT count(*) FROM learning_jobs').fetchone()[0],0)
@@ -51,8 +51,9 @@ class LearningTests(unittest.TestCase):
         newer=self.batch('b',self.at+20);self.run_job(newer,[self.fact('b1',answer='凯伊售价200元。')])
         older=self.batch('c',self.at+10);r=self.run_job(older,[self.fact('c1',answer='凯伊售价150元。')])
         self.assertEqual(r['details']['changes'][0]['action'],'skipped_newer')
-        self.assertEqual(self.api('GET','qa/'+str(qid))['answer'],'凯伊售价200元。')
-        with app.db() as c:self.assertEqual(c.execute('SELECT count(*) FROM qa_entries').fetchone()[0],1)
+        old=self.api('GET','qa/'+str(qid));self.assertEqual(old['answer'],'凯伊售价100元。')
+        self.assertEqual(self.api('GET','qa/'+str(old['superseded_by']))['answer'],'凯伊售价200元。')
+        with app.db() as c:self.assertEqual(c.execute('SELECT count(*) FROM qa_entries').fetchone()[0],2)
     def test_separate_scope_does_not_overwrite(self):
         self.run_job(self.batch('a'),[self.fact('a1',scope='活动一')])
         self.run_job(self.batch('b',self.at+10),[self.fact('b1',scope='活动二',question='活动二凯伊多少钱？')])
@@ -174,3 +175,46 @@ class LearningTests(unittest.TestCase):
             learning.schedule_idle(c);self.assertEqual(c.execute('SELECT count(*) FROM learning_jobs').fetchone()[0],1)
         with patch.object(learning.time,'time',return_value=self.at+900),app.db() as c:
             learning.schedule_idle(c);self.assertEqual(c.execute('SELECT count(*) FROM learning_jobs').fetchone()[0],2)
+
+    def test_owner_auto_listening_and_bot_ignored(self):
+        self.api('PUT',f'bases/{self.kb}/learning',self.cfg|{'bindings':[]})
+        self.event('prior','凯伊价格？',member='guest001',group='newgroup')
+        result=self.event('owner','凯伊售价100元',member='unknownowner',group='newgroup',member_role='owner',is_reply=True,reference={'message_id':'prior'})
+        row=self.run_job(result['job_id'],[self.fact('owner')])
+        self.assertEqual(row['status'],'completed');self.assertEqual(row['details']['context'][-1]['qq'],'owner')
+        self.assertFalse(self.event('robot',member='otherbot',group='newgroup',member_role='owner',author_bot=True,is_reply=True)['accepted'])
+        self.assertNotIn('job_id',self.event('admin','凯伊售价100元',member='notbound',member_role='admin',is_reply=True))
+
+    def test_global_binding_accepts_other_group_keeps_context_local(self):
+        self.event('same-id','凯伊价格？',member='guest001',group='newgroup')
+        self.event('same-id','不要混入其他群',member='guest001')
+        job=self.event('owner','凯伊售价100元',group='newgroup',is_reply=True,reference={'message_id':'same-id'})['job_id']
+        d=self.api('GET','learning/jobs/'+job)['details']
+        self.assertEqual(d['context'][-1]['reference']['quotes'][0]['content'],'凯伊价格？')
+
+    def test_documents_and_qa_reach_model_unchanged_skips_insert(self):
+        self.api('POST',f'bases/{self.kb}/documents',{'title':'凯伊价格','content':'凯伊售价100元'})
+        self.api('POST',f'bases/{self.kb}/qa',{'question':'凯伊定金','answer':'20元'})
+        job=self.event('reply','凯伊售价100元',is_reply=True)['job_id']
+        row=self.run_job(job,[])
+        payload=json.loads(row['details']['model_calls'][0]['messages'][-1]['content'])
+        self.assertTrue(payload['existing_documents']);self.assertTrue(payload['existing_qa'])
+        self.assertEqual(row['details']['changes'],[])
+        with app.db() as c:self.assertEqual(c.execute('SELECT count(*) FROM qa_entries').fetchone()[0],1)
+
+    def test_append_update_retains_manual_record_provenance_and_latest_retrieval(self):
+        original=self.api('POST',f'bases/{self.kb}/qa',{'question':'凯伊多少钱？','answer':'凯伊售价80元。'})
+        with app.db() as c:c.execute('UPDATE qa_entries SET updated_at=? WHERE id=?',(learning.utc(self.at-10),original['id']))
+        job=self.event('reply','凯伊售价100元',is_reply=True,raw_content='<@guest001> 凯伊售价100元')['job_id']
+        row=self.run_job(job,[self.fact('reply',existing_qa_id=original['id'])]);created=row['details']['changes'][0]['after']
+        self.assertNotEqual(original['id'],created['id']);self.assertEqual(created['origin'],'model')
+        self.assertIn('<@guest001>',json.loads(created['source_context'])['content'])
+        old=self.api('GET','qa/'+str(original['id']));self.assertEqual(old['origin'],'manual');self.assertEqual(old['answer'],'凯伊售价80元。')
+        self.assertEqual(old['superseded_by'],created['id'])
+        results=self.api('POST','retrieve',{'kb_id':self.kb,'query':'凯伊多少钱'})['results']
+        self.assertEqual([r['qa_id'] for r in results],[created['id']])
+        self.api('PUT','qa/'+str(created['id']),{'question':created['question'],'answer':'人工校正'})
+        updated=self.api('GET','qa/'+str(created['id']));self.assertEqual(updated['updated_by'],'manual');self.assertEqual(updated['source_context'],created['source_context'])
+        with app.db() as c:
+            c.execute('DELETE FROM learning_jobs');c.execute('DELETE FROM learning_events')
+        self.assertEqual(self.api('GET','qa/'+str(created['id']))['source_context'],created['source_context'])

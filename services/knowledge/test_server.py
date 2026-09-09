@@ -135,7 +135,7 @@ class KnowledgeTests(unittest.TestCase):
         try:
             self.assertEqual(req('api/bases')[0], 401)
             self.assertEqual(req('api/learning/events',app.READ_TOKEN,{'kb_id':self.kb})[0],403)
-            self.assertEqual(req('api/learning/events',app.LEARN_TOKEN,{'kb_id':self.kb})[0],200)
+            self.assertEqual(req('api/learning/events',app.LEARN_TOKEN,{'kb_id':self.kb,'author_bot':True})[0],200)
             self.assertEqual(req('api/bases',app.LEARN_TOKEN)[0],403)
             self.assertEqual(req('api/learning/jobs?kb_id='+self.kb,app.READ_TOKEN)[0],403)
             self.assertEqual(req('api/bases', app.READ_TOKEN)[0], 403)

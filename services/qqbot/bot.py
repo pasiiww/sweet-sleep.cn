@@ -164,17 +164,20 @@ class KnowledgeBot(botpy.Client):
         await self.answer(message, 'c2c')
 
     async def on_group_at_message_create(self, message):
+        if compat.is_bot(message):return
         if self.learner: self.learner.observe(message)
         # The platform event certifies this bot was mentioned; text may omit the tag.
         await self.answer(message, 'group', mentioned=True)
 
     async def on_group_message_create(self, message):
         # Only delivered platform events can be observed; learning never sends a reply.
+        if compat.is_bot(message):return
         if self.learner: self.learner.observe(message)
         if getattr(message, 'sweet_mentioned', False):
             await self.answer(message, 'group', mentioned=True)
 
     async def answer(self, message, kind, mentioned=False):
+        if compat.is_bot(message):return
         if kind == 'group' and not mentioned:
             return
         if not message.id or not self.seen.claim(kind + ':' + message.id):
