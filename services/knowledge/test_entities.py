@@ -65,7 +65,7 @@ class EntityTests(unittest.TestCase):
             self.assertEqual(result['query_groups'], [['凯伊', '价格']])
             self.assertEqual([row['title'] for row in result['results']], ['KEI'])
 
-    def test_alias_hints_and_history_reach_both_model_calls(self):
+    def test_history_only_reaches_answer_stage(self):
         self.call('POST', f'bases/{self.kb}/documents', {'title': 'KEI', 'content': '价格100元，定金20元。'})
         self.call('PUT', 'answer-settings', {'enabled': True, 'model': 'deepseek-v4-flash',
                                             'api_key': 'test', 'system_prompt': answers.DEFAULT_PROMPT})
@@ -76,11 +76,13 @@ class EntityTests(unittest.TestCase):
         self.assertEqual(result['query_groups'], [['凯伊', '定金'], ['凯伊', '价格']])
         self.assertEqual(result['history_turns'], 1)
         self.assertIn('"kei" 是 "凯伊" 的别名', result['alias_context'])
-        for call in model.call_args_list:
-            messages = call.args[1]
-            self.assertEqual(messages[1:3], history)
-            self.assertIn(result['alias_context'], messages[0]['content'])
-            self.assertEqual(messages[-1]['role'], 'user')
+        first = model.call_args_list[0].args[1]
+        self.assertEqual(len(first), 2)
+        self.assertEqual(first[-1], {'role':'user', 'content':'那定金呢？'})
+        self.assertNotIn('"kei" 是 "凯伊" 的别名', first[0]['content'])
+        second = model.call_args_list[1].args[1]
+        self.assertEqual(second[1:3], history)
+        self.assertIn(result['alias_context'], second[0]['content'])
         self.assertEqual(result['answer'], '定金20元。')
 
     def test_unavailable_model_followup_keeps_entity(self):

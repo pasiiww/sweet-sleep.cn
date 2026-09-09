@@ -41,11 +41,13 @@ class AnswerTests(unittest.TestCase):
         self.assertFalse(cfg['has_key'])
         with app.db() as c:
             embedding_before = app.config(c)
-        self.configure()
+        self.configure(keyword_prompt='仅提取当前问题的词')
+        self.assertEqual(self.call('GET', 'answer-settings')['keyword_prompt'], '仅提取当前问题的词')
         self.assertNotIn('api_key', self.call('GET', 'answer-settings'))
         self.configure(api_key='', system_prompt='新提示词')
         with app.db() as c:
             self.assertEqual(app.answer_config(c)['api_key'], 'test-key')
+            self.assertEqual(app.answer_config(c)['keyword_prompt'], '仅提取当前问题的词')
             self.assertEqual(app.config(c), embedding_before)
         self.configure(api_key='', clear_key=True)
         self.assertFalse(self.call('GET', 'answer-settings')['has_key'])
@@ -62,11 +64,13 @@ class AnswerTests(unittest.TestCase):
 
     def test_no_hits_and_irrelevant_hits_handoff(self):
         self.configure()
-        with patch.object(answers, 'complete') as model:
+        with patch.object(answers, 'complete', return_value={'supported': False, 'answer':'这个还不确定，请找落落确认呀～'}) as model:
             result = self.ask('xyznotpresent')
             self.assertEqual(result['reason'], 'no_results')
             self.assertEqual(result['mention_openids'], ['admin123456'])
-            model.assert_not_called()
+            model.assert_called_once()
+            self.assertEqual(model.call_args.args[2], [])
+            self.assertEqual(result['answer'], '这个还不确定，请找落落确认呀～')
         with patch.object(answers, 'complete', return_value={'supported': False}):
             result = self.ask()
             self.assertEqual(result['reason'], 'insufficient_evidence')
@@ -130,8 +134,18 @@ class AnswerTests(unittest.TestCase):
         self.assertEqual(result['mode'], 'document')
         self.assertEqual(result['query_groups'], [['营业', '时间'], ['配送', '规则']])
         self.assertEqual(len(result['results']), 1)
-        with patch.object(answers, 'keywords', side_effect=answers.ModelError('invalid_keywords')):
-            self.assertEqual(self.ask()['reason'], 'invalid_keywords')
+        for reason in ('invalid_keywords', 'invalid_response', 'output_truncated'):
+            with patch.object(answers, 'keywords', side_effect=answers.ModelError(reason)), patch.object(answers, 'complete', return_value={'supported':True,'answer':'十点开门哦～'}) as complete:
+                result = self.ask()
+                self.assertEqual(result['mode'], 'model')
+                self.assertEqual(result['answer'], '十点开门哦～')
+                complete.assert_called_once()
+                trace = self.call('GET', 'traces/' + result['trace_id'])
+                self.assertEqual(trace['details']['keyword_error'], reason)
+        for reason in ('invalid_key', 'insufficient_balance'):
+            with patch.object(answers, 'keywords', side_effect=answers.ModelError(reason)), patch.object(answers, 'complete') as complete:
+                self.assertEqual(self.ask()['reason'], reason)
+                complete.assert_not_called()
 
     def test_output_validation_and_http_error_mapping(self):
         rows = [{'citation': 1, 'title': '营业说明', 'content': '上午十点营业。'}]
@@ -189,6 +203,23 @@ class KeywordTests(unittest.TestCase):
             result = app.search_terms('kb1', ['营业时间', '几点开门'])
         self.assertEqual(retriever.call_count, 2)
         self.assertEqual([r['content'] for r in result['results']], ['十点开门', '八点关门'])
+
+    def test_separate_prompts_and_current_aliases(self):
+        cfg = answers.defaults() | {'keyword_prompt':'检索阶段自定义', 'system_prompt':'日本語で回答',
+            'keyword_alias_context':'"kei" 是 "凯伊" 的别名', 'alias_context':'"kei" 是 "凯伊" 的别名',
+            'conversation_history':[{'role':'user','content':'之前的问题'},{'role':'assistant','content':'之前的回答'}]}
+        with patch.object(answers, 'model_call', side_effect=['{"query_groups":[["凯伊"]]}', 'こんにちは']) as model:
+            answers.keywords(cfg, 'kei')
+            answers.complete(cfg, 'kei', [])
+        first, second = [call.args[1] for call in model.call_args_list]
+        self.assertEqual(len(first),2)
+        self.assertIn('检索阶段自定义',first[0]['content'])
+        self.assertIn(cfg['keyword_alias_context'],first[0]['content'])
+        self.assertNotIn('日本語で回答',first[0]['content'])
+        self.assertTrue(second[0]['content'].startswith('日本語で回答'))
+        self.assertNotIn('给用户的中文回复',second[0]['content'])
+        self.assertNotIn('检索阶段自定义',second[0]['content'])
+        self.assertEqual(second[1:3],cfg['conversation_history'])
 
     def test_handoff_marker_and_no_evidence_contract(self):
         with patch.object(answers, 'model_call', return_value='你好，这里直接回复。'):

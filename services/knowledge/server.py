@@ -486,8 +486,8 @@ def respond_pipeline(data, details):
     except ValueError as exc:
         fail(400, str(exc))
     hints = catalog.hints([m['content'] for m in history] + [query])
-    cfg = cfg | {'conversation_history': history, 'alias_context': entities.context(hints), '_trace': details}
-    details.update(history=history, model=cfg['model'], system_prompt=cfg['system_prompt'], keyword_prompt=answers.KEYWORD_PROMPT)
+    cfg = cfg | {'conversation_history': history, 'alias_context': entities.context(hints), 'keyword_alias_context': entities.context(catalog.hints([query])), '_trace': details}
+    details.update(history=history, model=cfg['model'], system_prompt=cfg['system_prompt'], keyword_prompt=cfg['keyword_prompt'])
     def search(terms):
         started = time.monotonic()
         result = search_terms(kb_id, terms)
@@ -519,17 +519,25 @@ def respond_pipeline(data, details):
         return fallback('busy')
     result = None
     try:
-        terms = answers.keywords(cfg, query)
         try:
-            terms = answers.normalize_query_groups([[catalog.normalize(term) for term in group] for group in terms])
-        except ValueError:
-            raise answers.ModelError('invalid_keywords') from None
+            terms = answers.keywords(cfg, query)
+            try:
+                terms = answers.normalize_query_groups([[catalog.normalize(term) for term in group] for group in terms])
+            except ValueError:
+                raise answers.ModelError('invalid_keywords') from None
+        except answers.ModelError as exc:
+            details['keyword_error'] = str(exc)
+            if str(exc) in ('invalid_key', 'insufficient_balance', 'access_denied'):
+                return fallback(str(exc))
+            # A planning failure must not skip the independent answer stage.
+            terms = entities.fallback_groups(catalog, query, []) or [catalog.normalize(query)[:2000]]
         result = search(terms)
-        if not result['results']:
-            return finish(answers.handoff(cfg, group_id, 'no_results'))
         model = answers.complete(cfg, query, result['results'])
         if not model['supported']:
-            return finish(answers.handoff(cfg, group_id, 'insufficient_evidence'))
+            response = answers.handoff(cfg, group_id, 'insufficient_evidence' if result['results'] else 'no_results')
+            if model.get('answer'):
+                response['answer'] = answers.plain(model['answer'])
+            return finish(response)
         return finish({'mode': 'model', 'reason': 'ok', 'handoff': False, 'mention_openids': [],
                        'answer': answers.plain(model['answer']), 'results': result['results']})
     except answers.ModelError as exc:
@@ -608,6 +616,7 @@ def api(method, path, data, params):
                 cfg = {'enabled': data['enabled'], 'model': model, 'admin_qq': admin_qq,
                        'admin_name': string(data, 'admin_name', 40) or cfg['admin_name'],
                        'system_prompt': string(data, 'system_prompt', 12000, True),
+                       'keyword_prompt': string(data, 'keyword_prompt', 12000, True) if 'keyword_prompt' in data else cfg['keyword_prompt'],
                        'api_key': key or ('' if data.get('clear_key') else cfg['api_key']),
                        'handoff_groups': groups, 'revision': secrets.token_hex(8)}
                 c.execute('UPDATE app_settings SET value=? WHERE name=?', (json.dumps(cfg), 'answer'))
@@ -616,7 +625,7 @@ def api(method, path, data, params):
                 fail(405, '不支持此操作')
             status = c.execute("SELECT value FROM app_settings WHERE name='answer_status'").fetchone()
             return {k: v for k, v in cfg.items() if k not in ('api_key', 'revision')} | {
-                'has_key': bool(cfg['api_key']), 'default_prompt': answers.DEFAULT_PROMPT,
+                'has_key': bool(cfg['api_key']), 'default_prompt': answers.DEFAULT_PROMPT, 'default_keyword_prompt': answers.KEYWORD_PROMPT,
                 'last_status': json.loads(status[0]) if status else None}
         if segments == ['settings']:
             cfg = config(c)
