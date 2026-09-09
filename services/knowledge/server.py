@@ -1,0 +1,489 @@
+#!/usr/bin/env python3
+"""Small, authenticated knowledge service. Python 3.11+, SQLite FTS5, no pip dependencies."""
+import contextlib
+import hashlib
+import hmac
+import ipaddress
+import json
+import math
+import os
+from pathlib import Path
+import re
+import secrets
+import socket
+import sqlite3
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib import request, error
+from urllib.parse import urlsplit, parse_qs
+
+DATA = Path(os.environ.get('KB_DATA_DIR', '/var/lib/sweet-knowledge'))
+STATIC = Path(os.environ.get('KB_STATIC_DIR', Path(__file__).resolve().parents[2] / 'knowledge'))
+ADMIN_TOKEN = os.environ.get('KB_ADMIN_TOKEN', '')
+READ_TOKEN = os.environ.get('KB_READ_TOKEN', '')
+WRITE_LOCK = threading.RLock()
+VECTOR_LOCK = threading.Lock()
+MAX_CHUNKS = 10000
+
+
+class Problem(Exception):
+    def __init__(self, status, message):
+        self.status, self.message = status, message
+
+
+def fail(status, message):
+    raise Problem(status, message)
+
+
+@contextlib.contextmanager
+def db():
+    conn = sqlite3.connect(DATA / 'knowledge.db', timeout=30)
+    conn.row_factory = sqlite3.Row
+    conn.execute('PRAGMA foreign_keys=ON')
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
+
+
+def initialize():
+    DATA.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with db() as c:
+        c.execute('PRAGMA journal_mode=WAL')
+        c.executescript('''
+        CREATE TABLE IF NOT EXISTS bases (
+          id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL,
+          chunk_size INTEGER NOT NULL, overlap INTEGER NOT NULL, top_k INTEGER NOT NULL,
+          created_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS documents (
+          id TEXT PRIMARY KEY, kb_id TEXT NOT NULL REFERENCES bases(id) ON DELETE CASCADE,
+          title TEXT NOT NULL, content TEXT NOT NULL, source TEXT NOT NULL,
+          updated_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS chunks (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          doc_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+          kb_id TEXT NOT NULL REFERENCES bases(id) ON DELETE CASCADE,
+          ordinal INTEGER NOT NULL, content TEXT NOT NULL,
+          vector TEXT, fingerprint TEXT);
+        CREATE INDEX IF NOT EXISTS chunk_kb ON chunks(kb_id);
+        CREATE INDEX IF NOT EXISTS document_kb ON documents(kb_id);
+        CREATE VIRTUAL TABLE IF NOT EXISTS chunk_fts USING fts5(title, body);
+        CREATE TRIGGER IF NOT EXISTS chunk_delete AFTER DELETE ON chunks BEGIN
+          DELETE FROM chunk_fts WHERE rowid=old.id;
+        END;
+        CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
+        ''')
+        c.execute('INSERT OR IGNORE INTO settings VALUES(1, ?)', (json.dumps({
+            'base_url': '', 'model': '', 'api_key': '', 'revision': secrets.token_hex(8)}),))
+
+
+def now():
+    return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+
+
+def string(data, key, limit, required=False):
+    value = data.get(key, '')
+    if not isinstance(value, str) or len(value) > limit or (required and not value.strip()):
+        fail(400, f'{key} 必须是有效文本，最多 {limit} 个字符')
+    return value.strip()
+
+
+def integer(data, key, default, low, high):
+    value = data.get(key, default)
+    if type(value) is not int or not low <= value <= high:
+        fail(400, f'{key} 必须是 {low}–{high} 之间的整数')
+    return value
+
+
+def tokens(text):
+    # Chinese unigrams + bigrams; Latin words. No raw user FTS syntax is executed.
+    result = []
+    for part in re.findall(r'[\u3400-\u9fff]+|[a-z0-9_]+', text.lower()):
+        if '\u3400' <= part[0] <= '\u9fff':
+            result.extend(part)
+            result.extend(part[i:i + 2] for i in range(len(part) - 1))
+        else:
+            result.append(part)
+    return result
+
+
+def split_text(text, size, overlap):
+    parts, start = [], 0
+    while start < len(text):
+        end = min(start + size, len(text))
+        if end < len(text):
+            boundary = max(text.rfind(mark, start + size // 2, end) for mark in ('\n', '。', '. ', '！', '？'))
+            if boundary >= 0:
+                end = boundary + 1
+        if text[start:end].strip():
+            parts.append(text[start:end].strip())
+        if end == len(text):
+            break
+        start = max(start + 1, end - overlap)
+    return parts
+
+
+def base(c, kb_id):
+    row = c.execute('SELECT * FROM bases WHERE id=?', (kb_id,)).fetchone()
+    if not row:
+        fail(404, '知识库不存在')
+    return dict(row)
+
+
+def config(c):
+    return json.loads(c.execute('SELECT value FROM settings WHERE id=1').fetchone()[0])
+
+
+def fingerprint(cfg):
+    return hashlib.sha256((cfg['base_url'] + '\n' + cfg['model'] + '\n' + cfg['revision']).encode()).hexdigest()
+
+
+def public_config(cfg):
+    return {k: v for k, v in cfg.items() if k not in ('api_key', 'revision')} | {
+        'has_key': bool(cfg['api_key']), 'ready': bool(cfg['base_url'] and cfg['model'])}
+
+
+def validate_url(url):
+    parsed = urlsplit(url)
+    if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
+        fail(400, 'Embedding Base URL 必须为 HTTPS 地址，不含账号、查询参数或片段')
+    try:
+        addresses = socket.getaddrinfo(parsed.hostname, parsed.port or 443, type=socket.SOCK_STREAM)
+        if not addresses or any(not ipaddress.ip_address(a[4][0]).is_global for a in addresses):
+            fail(400, 'Embedding 地址必须指向公网服务')
+    except (OSError, ValueError):
+        fail(400, 'Embedding 服务地址无法解析')
+
+
+class NoRedirect(request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+def embed(texts, cfg):
+    if not cfg['base_url'] or not cfg['model']:
+        fail(409, '请先在模型设置中配置 Embedding 服务')
+    validate_url(cfg['base_url'])
+    vectors = []
+    for start in range(0, len(texts), 16):
+        batch = texts[start:start + 16]
+        headers = {'Content-Type': 'application/json'}
+        if cfg['api_key']:
+            headers['Authorization'] = 'Bearer ' + cfg['api_key']
+        payload = {'input': batch, 'model': cfg['model'], 'encoding_format': 'float'}
+        req = request.Request(cfg['base_url'].rstrip('/') + '/embeddings',
+                              data=json.dumps(payload).encode(), headers=headers)
+        try:
+            with request.build_opener(NoRedirect).open(req, timeout=30) as resp:
+                raw = resp.read(8_000_001)
+                if len(raw) > 8_000_000:
+                    fail(502, 'Embedding 返回内容过大')
+                rows = sorted(json.loads(raw)['data'], key=lambda row: row['index'])
+                if [r['index'] for r in rows] != list(range(len(batch))):
+                    raise ValueError('Invalid embedding indices')
+                for row in rows:
+                    v = row['embedding']
+                    if not isinstance(v, list) or not 1 <= len(v) <= 8192:
+                        raise ValueError('Invalid vector')
+                    if any(type(x) not in (int, float) or not math.isfinite(x) for x in v):
+                        raise ValueError('Invalid vector values')
+                    norm = math.sqrt(sum(x * x for x in v))
+                    if not norm or not math.isfinite(norm) or (vectors and len(v) != len(vectors[0])):
+                        raise ValueError('Invalid vector norm or dimensions')
+                    vectors.append([x / norm for x in v])
+        except error.HTTPError as exc:
+            fail(502, f'Embedding 服务返回 HTTP {exc.code}，请检查地址、模型及密钥')
+        except (OSError, ValueError, KeyError, TypeError, OverflowError):
+            fail(502, 'Embedding 调用失败或响应格式无效，请检查服务配置')
+    return vectors
+
+
+def index_document(c, document, kb):
+    parts = split_text(document['content'], kb['chunk_size'], kb['overlap'])
+    current = c.execute('SELECT count(*) FROM chunks WHERE kb_id=? AND doc_id<>?',
+                        (kb['id'], document['id'])).fetchone()[0]
+    if current + len(parts) > MAX_CHUNKS:
+        fail(400, f'单个知识库最多 {MAX_CHUNKS} 个分段，请减少内容或增大分段长度')
+    c.execute('DELETE FROM chunks WHERE doc_id=?', (document['id'],))
+    for i, part in enumerate(parts):
+        chunk_id = c.execute('INSERT INTO chunks(doc_id,kb_id,ordinal,content) VALUES(?,?,?,?)',
+                             (document['id'], kb['id'], i, part)).lastrowid
+        c.execute('INSERT INTO chunk_fts(rowid,title,body) VALUES(?,?,?)',
+                  (chunk_id, ' '.join(tokens(document['title'])), ' '.join(tokens(part))))
+
+
+def build_vectors(kb_id):
+    if not VECTOR_LOCK.acquire(blocking=False):
+        fail(409, '已有向量任务正在运行，请稍后再试')
+    try:
+        with db() as c:
+            base(c, kb_id)
+            cfg = config(c)
+            fp = fingerprint(cfg)
+            rows = c.execute('SELECT id,content FROM chunks WHERE kb_id=? AND (fingerprint IS NULL OR fingerprint<>?) ORDER BY id LIMIT 32', (kb_id, fp)).fetchall()
+        if not rows:
+            return {'processed': 0, 'remaining': 0}
+        vectors = embed([r['content'] for r in rows], cfg)
+        with WRITE_LOCK, db() as c:
+            if fingerprint(config(c)) != fp:
+                fail(409, '模型配置已更改，请重新生成向量')
+            for row, vector in zip(rows, vectors):
+                # AUTOINCREMENT IDs prevent stale writes when a document is edited during embedding.
+                c.execute('UPDATE chunks SET vector=?,fingerprint=? WHERE id=?',
+                          (json.dumps(vector), fp, row['id']))
+            remaining = c.execute('SELECT count(*) FROM chunks WHERE kb_id=? AND (fingerprint IS NULL OR fingerprint<>?)', (kb_id, fp)).fetchone()[0]
+        return {'processed': len(rows), 'remaining': remaining}
+    finally:
+        VECTOR_LOCK.release()
+
+
+def retrieve(data):
+    query = string(data, 'query', 2000, True)
+    kb_id = string(data, 'kb_id', 80, True)
+    mode = data.get('mode', 'keyword')
+    if mode not in ('keyword', 'vector', 'hybrid'):
+        fail(400, 'mode 必须为 keyword、vector 或 hybrid')
+    budget = integer(data, 'max_context_chars', 12000, 100, 40000)
+    started = time.monotonic()
+    with db() as c:
+        kb = base(c, kb_id)
+        k = integer(data, 'top_k', kb['top_k'], 1, 20)
+        cfg, keyword, semantic = config(c), [], []
+        ft = list(dict.fromkeys(tokens(query)))[:128]
+        if mode != 'vector' and ft:
+            keyword = [(r['id'], -r['rank']) for r in c.execute('''
+                SELECT chunks.id,bm25(chunk_fts,2.0,1.0) AS rank FROM chunk_fts
+                JOIN chunks ON chunks.id=chunk_fts.rowid
+                WHERE chunk_fts MATCH ? AND chunks.kb_id=? ORDER BY rank LIMIT ?
+                ''', (' OR '.join('"' + t + '"' for t in ft), kb_id, k * 4))]
+        if mode != 'keyword':
+            if not public_config(cfg)['ready']:
+                fail(409, '向量召回尚未配置，请先设置 Embedding 服务并生成向量')
+            rows = c.execute('SELECT id,vector,fingerprint FROM chunks WHERE kb_id=?', (kb_id,)).fetchall()
+            if any(r['fingerprint'] != fingerprint(cfg) or not r['vector'] for r in rows):
+                fail(409, '部分分段尚未生成当前模型的向量，请先点击「生成向量」')
+            if rows:
+                qv = embed([query], cfg)[0]
+                for row in rows:
+                    v = json.loads(row['vector'])
+                    if len(v) != len(qv):
+                        fail(409, '向量维度不一致，请重新保存模型设置并生成向量')
+                    score = sum(a * b for a, b in zip(qv, v))
+                    if score > 0:
+                        semantic.append((row['id'], score))
+                semantic.sort(key=lambda row: row[1], reverse=True)
+                semantic = semantic[:k * 4]
+        if mode == 'hybrid':
+            scores = {}
+            for ranking in (keyword, semantic):
+                for rank, (chunk_id, _) in enumerate(ranking, 1):
+                    scores[chunk_id] = scores.get(chunk_id, 0) + 1 / (60 + rank)
+            ranking = sorted(scores.items(), key=lambda row: row[1], reverse=True)
+        else:
+            ranking = keyword if mode == 'keyword' else semantic
+        results, context, used = [], [], 0
+        for chunk_id, score in ranking[:k]:
+            row = c.execute('SELECT c.id AS chunk_id,c.ordinal,c.content,d.id AS document_id,d.title,d.source FROM chunks c JOIN documents d ON d.id=c.doc_id WHERE c.id=? AND c.kb_id=?', (chunk_id, kb_id)).fetchone()
+            if not row:
+                continue
+            result = dict(row)
+            prefix = f'[{len(results) + 1}] {result["title"]} (document={result["document_id"]}, chunk={chunk_id})\n'
+            available = budget - used - len(prefix) - (2 if context else 0)
+            if available <= 0:
+                break
+            original = result['content']
+            result['content'] = original[:available]
+            result['truncated'] = len(original) > available
+            result['score'] = round(score, 8)
+            result['citation'] = len(results) + 1
+            block = prefix + result['content']
+            used += len(block) + (2 if context else 0)
+            context.append(block)
+            results.append(result)
+        return {'query': query, 'kb_id': kb_id, 'mode': mode, 'results': results,
+                'context': '\n\n'.join(context), 'elapsed_ms': round((time.monotonic() - started) * 1000),
+                'score_type': {'keyword': 'bm25', 'vector': 'cosine', 'hybrid': 'rrf'}[mode]}
+
+
+def api(method, path, data, params):
+    segments = path.removeprefix('/knowledge/api/').strip('/').split('/')
+    if segments == ['retrieve'] and method == 'POST':
+        return retrieve(data)
+    if len(segments) == 3 and segments[0] == 'bases' and segments[2] == 'embed' and method == 'POST':
+        return build_vectors(segments[1])
+    if segments == ['settings', 'test'] and method == 'POST':
+        with db() as c:
+            cfg = config(c)
+        v = embed(['连接测试'], cfg)
+        return {'dimensions': len(v[0]), 'ok': True}
+    with WRITE_LOCK, db() as c:
+        if segments == ['settings']:
+            cfg = config(c)
+            if method == 'PUT':
+                url = string(data, 'base_url', 500).rstrip('/')
+                model = string(data, 'model', 200)
+                if bool(url) != bool(model):
+                    fail(400, '服务地址和模型名必须一起填写或一起清空')
+                if url:
+                    validate_url(url)
+                key = string(data, 'api_key', 2000)
+                # A different endpoint must never inherit a previous provider's secret.
+                key = key or (cfg['api_key'] if url == cfg['base_url'] and not data.get('clear_key') else '')
+                cfg = {'base_url': url, 'model': model, 'api_key': key, 'revision': secrets.token_hex(8)}
+                c.execute('UPDATE settings SET value=? WHERE id=1', (json.dumps(cfg),))
+            elif method != 'GET':
+                fail(405, '不支持此操作')
+            return public_config(cfg)
+        if segments == ['bases']:
+            if method == 'GET':
+                fp = fingerprint(config(c))
+                return {'items': [dict(r) for r in c.execute('''SELECT b.*,
+                    (SELECT count(*) FROM documents d WHERE d.kb_id=b.id) AS document_count,
+                    (SELECT count(*) FROM chunks ch WHERE ch.kb_id=b.id) AS chunk_count,
+                    (SELECT count(*) FROM chunks ch WHERE ch.kb_id=b.id AND ch.fingerprint=?) AS vector_count
+                    FROM bases b ORDER BY b.created_at,b.id''', (fp,))]}
+            if method == 'POST':
+                kb_id = secrets.token_hex(8)
+                name, desc, size, overlap, top_k = validate_base(data)
+                c.execute('INSERT INTO bases VALUES(?,?,?,?,?,?,?)', (kb_id, name, desc, size, overlap, top_k, now()))
+                return base(c, kb_id)
+        if len(segments) >= 2 and segments[0] == 'bases':
+            kb = base(c, segments[1])
+            if len(segments) == 2:
+                if method == 'GET':
+                    return kb
+                if method == 'DELETE':
+                    c.execute('DELETE FROM bases WHERE id=?', (kb['id'],))
+                    return {'deleted': True}
+                if method == 'PUT':
+                    name, desc, size, overlap, top_k = validate_base(data)
+                    c.execute('UPDATE bases SET name=?,description=?,chunk_size=?,overlap=?,top_k=? WHERE id=?',
+                              (name, desc, size, overlap, top_k, kb['id']))
+                    updated = base(c, kb['id'])
+                    if (size, overlap) != (kb['chunk_size'], kb['overlap']):
+                        documents = c.execute('SELECT * FROM documents WHERE kb_id=?', (kb['id'],)).fetchall()
+                        c.execute('DELETE FROM chunks WHERE kb_id=?', (kb['id'],))
+                        for d in documents:
+                            index_document(c, dict(d), updated)
+                    return updated
+            if len(segments) == 3 and segments[2] == 'documents':
+                if method == 'GET':
+                    query = params.get('q', [''])[0][:200]
+                    return {'items': [dict(r) for r in c.execute('''SELECT d.id,d.kb_id,d.title,d.source,d.updated_at,
+                        length(d.content) AS chars,(SELECT count(*) FROM chunks ch WHERE ch.doc_id=d.id) AS chunk_count
+                        FROM documents d WHERE kb_id=? AND (instr(lower(title),lower(?))>0 OR instr(lower(content),lower(?))>0)
+                        ORDER BY updated_at DESC,id''', (kb['id'], query, query))]}
+                if method == 'POST':
+                    return save_document(c, kb, data)
+        if len(segments) == 2 and segments[0] == 'documents':
+            d = c.execute('SELECT * FROM documents WHERE id=?', (segments[1],)).fetchone()
+            if not d:
+                fail(404, '文档不存在')
+            if method == 'GET':
+                return dict(d) | {'chunks': [dict(r) for r in c.execute('SELECT id,ordinal,content FROM chunks WHERE doc_id=? ORDER BY ordinal', (d['id'],))]}
+            if method == 'PUT':
+                return save_document(c, base(c, d['kb_id']), data, d['id'])
+            if method == 'DELETE':
+                c.execute('DELETE FROM documents WHERE id=?', (d['id'],))
+                return {'deleted': True}
+    fail(404, '接口不存在')
+
+
+def validate_base(data):
+    size = integer(data, 'chunk_size', 600, 100, 2000)
+    overlap = integer(data, 'overlap', 80, 0, size // 2 - 1)
+    return (string(data, 'name', 100, True), string(data, 'description', 1000), size, overlap,
+            integer(data, 'top_k', 5, 1, 20))
+
+
+def save_document(c, kb, data, doc_id=None):
+    doc_id = doc_id or secrets.token_hex(8)
+    title = string(data, 'title', 200, True)
+    content = string(data, 'content', 100000, True)
+    source = string(data, 'source', 1000)
+    c.execute('''INSERT INTO documents VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
+        title=excluded.title,content=excluded.content,source=excluded.source,updated_at=excluded.updated_at''',
+              (doc_id, kb['id'], title, content, source, now()))
+    document = dict(c.execute('SELECT * FROM documents WHERE id=?', (doc_id,)).fetchone())
+    index_document(c, document, kb)
+    return {'id': doc_id, 'kb_id': kb['id'], 'title': title}
+
+
+class Handler(BaseHTTPRequestHandler):
+    server_version = 'Knowledge/1.0'
+
+    def setup(self):
+        super().setup()
+        self.connection.settimeout(70)
+
+    def log_message(self, fmt, *args):
+        # Avoid logging user queries or credentials.
+        print(f'{self.command} {urlsplit(self.path).path} {args[1] if len(args) > 1 else ""}', flush=True)
+
+    def reply(self, status, payload, content_type='application/json; charset=utf-8'):
+        body = payload if isinstance(payload, bytes) else json.dumps(payload, ensure_ascii=False, allow_nan=False).encode()
+        self.send_response(status)
+        self.send_header('Content-Type', content_type)
+        self.send_header('Content-Length', str(len(body)))
+        self.send_header('Cache-Control', 'no-store')
+        self.send_header('X-Content-Type-Options', 'nosniff')
+        self.send_header('Referrer-Policy', 'no-referrer')
+        self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+        self.end_headers()
+        if self.command != 'HEAD':
+            self.wfile.write(body)
+
+    def handle_request(self):
+        try:
+            parsed = urlsplit(self.path)
+            if not parsed.path.startswith('/knowledge/api/'):
+                assets = {'/knowledge/': ('index.html', 'text/html'), '/knowledge/index.html': ('index.html', 'text/html'),
+                          '/knowledge/app.js': ('app.js', 'text/javascript'), '/knowledge/style.css': ('style.css', 'text/css')}
+                if parsed.path not in assets or self.command not in ('GET', 'HEAD'):
+                    fail(404, '页面不存在')
+                filename, mime = assets[parsed.path]
+                self.reply(200, (STATIC / filename).read_bytes(), mime + '; charset=utf-8')
+                return
+            supplied = self.headers.get('Authorization', '').removeprefix('Bearer ')
+            admin = bool(ADMIN_TOKEN) and hmac.compare_digest(supplied.encode(), ADMIN_TOKEN.encode())
+            reader = bool(READ_TOKEN) and hmac.compare_digest(supplied.encode(), READ_TOKEN.encode())
+            if not admin and not reader:
+                fail(401, '请输入有效的访问密钥')
+            if not admin and not (parsed.path == '/knowledge/api/retrieve' and self.command == 'POST'):
+                fail(403, '召回密钥仅可调用检索接口')
+            data = {}
+            if self.command in ('POST', 'PUT'):
+                if self.headers.get('Transfer-Encoding'):
+                    fail(400, '不支持分块请求体')
+                length = int(self.headers.get('Content-Length', 0))
+                if not 0 < length <= 1_000_000:
+                    fail(413, '请求体过大或为空')
+                if self.headers.get_content_type() != 'application/json':
+                    fail(415, '请使用 application/json')
+                data = json.loads(self.rfile.read(length))
+                if not isinstance(data, dict):
+                    fail(400, '请求体必须是 JSON 对象')
+            self.reply(200, api(self.command, parsed.path, data, parse_qs(parsed.query)))
+        except Problem as exc:
+            self.reply(exc.status, {'error': exc.message})
+        except (ValueError, UnicodeError):
+            self.reply(400, {'error': '请求格式不正确'})
+        except (BrokenPipeError, ConnectionResetError, TimeoutError):
+            pass
+        except Exception as exc:
+            print(f'Internal error: {type(exc).__name__}', flush=True)
+            self.reply(500, {'error': '服务暂时不可用，请稍后再试'})
+
+    do_GET = do_POST = do_PUT = do_DELETE = do_HEAD = handle_request
+
+
+if __name__ == '__main__':
+    if len(ADMIN_TOKEN) < 24 or len(READ_TOKEN) < 24 or ADMIN_TOKEN == READ_TOKEN:
+        raise SystemExit('Set distinct KB_ADMIN_TOKEN and KB_READ_TOKEN (at least 24 characters each)')
+    os.umask(0o077)
+    initialize()
+    port = int(os.environ.get('KB_PORT', '8765'))
+    print(f'Knowledge listening on 127.0.0.1:{port}', flush=True)
+    ThreadingHTTPServer(('127.0.0.1', port), Handler).serve_forever()

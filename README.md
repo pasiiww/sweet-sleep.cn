@@ -9,10 +9,11 @@ Static website for `sweet-sleep.cn`.
 - `/ar/` - MindAR + Three.js AR page
 - `/menu/` - interactive character menu page
 - `/gacha/` - pure frontend Blue Archive gacha simulator
+- `/knowledge/` - authenticated knowledge management and retrieval, with a separate Python backend; see [service documentation](services/knowledge/README.md)
 
 ## Deploy
 
-Upload the repository contents to the web root of the server.
+Upload only the static site files to the web root. The knowledge service is deployed separately to `/opt/sweet-knowledge`; never publish its database, environment files, or backend source under the web root.
 
 ## Sync
 
