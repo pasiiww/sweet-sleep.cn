@@ -25,6 +25,7 @@ import qa
 import learning
 import stickers
 import notifications
+import products
 import sys
 
 DATA = Path(os.environ.get('KB_DATA_DIR', '/var/lib/sweet-knowledge'))
@@ -97,6 +98,7 @@ def initialize():
         learning.initialize(c)
         stickers.initialize(c)
         notifications.initialize(c)
+        products.initialize(c)
 
 
 def now():
@@ -664,6 +666,8 @@ def api(method, path, data, params):
             data=dict(data,name=stickers.generate_name(cfg,naming_image));auto_sticker_name=True
         except ValueError as exc:fail(400,str(exc))
     with WRITE_LOCK, db() as c:
+        if segments[0]=='products' and len(segments) in (1,2):
+            return products.handle(sys.modules[__name__],c,method,segments,data,params)
         if segments==['owner-notifications'] and method=='GET':
             return {'config':notifications.config(c),'items':[dict(r) for r in c.execute('SELECT id,kb_id,title,created,status,error FROM owner_notifications ORDER BY id DESC LIMIT 30')]}
         if segments==['owner-notifications'] and method=='PUT':
@@ -979,7 +983,7 @@ class Handler(BaseHTTPRequestHandler):
                 fail(403, '学习密钥仅可提交聊天事件')
             if not admin and not learner and not (parsed.path in ('/knowledge/api/retrieve', '/knowledge/api/answer', '/knowledge/api/trace-delivery') and self.command == 'POST'):
                 fail(403, '召回密钥仅可调用检索接口')
-            if parsed.path=='/knowledge/api/stickers/upload' and self.command=='POST':
+            if parsed.path in ('/knowledge/api/stickers/upload','/knowledge/api/products/upload') and self.command=='POST':
                 if self.headers.get('Transfer-Encoding'):fail(400,'不支持分块请求体')
                 length=int(self.headers.get('Content-Length',0))
                 if not 0<length<=stickers.MAX_UPLOAD:fail(413,'图片不能超过 5 MB')
@@ -987,6 +991,9 @@ class Handler(BaseHTTPRequestHandler):
                 with WRITE_LOCK:
                     try:target=stickers.save_upload(DATA/'stickers',self.rfile.read(length))
                     except ValueError as exc:fail(400,str(exc))
+                if parsed.path=='/knowledge/api/products/upload':
+                    self.reply(200,{'path':'/knowledge/sticker-files/'+target.name})
+                    return
                 try:result=api('POST','/knowledge/api/stickers',{'name':name,'path':'/knowledge/sticker-files/'+target.name},{})
                 except Exception:
                     target.unlink(missing_ok=True)

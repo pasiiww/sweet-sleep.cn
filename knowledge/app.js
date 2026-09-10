@@ -2,7 +2,52 @@
 const $ = id => document.getElementById(id);
 const state = { token: '', bases: [], selected: '', editBase: null, editDoc: null, context: '', settings: {}, embedding: false };
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+document.querySelector('.sidebar nav').insertAdjacentHTML('beforeend','<button data-view="products" class="nav-item"><span>▦</span> 社团制品</button>');
+document.querySelector('.main-content .footer').insertAdjacentHTML('beforebegin',`<section id="view-products" class="view" hidden><section class="panel"><div class="panel-heading"><div><h2>社团制品</h2><p>按系列与角色整理制品，各类型价格仅供参考，具体以平台为准。</p></div><button id="product-add" class="primary">＋ 新增制品</button></div><div class="toolbar"><label>所属知识库<select id="product-base"></select></label><label class="search-label"><input id="product-search" placeholder="搜索系列、角色、制品类型" aria-label="搜索制品"></label><button id="product-refresh">查询 / 刷新</button></div><div class="table-wrap"><table><thead><tr><th>图片</th><th>系列 / 角色</th><th>类型 / 参考价</th><th>平台链接</th><th>机器人检索</th><th>操作</th></tr></thead><tbody id="product-rows"></tbody></table></div><p id="product-empty" class="empty">暂无制品，点击右上角添加。</p></section></section>`);
+document.body.insertAdjacentHTML('beforeend',`<dialog id="product-dialog"><form id="product-form"><div class="dialog-heading"><h2 id="product-title">新增制品</h2><button type="button" id="product-close" aria-label="关闭">×</button></div><div class="product-fields"><label>制品系列名<input name="series" maxlength="150" placeholder="可留空"></label><label>角色名字<input name="character" maxlength="150" required></label></div><label>图片地址<input name="image" maxlength="2000" placeholder="粘贴图片地址，或选择本地图片"></label><label>上传制品图片<input id="product-file" type="file" accept="image/png,image/jpeg,image/gif"></label><p class="hint">PNG / JPG / GIF，最大5 MB。不会加入表情包库。</p><img id="product-preview" class="sticker-preview" alt="制品图片预览" hidden><div class="panel-heading"><h3>制品类型与参考价</h3><button type="button" id="product-type-add">＋ 添加类型</button></div><p class="hint">可选多种类型，也可输入自定义类型。价格单位为元，未知可留空。</p><datalist id="product-types"><option value="徽章"><option value="亚克力立牌"><option value="挂件"><option value="色纸"><option value="明信片"><option value="毛绒娃娃"><option value="手偶"><option value="贴纸"><option value="套组"></datalist><div id="product-types-rows"></div><div class="panel-heading"><h3>平台链接</h3><button type="button" id="product-link-add">＋ 添加平台</button></div><div id="product-links-rows"></div><label>备注<textarea name="notes" rows="3" maxlength="4000"></textarea></label><label class="checkbox"><input name="searchable" type="checkbox">供机器人检索</label><p class="hint">开启后同步到知识库，回答会提示参考价格以平台为准。关闭或删除时移除对应文档。</p><div class="dialog-actions"><button type="button" id="product-cancel">取消</button><button type="submit" class="primary">保存制品</button></div></form></dialog>`);
 let toastTimer;
+let productItems=[], editingProduct=null, productRequest=0, productFile=null;
+function productPreview(value){const img=$('product-preview');img.hidden=!value;img.src=value||'';}
+function productRow(kind,row={}){
+  const isType=kind==='types';const div=document.createElement('div');div.className='product-entry';
+  div.innerHTML=`<input data-key="name" aria-label="${isType?'制品类型':'平台名称'}" placeholder="${isType?'选择或输入类型':'平台名称，如闲鱼'}" maxlength="80" ${isType?'list="product-types"':''} required value="${esc(row.name||'')}"><input data-key="${isType?'price':'url'}" aria-label="${isType?'参考价':'平台链接'}" placeholder="${isType?'参考价（元），可留空':'https://…'}" ${isType?'inputmode="decimal" maxlength="30"':'required type="url" maxlength="2000"'} value="${esc(row[isType?'price':'url']||'')}"><button type="button" aria-label="移除此行">移除</button>`;
+  div.querySelector('button').onclick=()=>div.remove();$('product-'+kind+'-rows').append(div);
+}
+async function loadProducts(){
+  const sequence=++productRequest,kb=$('product-base').value;
+  if(!kb){productItems=[];$('product-rows').innerHTML='';$('product-empty').hidden=false;return;}
+  const result=await api('products?kb_id='+encodeURIComponent(kb)+'&q='+encodeURIComponent($('product-search').value));if(sequence!==productRequest)return;
+  productItems=result.items;$('product-empty').hidden=!!productItems.length;
+  $('product-rows').innerHTML=productItems.map(r=>`<tr><td>${r.image?`<img class="sticker-preview" loading="lazy" src="${esc(r.image)}" alt="${esc(r.character)}">`:'暂无图片'}</td><td><strong>${esc(r.character)}</strong><br>${esc(r.series||'未分系列')}<br><small>${esc(new Date(r.updated_at).toLocaleString())}</small></td><td>${r.types.map(t=>`${esc(t.name)} · ${t.price!==''?'¥'+esc(t.price):'以平台为准'}`).join('<br>')}</td><td>${r.links.map(t=>`<a href="${esc(t.url)}" target="_blank" rel="noopener noreferrer">${esc(t.name)} ↗</a>`).join('<br>')||'未填写'}</td><td>${r.searchable?'已开启':'未开启'}</td><td><button data-product-edit="${r.id}">编辑</button> <button data-product-delete="${r.id}" class="text-btn danger">删除</button></td></tr>`).join('');
+}
+function editProduct(row=null){
+  if(!$('product-base').value){toast('请先创建知识库');return;}
+  editingProduct=row;productFile=null;$('product-form').reset();$('product-title').textContent=row?'编辑制品':'新增制品';
+  if(row)for(const name of ['series','character','image','notes'])$('product-form').elements[name].value=row[name]||'';
+  $('product-form').elements.searchable.checked=!!row?.searchable;
+  $('product-types-rows').innerHTML='';$('product-links-rows').innerHTML='';
+  (row?.types||[{}]).forEach(r=>productRow('types',r));(row?.links||[]).forEach(r=>productRow('links',r));
+  productPreview(row?.image);$('product-dialog').showModal();
+}
+$('product-file').onchange=()=>{productFile=$('product-file').files[0]||null;if(productFile){if(productFile.size>5*1024*1024){toast('图片最大5 MB');productFile=null;$('product-file').value='';return;}const reader=new FileReader();reader.onload=()=>productPreview(reader.result);reader.readAsDataURL(productFile);}};
+$('product-form').elements.image.onchange=e=>{productFile=null;$('product-file').value='';productPreview(e.target.value);};
+$('product-type-add').onclick=()=>productRow('types');$('product-link-add').onclick=()=>productRow('links');
+$('product-add').onclick=()=>editProduct();$('product-close').onclick=$('product-cancel').onclick=()=>$('product-dialog').close();
+$('product-refresh').onclick=$('product-base').onchange=()=>loadProducts().catch(e=>toast(e.message));
+$('product-search').onkeydown=e=>{if(e.key==='Enter')loadProducts().catch(e=>toast(e.message));};
+$('product-rows').onclick=e=>{const b=e.target.closest('button');if(!b)return;const id=b.dataset.productEdit||b.dataset.productDelete,row=productItems.find(r=>r.id===id);if(!row)return;if(b.dataset.productEdit){editProduct(row);return;}if(confirm(`删除“${row.character}”的这条制品？已同步的检索文档也会移除。`))busy(b,async()=>{await api('products/'+id,'DELETE',{revision:row.revision});await loadProducts();toast('已删除制品');});};
+$('product-form').onsubmit=e=>{
+  e.preventDefault();const form=e.target;
+  busy(e.submitter,async()=>{
+    const data=Object.fromEntries(new FormData(form));data.searchable=form.elements.searchable.checked;data.kb_id=$('product-base').value;
+    for(const kind of ['types','links'])data[kind]=[...$('product-'+kind+'-rows').children].map(r=>Object.fromEntries([...r.querySelectorAll('[data-key]')].map(el=>[el.dataset.key,el.value.trim()])));
+    if(!data.types.length)throw new Error('请至少添加一种制品类型');
+    if(productFile){const response=await fetch('/knowledge/api/products/upload',{method:'POST',headers:{Authorization:'Bearer '+state.token,'Content-Type':productFile.type},body:productFile});const result=await response.json();if(!response.ok)throw new Error(result.error||'图片上传失败');data.image=result.path;form.elements.image.value=result.path;productFile=null;}
+    if(editingProduct)data.revision=editingProduct.revision;
+    await api('products'+(editingProduct?'/'+editingProduct.id:''),editingProduct?'PUT':'POST',data);
+    $('product-dialog').close();await loadProducts();toast('制品已保存');
+  });
+};
 function toast(message) { $('toast').textContent = message; $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => $('toast').hidden = true, 5500); }
 async function api(path, method = 'GET', body) {
   const response = await fetch('/knowledge/api/' + path, { method, headers: { Authorization: 'Bearer ' + state.token, ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
@@ -36,12 +81,17 @@ $('login-form').addEventListener('submit', async event => {
 $('logout').onclick = logout;
 const views = { stickers:['表情包库','给客服回复，添一点可爱的表情。'], learning:['持续学习','将管理员确认的信息，沉淀为可持续更新的知识。'], qa: ['QA 知识库', '整理常见问题，让每次回答都有合适的参考。'], traces: ['对话 Trace', '从问题到回复，查看每次检索与模型调用的过程。'], aliases: ['实体别名', '统一名称，让不同称呼都能找到同一份知识。'], documents: ['知识库', '把分散的信息，变成有据可依的回答。'], retrieve: ['召回测试', '在连接大模型之前，先看看知识是否被准确找到。'], integration: ['API 接入', '把你的知识，接入任意大模型工作流。'], settings: ['模型设置', '为你的知识库，连接语义理解能力。'] };
 document.querySelectorAll('[data-view]').forEach(button => button.onclick = () => {
+  views.products=['社团制品','按系列与角色维护多类型制品、参考价格和平台链接。'];
   const view = button.dataset.view;
   document.querySelectorAll('.view').forEach(el => el.hidden = el.id !== 'view-' + view);
   document.querySelectorAll('[data-view]').forEach(el => el.classList.toggle('active', el === button));
   $('page-title').textContent = $('breadcrumb').textContent = views[view][0]; $('page-subtitle').textContent = views[view][1];
   $('create-base').hidden = view !== 'documents';
   if (view === 'stickers') loadStickers().catch(error=>toast(error.message));
+  if (view === 'products') {
+    $('product-base').innerHTML=state.bases.map(b=>`<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
+    $('product-base').value=state.selected;loadProducts().catch(error=>toast(error.message));
+  }
   if (view === 'learning') {loadLearning().catch(error=>toast(error.message));loadOwnerNotifications().catch(error=>toast(error.message));}
   if (view === 'traces') loadTraces(true).catch(error => toast(error.message));
 });

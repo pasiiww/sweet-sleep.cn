@@ -82,6 +82,9 @@ class StickerTests(unittest.TestCase):
     with self.assertRaises(HTTPError) as error:urlopen(request)
     self.assertEqual(error.exception.code,409)
     self.assertEqual(len(list((app.DATA/'stickers').iterdir())),1)
+    with urlopen(Request(endpoint+'/knowledge/api/products/upload',data=raw,headers={'Authorization':'Bearer upload-admin','Content-Type':'image/png'})) as response:product_image=json.load(response)
+    with urlopen(endpoint+product_image['path']) as response:self.assertEqual(response.read(),raw)
+    with app.db() as c:self.assertEqual(c.execute('SELECT count(*) FROM stickers').fetchone()[0],1)
     with self.assertRaises(HTTPError):urlopen(endpoint+'/knowledge/sticker-files/../../knowledge.db')
   finally:http.shutdown();http.server_close();thread.join()
  def test_gif_and_auto_name(self):
