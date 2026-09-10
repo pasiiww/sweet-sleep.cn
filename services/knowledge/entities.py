@@ -71,9 +71,17 @@ def context(hints):
         f'{json.dumps(item["alias"], ensure_ascii=False)} 是 {json.dumps(item["name"], ensure_ascii=False)} 的别名。' for item in hints)
 
 
+def clean_dialogue(text):
+    # Preserve natural emoji, brief confirmations, prices and links; remove transport markup only.
+    text = re.sub(r'<faceType=[^>]*>', '', text)
+    text = re.sub(r'<@!?[A-Za-z0-9_-]+>|<qqbot-at-user\s+id="[A-Za-z0-9_-]+"\s*/>', '', text)
+    text = re.sub(r'（已发送表情包：([^）]+)）', r'[\1]', text)
+    return text.replace('\x00', '').strip()
+
+
 def history(value):
-    if not isinstance(value, list) or len(value) > 20 or len(value) % 2:
-        raise ValueError('history 必须为最多10轮完整的 user/assistant 消息')
+    if not isinstance(value, list) or len(value) > 40 or len(value) % 2:
+        raise ValueError('history 必须为最多20轮完整的 user/assistant 消息')
     result, size = [], 0
     for i, message in enumerate(value):
         role = 'user' if i % 2 == 0 else 'assistant'
@@ -83,10 +91,11 @@ def history(value):
         if not isinstance(text, str) or not text.strip() or len(text) > 4000:
             raise ValueError('每条历史消息必须为1至4000字符')
         size += len(text)
-        result.append({'role': role, 'content': text})
-    if size > 12000:
-        raise ValueError('历史消息总长度最多12000字符')
-    return result
+        result.append({'role': role, 'content': clean_dialogue(text)})
+    if size > 24000:
+        raise ValueError('历史消息总长度最多24000字符')
+    # Drop an empty turn as a pair so roles never shift. Do not deduplicate meaningful answers.
+    return [m for i in range(0, len(result), 2) if result[i]['content'] and result[i+1]['content'] for m in result[i:i+2]]
 
 
 def is_followup(query):

@@ -277,11 +277,11 @@ $('test-answer-model').onclick = () => busy($('test-answer-model'), async () => 
 });
 const previewTurns = new Map();
 function previewHistory(kb) {
-  const recent = (previewTurns.get(kb) || []).filter(turn => turn.at > Date.now() - 1800000).slice(-10);
+  const recent = (previewTurns.get(kb) || []).filter(turn => turn.at > Date.now() - 1800000).slice(-20);
   let size = 0;
   const selected = [];
   for (const turn of recent.reverse()) {
-    if (size + turn.query.length + turn.reply.length > 12000) break;
+    if (size + turn.query.length + turn.reply.length > 24000) break;
     size += turn.query.length + turn.reply.length; selected.unshift(turn);
   }
   previewTurns.set(kb, selected);
@@ -293,7 +293,7 @@ $('answer-preview-form').onsubmit = event => { event.preventDefault(); busy(even
   try {
     const kb = $('answer-base').value, query = $('answer-query').value;
     const result = await api('answer', 'POST', {kb_id: kb, query, origin: 'preview', history: previewHistory(kb), previous_sticker_sent:!!previewTurns.get(kb)?.at(-1)?.sticker});
-    previewTurns.set(kb, [...(previewTurns.get(kb) || []), {query, reply: result.answer+(result.sticker?'（已发送表情包：'+result.sticker.name+'）':''), sticker:!!result.sticker, at: Date.now()}].slice(-10));
+    if(result.mode!=='quota') previewTurns.set(kb, [...(previewTurns.get(kb) || []), {query, reply: result.answer+(result.sticker?'['+result.sticker.name+']':''), sticker:!!result.sticker, at: Date.now()}].slice(-20));
     $('answer-preview').textContent = (answerReasons[result.reason] || result.mode) + (result.trace_id ? '\nTrace ID：' + result.trace_id : '') + '\n携带历史：' + result.history_turns + ' 轮' + (result.alias_context ? '\n' + result.alias_context : '') + '\n检索词：' + (result.search_terms || []).map(group => Array.isArray(group) ? '[' + group.join(' + ') + ']' : group).join(' / ') + '\n\n' + result.answer + (result.handoff ? '\n\n实际群聊会按该群的人工联系人配置尝试艾特；这里仅预览文本。' : '');
     if(result.sticker){const img=document.createElement('img');img.src=result.sticker.url;img.alt=result.sticker.name;img.className='sticker-preview';img.referrerPolicy='no-referrer';$('answer-preview').append(img);}
   } catch (error) { $('answer-preview').textContent = error.message; throw error; }

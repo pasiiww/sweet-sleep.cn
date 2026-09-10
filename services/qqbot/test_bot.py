@@ -76,7 +76,7 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(api.post_c2c_message.call_args.kwargs['msg_type'],7)
         self.assertIsNone(api.post_c2c_message.call_args.kwargs['content'])
         session=conversation_key(message,'c2c','test')
-        self.assertIn('已发送表情包：开心',self.seen.history(session)[-1]['content'])
+        self.assertIn('[开心]',self.seen.history(session)[-1]['content'])
         message.id='failed-image';api.post_c2c_file.side_effect=RuntimeError('upload failed')
         self.retriever.search.return_value={'answer':'','mode':'model','sticker':{'name':'开心','url':'https://example.com/a.jpg'}}
         await self.bot.on_c2c_message_create(message)
@@ -201,6 +201,15 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.retriever.search.await_count, count)
         self.assertEqual(self.seen.history(key), [])
 
+    async def test_quoted_question_in_context_and_history(self):
+        msg = self.identified('这个怎么买', 'quote-question')
+        msg.sweet_learning = {'reference':{'quotes':[{'content':'kei毛绒', 'member_id':'opaque-id'}, {'content':'kei毛绒'}]}}
+        await self.bot.answer(msg, 'group', mentioned=True)
+        self.assertEqual(self.retriever.search.call_args.kwargs['trace_meta']['reply_reference'], 'kei毛绒')
+        saved = self.seen.history(conversation_key(msg, 'group', 'test'))
+        self.assertIn('引用内容：kei毛绒', saved[0]['content'])
+        self.assertNotIn('opaque-id', saved[0]['content'])
+
     async def test_history_expiry_budgets_and_restart(self):
         with patch('bot.time.time', return_value=1000):
             self.seen.remember('session', 'old question', 'old answer')
@@ -216,8 +225,8 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
         for i in range(12):
             self.seen.remember('session', str(i), 'a' * 1700)
         history = self.seen.history('session')
-        self.assertLessEqual(len(history), 20)
-        self.assertLessEqual(sum(len(m['content']) for m in history), 12000)
+        self.assertEqual(len(history), 24)
+        self.assertLessEqual(sum(len(m['content']) for m in history), 24000)
         self.assertEqual(history[-2]['content'], '11')
 
     async def test_trace_delivery_and_metadata(self):

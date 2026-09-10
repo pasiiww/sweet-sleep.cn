@@ -72,7 +72,7 @@ class EntityTests(unittest.TestCase):
         history = [{'role': 'user', 'content': 'kei多少钱'}, {'role': 'assistant', 'content': '总价100元。'}]
         with patch.object(answers, 'model_call', side_effect=[
             '{"query_groups":[["kei","定金"],["小凯","价格"]]}', '定金20元。']) as model:
-            result = self.call('POST', 'answer', {'kb_id': self.kb, 'query': '那定金呢？', 'history': history})
+            result = self.call('POST', 'answer', {'kb_id': self.kb, 'query': '那定金呢？', 'history': history, 'reply_reference':'kei毛绒怎么买？'})
         self.assertEqual(result['query_groups'], [['凯伊', '定金'], ['凯伊', '价格']])
         self.assertEqual(result['history_turns'], 1)
         self.assertIn('"kei" 是 "凯伊" 的别名', result['alias_context'])
@@ -83,6 +83,8 @@ class EntityTests(unittest.TestCase):
         self.assertNotIn('"kei" 是 "凯伊" 的别名', first[0]['content'])
         second = model.call_args_list[1].args[1]
         self.assertEqual(second[1:3], history)
+        for stage in (first, second):
+            self.assertEqual(json.loads(stage[-1]['content'])['reply_reference'], 'kei毛绒怎么买？')
         self.assertEqual(json.loads(second[-1]['content'])['alias_context'],result['alias_context'])
         self.assertEqual(result['answer'], '定金20元。')
 
@@ -111,3 +113,21 @@ class EntityTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class DialogueCleaningTests(unittest.TestCase):
+    def test_clean_without_losing_facts_or_assistant_turn(self):
+        rows = [{'role':'user','content':'<faceType=1,ext=opaque>kei 9月20日，20元 https://example.com'},
+                {'role':'assistant','content':'可以呀（已发送表情包：开心）'},
+                {'role':'user','content':'不是'}, {'role':'assistant','content':'那你指哪个？'}]
+        cleaned = entities.history(rows)
+        self.assertEqual(cleaned[0]['content'], 'kei 9月20日，20元 https://example.com')
+        self.assertEqual(cleaned[1]['content'], '可以呀[开心]')
+        self.assertEqual(cleaned[2:], rows[2:])
+
+    def test_empty_pairs_and_twenty_turns(self):
+        pair = [{'role':'user','content':'嗯'}, {'role':'assistant','content':'[开心]'}]
+        noise = [{'role':'user','content':'<faceType=1>'}, {'role':'assistant','content':'你好'}]
+        self.assertEqual(entities.history(noise + pair), pair)
+        self.assertEqual(len(entities.history(pair * 20)), 40)
+        with self.assertRaises(ValueError): entities.history(pair * 21)

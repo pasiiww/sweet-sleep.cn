@@ -479,6 +479,7 @@ def respond(data):
     meta = {key: string(data, key, 128) for key in ('user_id', 'group_id', 'session_id')}
     meta['origin'] = origin
     if origin.startswith('qq_') and not meta['user_id']:fail(400,'缺少用户身份，无法核验每日额度')
+    string(data, 'reply_reference', 1800)
     try:entities.history(data.get('history', []))
     except ValueError as exc:fail(400,str(exc))
     with WRITE_LOCK, db() as c:
@@ -532,16 +533,17 @@ def respond_pipeline(data, details):
         history = entities.history(data.get('history', []))
     except ValueError as exc:
         fail(400, str(exc))
-    hints = catalog.hints([m['content'] for m in history] + [query])
+    reply_reference = entities.clean_dialogue(string(data, 'reply_reference', 1800))
+    hints = catalog.hints([m['content'] for m in history] + [reply_reference, query])
     with db() as c:
         hint_query=catalog.normalize(query+' '+' '.join(m['content'] for m in history[-4:] if m['role']=='user'))
         ranking=qa.search(c,kb_id,hint_query,None,catalog,tokens,8)
         hint_ids=[r[0] for r in ranking]
         hint_ids += [r[0] for r in c.execute("SELECT id FROM qa_entries WHERE kb_id=? AND publication='active' AND superseded_by IS NULL ORDER BY updated_at DESC,id DESC LIMIT 8",(kb_id,)) if r[0] not in hint_ids]
         qa_hints=[c.execute('SELECT question FROM qa_entries WHERE id=?',(qid,)).fetchone()[0][:300] for qid in hint_ids[:8]]
-    cfg = cfg | {'previous_sticker_sent':previous_sticker_sent,'current_date':answers.current_date(),'qa_hints':qa_hints,'conversation_history': history, 'alias_context': entities.context(hints), '_trace': details}
+    cfg = cfg | {'previous_sticker_sent':previous_sticker_sent,'current_date':answers.current_date(),'qa_hints':qa_hints,'conversation_history': history, 'reply_reference': reply_reference, 'alias_context': entities.context(hints), '_trace': details}
     details['sticker_policy']={'mode':'advisory','previous_sticker_sent':previous_sticker_sent,'guidance':'频率建议：闲聊类可以较高频率使用表情包，也可以只回复表情包；店铺咨询类控制在50%的轮次以下。'}
-    details.update(current_date=cfg['current_date'],qa_hints=qa_hints,history=history, model=cfg['model'], system_prompt=cfg['system_prompt'], keyword_prompt=cfg['keyword_prompt'])
+    details.update(reply_reference=reply_reference, history_policy={'max_turns':20,'max_chars':24000,'roles':'user/assistant'},current_date=cfg['current_date'],qa_hints=qa_hints,history=history, model=cfg['model'], system_prompt=cfg['system_prompt'], keyword_prompt=cfg['keyword_prompt'])
     def search(terms):
         started = time.monotonic()
         result = search_terms(kb_id, terms, original_query=query)

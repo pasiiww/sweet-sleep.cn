@@ -82,10 +82,10 @@ class SeenMessages:
             return []
         with self.conn:
             self.conn.execute('DELETE FROM dialogue WHERE at<=?', (time.time() - 1800,))
-            rows = self.conn.execute('SELECT query,reply FROM dialogue WHERE session=? ORDER BY id DESC LIMIT 10', (session,)).fetchall()
+            rows = self.conn.execute('SELECT query,reply FROM dialogue WHERE session=? ORDER BY id DESC LIMIT 20', (session,)).fetchall()
         selected, used = [], 0
         for query, reply in rows:
-            if used + len(query) + len(reply) > 12000:
+            if used + len(query) + len(reply) > 24000:
                 break
             selected.append([{'role': 'user', 'content': query}, {'role': 'assistant', 'content': reply}])
             used += len(query) + len(reply)
@@ -97,7 +97,7 @@ class SeenMessages:
         with self.conn:
             self.conn.execute('DELETE FROM dialogue WHERE at<=?', (time.time() - 1800,))
             self.conn.execute('INSERT INTO dialogue(session,query,reply,at) VALUES(?,?,?,?)', (session, query, reply, time.time()))
-            self.conn.execute('DELETE FROM dialogue WHERE session=? AND id NOT IN (SELECT id FROM dialogue WHERE session=? ORDER BY id DESC LIMIT 10)', (session, session))
+            self.conn.execute('DELETE FROM dialogue WHERE session=? AND id NOT IN (SELECT id FROM dialogue WHERE session=? ORDER BY id DESC LIMIT 20)', (session, session))
 
     def last_sticker_sent(self, session):
         if not session:return False
@@ -248,6 +248,10 @@ class KnowledgeBot(botpy.Client):
 
     async def _answer(self, message, kind, session):
         query = normalize(message.content)
+        learning = getattr(message, 'sweet_learning', None)
+        quotes = ((learning.get('reference') or {}).get('quotes') or []) if isinstance(learning, dict) else []
+        quote_texts = list(dict.fromkeys(normalize(q.get('content', '')) for q in quotes if isinstance(q, dict)))
+        reply_reference = '\n'.join(t for t in quote_texts if t and t != query)[:1800]
         remember = False
         trace, delivery, sent, delivery_error = None, 'failed', '', ''
         try:
@@ -271,6 +275,7 @@ class KnowledgeBot(botpy.Client):
                     author = getattr(message, 'author', None)
                     meta = {'origin': 'qq_group' if kind == 'group' else 'qq_private',
                             'user_id': getattr(author, 'member_openid' if kind == 'group' else 'user_openid', ''), 'session_id': session}
+                    if reply_reference:meta['reply_reference']=reply_reference
                     if self.seen.last_sticker_sent(session):meta['previous_sticker_sent']=True
                     trace = await self.retriever.search(query, group_id=group_id, history=self.seen.history(session), trace_meta=meta)
                     reply = format_reply(trace, kind)
@@ -282,8 +287,8 @@ class KnowledgeBot(botpy.Client):
             if remember:
                 history_reply=sent
                 if (trace or {}).get('sticker_delivery',{}).get('status')=='sent':
-                    history_reply+='（已发送表情包：'+trace['sticker']['name']+'）'
-                self.seen.remember(session, query, history_reply)
+                    history_reply+='['+trace['sticker']['name']+']'
+                self.seen.remember(session, ('引用内容：'+reply_reference+'\n本次问题：' if reply_reference else '')+query, history_reply)
             LOG.info('REPLY_OK kind=%s chars=%s', kind, len(reply))
         except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError) as exc:
             delivery_error = type(exc).__name__
