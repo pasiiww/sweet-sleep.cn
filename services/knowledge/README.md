@@ -235,3 +235,5 @@ DeepSeek 统一调用层启用 `thinking.type=enabled`、`reasoning_effort=low`�
 原生 function calling 提供 search_records、read_record、update_record、add_product，按指令限定工具；最多4次模型调用、每次一个工具、每条消息最多写一条。修改必须先读取同库原文并核对摘要以避免并发覆盖。新增商品复用后台字段验证。缺字段或目标不明确时追问；未知价格、链接、图片不猜测，商品默认不用于召回。暂不接收私聊图片附件，图片可提供URL或后续后台上传。
 
 同一消息7天内幂等，写入结果与数据变更在同一事务提交。对话 Trace 的「私聊维护操作」显示工具、参数、修改前后内容；QA 的 updated_by 标为 private_admin_ai，原始指令保留在 trace。thinking 工具循环按协议在内存回传 reasoning_content，不存入 trace、历史或发送给 QQ。
+
+Owner 通知接收人与私聊维护权限均支持最多20个私聊 OpenID，后台可按行、空格或中英文逗号分隔。通知配置使用 `openids` 数组；旧 `openid` 自动迁移并兼容旧接口。每位收件人独立生成待发送通知和回执，某人的发送失败不会阻止其他人，移出列表后其待发通知不会再认领。两份权限名单保持独立。

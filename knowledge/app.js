@@ -580,14 +580,14 @@ stickerDrop.ondrop=event=>{event.preventDefault();stickerDrop.classList.remove('
 for(const type of ['dragover','drop'])document.addEventListener(type,event=>{if(!$('view-stickers').hidden&&Array.from(event.dataTransfer?.types||[]).includes('Files'))event.preventDefault();});
 
 async function loadOwnerNotifications(){
- const data=await api('owner-notifications');$('owner-notify-enabled').checked=data.config.enabled;$('owner-notify-openid').value=data.config.openid;
+ const data=await api('owner-notifications');$('owner-notify-enabled').checked=data.config.enabled;$('owner-notify-openid').value=(data.config.openids||[data.config.openid].filter(Boolean)).join('\n');
  const labels={pending:'等待发送',sending:'发送中',delivered:'已发送',failed:'发送失败',uncertain:'发送结果未知'};
- $('owner-notify-list').innerHTML=data.items.length?data.items.map(row=>`<p>${esc(new Date(row.created*1000).toLocaleString())} · ${esc(row.title)} · ${esc(labels[row.status]||row.status)} ${esc(row.error)} ${['failed','uncertain'].includes(row.status)?`<button type="button" data-notify-retry="${row.id}">重试</button>`:''}</p>`).join(''):'<p class="hint">暂无通知。配置并启用后，新生效的知识变更会在这里显示。</p>';
+ $('owner-notify-list').innerHTML=data.items.length?data.items.map(row=>`<p>${esc(new Date(row.created*1000).toLocaleString())} · ${esc(row.title)} · 接收人 ${esc(row.recipient)} · ${esc(labels[row.status]||row.status)} ${esc(row.error)} ${['failed','uncertain'].includes(row.status)?`<button type="button" data-notify-retry="${row.id}">重试</button>`:''}</p>`).join(''):'<p class="hint">暂无通知。配置并启用后，新生效的知识变更会在这里显示。</p>';
 }
-$('owner-notify-form').onsubmit=event=>{event.preventDefault();busy(event.submitter,async()=>{await api('owner-notifications','PUT',{enabled:$('owner-notify-enabled').checked,openid:$('owner-notify-openid').value.trim()});await loadOwnerNotifications();toast('通知配置已保存');});};
+$('owner-notify-form').onsubmit=event=>{event.preventDefault();busy(event.submitter,async()=>{await api('owner-notifications','PUT',{enabled:$('owner-notify-enabled').checked,openids:$('owner-notify-openid').value.split(/[\s,，;；]+/).filter(Boolean)});await loadOwnerNotifications();toast('通知配置已保存');});};
 $('owner-notify-refresh').onclick=()=>loadOwnerNotifications().catch(error=>toast(error.message));
 $('owner-notify-list').onclick=event=>{const button=event.target.closest('[data-notify-retry]');if(button)busy(button,async()=>{if(!confirm('重新发送这条更新通知？结果未知的通知可能已经送达。'))return;await api('owner-notifications/'+button.dataset.notifyRetry+'/retry','POST',{});await loadOwnerNotifications();});};
 for(const id of ['admin-name','admin-qq','handoff-groups'])$(id).closest('label').hidden=true;
 
-$('answer-settings-form').insertAdjacentHTML('afterend', `<form id="private-maintenance-form" class="panel form-panel"><h2>私聊维护权限</h2><p>授权账号可使用 /modify 知识库、/modify qa、/add 商品库，并通过连续对话维护；/退出 结束。与更新通知接收人分别配置。</p><label>允许维护的私聊 OpenID<textarea id="private-maintenance-openids" rows="3" placeholder="每行一个私聊 OpenID，最多20个"></textarea></label><button class="primary" type="submit">保存维护权限</button></form>`);
-$('private-maintenance-form').onsubmit=event=>{event.preventDefault();busy(event.submitter,async()=>{await api('private-maintenance-settings','PUT',{openids:$('private-maintenance-openids').value.split(/\s+/).filter(Boolean)});toast('私聊维护权限已保存');});};
+$('answer-settings-form').insertAdjacentHTML('afterend', `<form id="private-maintenance-form" class="panel form-panel"><h2>私聊维护权限</h2><p>授权账号可使用 /modify 知识库、/modify qa、/add 商品库，并通过连续对话维护；/退出 结束。与更新通知接收人分别配置。</p><label>允许维护的私聊 OpenID（可多个）<textarea id="private-maintenance-openids" rows="3" placeholder="每行一个，或用逗号分隔，最多20个"></textarea></label><button class="primary" type="submit">保存维护权限</button></form>`);
+$('private-maintenance-form').onsubmit=event=>{event.preventDefault();busy(event.submitter,async()=>{await api('private-maintenance-settings','PUT',{openids:$('private-maintenance-openids').value.split(/[\s,，;；]+/).filter(Boolean)});toast('私聊维护权限已保存');});};

@@ -40,3 +40,31 @@ class NotificationsTests(unittest.TestCase):
     raise RuntimeError()
   except RuntimeError:pass
   self.assertEqual(self.api('GET','owner-notifications')['items'],[])
+ def test_multiple_recipients_dedup_and_independent_delivery(self):
+  self.api('PUT','owner-notifications',{'enabled':True,'openids':['owner_first','owner_second','owner_first']})
+  self.assertEqual(self.api('GET','owner-notifications')['config']['openids'],['owner_first','owner_second'])
+  self.api('POST',f'bases/{self.kb}/documents',{'title':'新知识','content':'内容'})
+  first=self.api('POST','owner-notifications/claim')
+  self.api('POST','owner-notifications/ack',{'receipt':first['receipt'],'status':'failed'})
+  second=self.api('POST','owner-notifications/claim')
+  self.assertNotEqual(first['openid'],second['openid'])
+  self.assertNotEqual(first['receipt'],second['receipt'])
+  self.api('POST','owner-notifications/ack',{'receipt':second['receipt'],'status':'delivered'})
+  self.assertEqual(self.api('POST','owner-notifications/claim'),{})
+  self.assertEqual(len(self.api('GET','owner-notifications')['items']),2)
+ def test_legacy_migration_and_removed_owner_not_claimed(self):
+  import json
+  with app.db() as c:
+   c.execute("UPDATE app_settings SET value=? WHERE name='owner_notifications'",(json.dumps({'enabled':True,'openid':'legacy_owner'}),))
+   notifications.initialize(c)
+  self.assertEqual(self.api('GET','owner-notifications')['config']['openids'],['legacy_owner'])
+  self.api('POST',f'bases/{self.kb}/documents',{'title':'旧通知','content':'内容'})
+  self.api('PUT','owner-notifications',{'enabled':True,'openids':['new_owner']})
+  self.assertEqual(self.api('POST','owner-notifications/claim'),{})
+  with self.assertRaises(app.Problem):self.api('PUT','owner-notifications',{'enabled':True,'openids':[]})
+ def test_multiple_maintenance_ids(self):
+  cfg=self.api('PUT','private-maintenance-settings',{'openids':['owner_first','owner_second','owner_first']})
+  self.assertEqual(cfg['openids'],['owner_first','owner_second'])
+  for uid in cfg['openids']:
+   result=self.api('POST','private-maintenance',{'kb_id':self.kb,'user_id':uid,'query':'/help','message_id':'help-'+uid})
+   self.assertIn('/modify qa',result['answer'])

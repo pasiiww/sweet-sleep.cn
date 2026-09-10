@@ -679,7 +679,7 @@ def api(method, path, data, params):
         if segments[0]=='products' and len(segments) in (1,2):
             return products.handle(sys.modules[__name__],c,method,segments,data,params)
         if segments==['owner-notifications'] and method=='GET':
-            return {'config':notifications.config(c),'items':[dict(r) for r in c.execute('SELECT id,kb_id,title,created,status,error FROM owner_notifications ORDER BY id DESC LIMIT 30')]}
+            return {'config':notifications.config(c),'items':[dict(r) for r in c.execute('SELECT id,kb_id,recipient,title,created,status,error FROM owner_notifications ORDER BY id DESC LIMIT 30')]}
         if segments==['owner-notifications'] and method=='PUT':
             try:return notifications.save(c,data)
             except (ValueError,AttributeError) as exc:fail(400,str(exc))

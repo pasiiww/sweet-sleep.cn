@@ -6,7 +6,9 @@ import time
 
 
 def config(c):
-    return json.loads(c.execute("SELECT value FROM app_settings WHERE name='owner_notifications'").fetchone()[0])
+    value=json.loads(c.execute("SELECT value FROM app_settings WHERE name='owner_notifications'").fetchone()[0])
+    value.setdefault('openids',[value['openid']] if value.get('openid') else [])
+    return value
 
 
 def initialize(c):
@@ -14,24 +16,28 @@ def initialize(c):
     c.execute('''CREATE TABLE IF NOT EXISTS owner_notifications(id INTEGER PRIMARY KEY AUTOINCREMENT,
       kb_id TEXT NOT NULL, recipient TEXT NOT NULL, kind TEXT NOT NULL,title TEXT NOT NULL,content TEXT NOT NULL,
       created REAL NOT NULL,status TEXT NOT NULL DEFAULT 'pending',receipt TEXT NOT NULL DEFAULT '',error TEXT NOT NULL DEFAULT '')''')
+    value=config(c)
+    c.execute("UPDATE app_settings SET value=? WHERE name='owner_notifications'",(json.dumps(value),))
     enabled="coalesce(json_extract((SELECT value FROM app_settings WHERE name='owner_notifications'),'$.enabled'),0)=1"
-    recipient="json_extract((SELECT value FROM app_settings WHERE name='owner_notifications'),'$.openid')"
+    recipients="json_each(json_extract((SELECT value FROM app_settings WHERE name='owner_notifications'),'$.openids'))"
     for table,title,content,extra in [('documents','title','content','1'),('qa_entries','question','answer',"new.publication='active' AND new.superseded_by IS NULL")]:
         for action in ('INSERT','UPDATE'):
             changed='1' if action=='INSERT' else (f'(new.{title}<>old.{title} OR new.{content}<>old.{content}'+(" OR new.publication<>old.publication" if table=='qa_entries' else '')+')')
+            c.execute(f'DROP TRIGGER IF EXISTS notify_{table}_{action.lower()}')
             c.execute(f'''CREATE TRIGGER IF NOT EXISTS notify_{table}_{action.lower()} AFTER {action} ON {table}
-            WHEN {enabled} AND length({recipient})>=8 AND {extra} AND {changed}
+            WHEN {enabled} AND {extra} AND {changed}
             BEGIN INSERT INTO owner_notifications(kb_id,recipient,kind,title,content,created)
-            VALUES(new.kb_id,{recipient},'{table}',new.{title},substr(new.{content},1,300),unixepoch()); END''')
+            SELECT new.kb_id,value,'{table}',new.{title},substr(new.{content},1,300),unixepoch() FROM {recipients} WHERE length(value)>=8; END''')
 
 
 def save(c,data):
-    enabled=data.get('enabled');openid=data.get('openid','').strip()
-    if type(enabled) is not bool or (openid and not re.fullmatch(r'[A-Za-z0-9_-]{8,128}',openid)):
-        raise ValueError('请填写有效的 owner 私聊 OpenID')
-    if enabled and not openid:raise ValueError('启用前请填写 owner 私聊 OpenID，不能填写 QQ 号或群成员 OpenID')
-    if openid.isdecimal():raise ValueError('请填写私聊 OpenID，不是 QQ 号')
-    value={'enabled':enabled,'openid':openid,'owner_qq':'471718054'}
+    enabled=data.get('enabled')
+    ids=data.get('openids',[data['openid']] if data.get('openid') else [])
+    if type(enabled) is not bool or not isinstance(ids,list) or len(ids)>20 or any(not isinstance(v,str) or not re.fullmatch(r'[A-Za-z0-9_-]{8,128}',v) or v.isdecimal() for v in ids):
+        raise ValueError('请填写最多20个有效的 Owner 私聊 OpenID，不是 QQ 号')
+    ids=list(dict.fromkeys(ids))
+    if enabled and not ids:raise ValueError('启用前请至少填写一个 Owner 私聊 OpenID')
+    value={'enabled':enabled,'openids':ids,'openid':ids[0] if ids else ''}
     c.execute("UPDATE app_settings SET value=? WHERE name='owner_notifications'",(json.dumps(value),))
     return value
 
@@ -39,10 +45,11 @@ def save(c,data):
 def claim(c):
     cfg=config(c)
     c.execute('DELETE FROM owner_notifications WHERE created<?',(time.time()-7*86400,))
-    if not cfg['enabled']:return {}
+    if not cfg['enabled'] or not cfg['openids']:return {}
     # A crash after sending is ambiguous: never automatically resend a claimed batch.
     c.execute("UPDATE owner_notifications SET status='uncertain',error='delivery_unknown' WHERE status='sending' AND created<?",(time.time()-300,))
-    first=c.execute("SELECT * FROM owner_notifications WHERE status='pending' AND recipient=? ORDER BY id LIMIT 1",(cfg['openid'],)).fetchone()
+    marks=','.join('?' for _ in cfg['openids'])
+    first=c.execute(f"SELECT * FROM owner_notifications WHERE status='pending' AND recipient IN ({marks}) ORDER BY id LIMIT 1",cfg['openids']).fetchone()
     if not first:return {}
     rows=c.execute("SELECT * FROM owner_notifications WHERE status='pending' AND recipient=? AND kb_id=? ORDER BY id LIMIT 8",(first['recipient'],first['kb_id'])).fetchall()
     receipt=secrets.token_hex(24);ids=[r['id'] for r in rows]
