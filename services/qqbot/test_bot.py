@@ -68,6 +68,22 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.seen.last_sticker_sent('other-user'))
         self.seen.clear_history('s');self.assertFalse(self.seen.last_sticker_sent('s'))
 
+    async def test_sticker_only_history_and_upload_failure(self):
+        api=SimpleNamespace(post_c2c_file=AsyncMock(return_value={'file_info':'media'}),post_c2c_message=AsyncMock(return_value={'id':'r'}))
+        message=C2CMessage(api,'e',{'id':'pure-image','content':'哈哈','author':{'user_openid':'user1'}})
+        self.retriever.search.return_value={'answer':'','mode':'model','sticker':{'name':'开心','url':'https://example.com/a.jpg'}}
+        await self.bot.on_c2c_message_create(message)
+        self.assertEqual(api.post_c2c_message.call_args.kwargs['msg_type'],7)
+        self.assertIsNone(api.post_c2c_message.call_args.kwargs['content'])
+        session=conversation_key(message,'c2c','test')
+        self.assertIn('已发送表情包：开心',self.seen.history(session)[-1]['content'])
+        message.id='failed-image';api.post_c2c_file.side_effect=RuntimeError('upload failed')
+        self.retriever.search.return_value={'answer':'','mode':'model','sticker':{'name':'开心','url':'https://example.com/a.jpg'}}
+        await self.bot.on_c2c_message_create(message)
+        self.assertEqual(api.post_c2c_message.call_args.kwargs['msg_type'],0)
+        self.assertIn('没发出去',api.post_c2c_message.call_args.kwargs['content'])
+        self.assertIn('没发出去',self.seen.history(session)[-1]['content'])
+
     async def test_private_message_retrieval(self):
         message = self.message('/检索 机器人怎么使用')
         await self.bot.on_c2c_message_create(message)

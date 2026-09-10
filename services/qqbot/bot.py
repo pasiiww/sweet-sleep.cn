@@ -223,7 +223,7 @@ class KnowledgeBot(botpy.Client):
                 media = await asyncio.wait_for(upload, timeout=15)
                 if not media or not media.get('file_info'):
                     raise RuntimeError('QQ empty media response')
-                result = await message.reply(content=reply, msg_type=7,
+                result = await message.reply(content=reply or None, msg_type=7,
                     media={'file_info': media['file_info']}, msg_seq=1)
                 if not result:
                     raise RuntimeError('QQ empty response')
@@ -234,7 +234,9 @@ class KnowledgeBot(botpy.Client):
                 trace['sticker_delivery'] = {'name': sticker['name'], 'status': 'failed', 'error': type(exc).__name__}
                 LOG.warning('STICKER_FAILED error=%s', type(exc).__name__)
         # Preserve the generated answer when an optional image cannot be sent.
-        result=await message.reply(content=reply, msg_type=0, msg_seq=1)
+        sent_text=reply or '表情包刚刚没发出去呀～我还在这里陪你聊。'
+        if trace is not None:trace['_sent_text']=sent_text
+        result=await message.reply(content=sent_text, msg_type=0, msg_seq=1)
         if result:self.seen.record_sticker(session,False)
         return result
 
@@ -270,9 +272,12 @@ class KnowledgeBot(botpy.Client):
             response = await self.send_answer(message, kind, reply, trace, session)
             if not response:
                 raise RuntimeError('QQ empty response')
-            delivery, sent = 'delivered', reply
+            delivery, sent = 'delivered', (trace or {}).get('_sent_text',reply)
             if remember:
-                self.seen.remember(session, query, reply)
+                history_reply=sent
+                if (trace or {}).get('sticker_delivery',{}).get('status')=='sent':
+                    history_reply+='（已发送表情包：'+trace['sticker']['name']+'）'
+                self.seen.remember(session, query, history_reply)
             LOG.info('REPLY_OK kind=%s chars=%s', kind, len(reply))
         except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError) as exc:
             delivery_error = type(exc).__name__

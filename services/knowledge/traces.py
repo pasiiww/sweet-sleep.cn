@@ -97,6 +97,7 @@ def query(c, filters, trace_id=None):
     for row in rows:
         item = dict(row)
         details = json.loads(item.pop('details'))
+        item['sticker_name'] = (details.get('sticker') or {}).get('name','')
         item['search_terms'] = details.get('search_terms', [])
         item['retrieval_count'] = sum(len(search.get('searches', [])) for search in details.get('retrievals', []))
         items.append(item)

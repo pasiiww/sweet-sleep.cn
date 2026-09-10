@@ -538,7 +538,7 @@ def respond_pipeline(data, details):
         hint_ids += [r[0] for r in c.execute("SELECT id FROM qa_entries WHERE kb_id=? AND publication='active' AND superseded_by IS NULL ORDER BY updated_at DESC,id DESC LIMIT 8",(kb_id,)) if r[0] not in hint_ids]
         qa_hints=[c.execute('SELECT question FROM qa_entries WHERE id=?',(qid,)).fetchone()[0][:300] for qid in hint_ids[:8]]
     cfg = cfg | {'previous_sticker_sent':previous_sticker_sent,'current_date':answers.current_date(),'qa_hints':qa_hints,'conversation_history': history, 'alias_context': entities.context(hints), '_trace': details}
-    details['sticker_policy']={'mode':'advisory','previous_sticker_sent':previous_sticker_sent,'guidance':'频率建议：店铺咨询类问题的50%以下的轮次带表情包。'}
+    details['sticker_policy']={'mode':'advisory','previous_sticker_sent':previous_sticker_sent,'guidance':'频率建议：闲聊类可以较高频率使用表情包，也可以只回复表情包；店铺咨询类控制在50%的轮次以下。'}
     details.update(current_date=cfg['current_date'],qa_hints=qa_hints,history=history, model=cfg['model'], system_prompt=cfg['system_prompt'], keyword_prompt=cfg['keyword_prompt'])
     def search(terms):
         started = time.monotonic()

@@ -108,7 +108,7 @@ class StickerTests(unittest.TestCase):
    self.assertEqual(result['sticker_name'],'独特表情')
    messages=model.call_args.args[1]
    self.assertEqual(sum(m['content'].count('[独特表情]') for m in messages),1)
-   self.assertIn('频率建议：店铺咨询类问题的50%以下的轮次带表情包。',messages[0]['content'])
+   self.assertIn('频率建议：闲聊类可以较高频率使用表情包，也可以只回复表情包；店铺咨询类控制在50%的轮次以下。',messages[0]['content'])
    self.assertNotIn('available_stickers',messages[-1]['content'])
    self.assertNotIn('sticker_allowed',messages[-1]['content'])
 
@@ -119,3 +119,10 @@ class StickerTests(unittest.TestCase):
   self.assertEqual(answers.parse_sticker('正文[说明][收到][开心]',library),('正文[说明]','收到'))
   self.assertEqual(answers.parse_sticker('正文[[HANDOFF]][开心][收到]',library),('正文[[HANDOFF]]','开心'))
   self.assertEqual(answers.parse_sticker('正文',library),('正文',None))
+
+ def test_sticker_only_is_valid_but_empty_is_not(self):
+  cfg={'system_prompt':'客服','stickers':[{'name':'开心'}]}
+  with patch.object(answers,'model_call',return_value='[开心][开心]'):
+   self.assertEqual(answers.complete(cfg,'哈哈',[]),{'supported':True,'answer':'','sticker_name':'开心'})
+  with patch.object(answers,'model_call',return_value='[[STICKER:不存在]]'):
+   with self.assertRaises(answers.ModelError):answers.complete(cfg,'哈哈',[])
