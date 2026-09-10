@@ -24,6 +24,7 @@ import traces
 import qa
 import learning
 import stickers
+import notifications
 import sys
 
 DATA = Path(os.environ.get('KB_DATA_DIR', '/var/lib/sweet-knowledge'))
@@ -95,6 +96,7 @@ def initialize():
         qa.initialize(c)
         learning.initialize(c)
         stickers.initialize(c)
+        notifications.initialize(c)
 
 
 def now():
@@ -662,6 +664,18 @@ def api(method, path, data, params):
             data=dict(data,name=stickers.generate_name(cfg,naming_image));auto_sticker_name=True
         except ValueError as exc:fail(400,str(exc))
     with WRITE_LOCK, db() as c:
+        if segments==['owner-notifications'] and method=='GET':
+            return {'config':notifications.config(c),'items':[dict(r) for r in c.execute('SELECT id,kb_id,title,created,status,error FROM owner_notifications ORDER BY id DESC LIMIT 30')]}
+        if segments==['owner-notifications'] and method=='PUT':
+            try:return notifications.save(c,data)
+            except (ValueError,AttributeError) as exc:fail(400,str(exc))
+        if segments==['owner-notifications','claim'] and method=='POST':return notifications.claim(c)
+        if segments==['owner-notifications','ack'] and method=='POST':
+            try:return notifications.acknowledge(c,data)
+            except ValueError as exc:fail(400,str(exc))
+        if len(segments)==3 and segments[0]=='owner-notifications' and segments[2]=='retry' and method=='POST':
+            c.execute("UPDATE owner_notifications SET status='pending',receipt='',error='' WHERE id=? AND status IN ('failed','uncertain')",(segments[1],))
+            return {'ok':True}
         if len(segments)==4 and segments[:2]==['learning','reviews'] and method=='POST':
             try:return learning.review(c,segments[2],segments[3])
             except ValueError as exc:fail(409,str(exc))
@@ -961,7 +975,7 @@ class Handler(BaseHTTPRequestHandler):
             learner = bool(LEARN_TOKEN) and hmac.compare_digest(supplied.encode(), LEARN_TOKEN.encode())
             if not admin and not reader and not learner:
                 fail(401, '请输入有效的访问密钥')
-            if learner and not admin and not (parsed.path == '/knowledge/api/learning/events' and self.command == 'POST'):
+            if learner and not admin and not (parsed.path in ('/knowledge/api/learning/events','/knowledge/api/owner-notifications/claim','/knowledge/api/owner-notifications/ack') and self.command == 'POST'):
                 fail(403, '学习密钥仅可提交聊天事件')
             if not admin and not learner and not (parsed.path in ('/knowledge/api/retrieve', '/knowledge/api/answer', '/knowledge/api/trace-delivery') and self.command == 'POST'):
                 fail(403, '召回密钥仅可调用检索接口')

@@ -76,12 +76,12 @@ class QATests(unittest.TestCase):
         self.assertEqual(result['answer'],'价格100元。')
         self.assertEqual(result['mode'],'document')
         result=self.api('POST','answer',{'kb_id':self.kb,'query':'unknownnothing'})
-        self.assertIn('落落',result['answer'])
+        self.assertIn('群主或管理员',result['answer'])
         self.assertNotIn('471718054',result['answer'])
         self.assertNotIn('知识库里没有足够',result['answer'])
         self.assertIn('♡',result['answer'])
         cfg=answers.defaults() | {'handoff_groups':{'group':['openid']}}
-        self.assertEqual(answers.handoff(cfg,'group','no_results')['mention_openids'],['openid'])
+        self.assertEqual(answers.handoff(cfg,'group','no_results')['mention_openids'],[])
 
     def test_pagination_and_limits(self):
         for i in range(22):self.api('POST',self.path,{'question':f'问题{i}','answer':'答案'})

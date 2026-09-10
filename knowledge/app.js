@@ -42,7 +42,7 @@ document.querySelectorAll('[data-view]').forEach(button => button.onclick = () =
   $('page-title').textContent = $('breadcrumb').textContent = views[view][0]; $('page-subtitle').textContent = views[view][1];
   $('create-base').hidden = view !== 'documents';
   if (view === 'stickers') loadStickers().catch(error=>toast(error.message));
-  if (view === 'learning') loadLearning().catch(error=>toast(error.message));
+  if (view === 'learning') {loadLearning().catch(error=>toast(error.message));loadOwnerNotifications().catch(error=>toast(error.message));}
   if (view === 'traces') loadTraces(true).catch(error => toast(error.message));
 });
 async function refresh() {
@@ -511,3 +511,13 @@ stickerDrop.ondragleave=event=>{if(!stickerDrop.contains(event.relatedTarget))st
 stickerDrop.ondrop=event=>{event.preventDefault();stickerDrop.classList.remove('drag-over');selectStickerFiles(event.dataTransfer.files);};
 // Files dropped outside the target should not navigate away from the unsaved form.
 for(const type of ['dragover','drop'])document.addEventListener(type,event=>{if(!$('view-stickers').hidden&&Array.from(event.dataTransfer?.types||[]).includes('Files'))event.preventDefault();});
+
+async function loadOwnerNotifications(){
+ const data=await api('owner-notifications');$('owner-notify-enabled').checked=data.config.enabled;$('owner-notify-openid').value=data.config.openid;
+ const labels={pending:'等待发送',sending:'发送中',delivered:'已发送',failed:'发送失败',uncertain:'发送结果未知'};
+ $('owner-notify-list').innerHTML=data.items.length?data.items.map(row=>`<p>${esc(new Date(row.created*1000).toLocaleString())} · ${esc(row.title)} · ${esc(labels[row.status]||row.status)} ${esc(row.error)} ${['failed','uncertain'].includes(row.status)?`<button type="button" data-notify-retry="${row.id}">重试</button>`:''}</p>`).join(''):'<p class="hint">暂无通知。配置并启用后，新生效的知识变更会在这里显示。</p>';
+}
+$('owner-notify-form').onsubmit=event=>{event.preventDefault();busy(event.submitter,async()=>{await api('owner-notifications','PUT',{enabled:$('owner-notify-enabled').checked,openid:$('owner-notify-openid').value.trim()});await loadOwnerNotifications();toast('通知配置已保存');});};
+$('owner-notify-refresh').onclick=()=>loadOwnerNotifications().catch(error=>toast(error.message));
+$('owner-notify-list').onclick=event=>{const button=event.target.closest('[data-notify-retry]');if(button)busy(button,async()=>{if(!confirm('重新发送这条更新通知？结果未知的通知可能已经送达。'))return;await api('owner-notifications/'+button.dataset.notifyRetry+'/retry','POST',{});await loadOwnerNotifications();});};
+for(const id of ['admin-name','admin-qq','handoff-groups'])$(id).closest('label').hidden=true;

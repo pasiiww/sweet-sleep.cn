@@ -167,7 +167,9 @@ class KnowledgeBot(botpy.Client):
             self.learner = Learner(seen.conn, retriever.url.rsplit("/",1)[0]+"/learning/events", os.environ["KB_LEARN_TOKEN"], retriever.kb_id)
 
     async def on_ready(self):
-        if self.learner: self.learner.start()
+        if self.learner:
+            self.learner.api=self.api
+            self.learner.start()
         LOG.info('QQ_CONNECTED app_id=%s knowledge_id=%s', os.environ.get('QQ_APP_ID'), self.retriever.kb_id)
 
     async def on_error(self, event_method, *args, **kwargs):
@@ -250,7 +252,7 @@ class KnowledgeBot(botpy.Client):
                 if kind == 'group':
                     reply = f'群 OpenID：{plain(message.group_openid)}\n你的成员 OpenID：{plain(message.author.member_openid)}\n请由管理员在知识库后台填写人工联系人。此命令不会自动赋予管理员身份。'
                 else:
-                    reply = '请在需要配置人工接管的群里 @我发送 /身份。私聊 ID 不能代替群内成员 ID。'
+                    reply = '你的私聊 OpenID：'+plain(getattr(message.author,'user_openid',''))+'\n可由 owner 在知识库后台配置更新通知。此命令不会自动绑定身份。'
             elif len(query) > 2000:
                 reply = '问题有点长，请缩短到 2000 字以内。'
             elif self.capacity.locked():

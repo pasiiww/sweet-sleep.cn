@@ -16,6 +16,7 @@ class Learner:
     def __init__(self, connection, url, token, kb_id):
         self.conn, self.url, self.token, self.kb_id = connection, url, token, kb_id
         self.task = None
+        self.api = None
         self.conn.execute('CREATE TABLE IF NOT EXISTS learning_outbox(id TEXT PRIMARY KEY,payload TEXT NOT NULL,created REAL NOT NULL)')
         self.conn.commit()
 
@@ -54,9 +55,37 @@ class Learner:
         with self.conn:self.conn.execute('DELETE FROM learning_outbox WHERE id=?',(row[0],))
         return True
 
-    async def run(self):
-        while True:
+    async def notify_once(self):
+        if self.api is None:return
+        endpoint=self.url.rsplit('/learning/events',1)[0]+'/owner-notifications'
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
+            headers={'Authorization':'Bearer '+self.token}
+            async with session.post(endpoint+'/claim',headers=headers,json={}) as response:
+                if response.status!=200:raise RuntimeError('Notification claim failed')
+                item=await response.json()
+            if not item:return
+            status,error='failed',''
             try:
-                if await self.flush_once():continue
-            except Exception as exc: LOG.warning('LEARNING_UPLOAD_FAILED error=%s',type(exc).__name__)
-            await asyncio.sleep(3)
+                # Owner explicitly bound in admin UI; no user msg_id is invented for a proactive notification.
+                content=item['content'].replace('@','＠').replace('<','＜').replace('>','＞')
+                result=await self.api.post_c2c_message(openid=item['openid'],msg_type=0,content=content)
+                if not result:raise RuntimeError('Empty QQ response')
+                status='delivered'
+            except Exception as exc:
+                error=type(exc).__name__
+                LOG.warning('OWNER_NOTIFICATION_FAILED error=%s',error)
+            async with session.post(endpoint+'/ack',headers=headers,json={'receipt':item['receipt'],'status':status,'error':error}) as response:
+                if response.status!=200:raise RuntimeError('Notification receipt failed')
+
+    async def run(self):
+        last_notification=0
+        while True:
+            uploaded=False
+            try:
+                uploaded=await self.flush_once()
+            except Exception as exc:LOG.warning('LEARNING_UPLOAD_FAILED error=%s',type(exc).__name__)
+            if time.monotonic()-last_notification>=3:
+                try:await self.notify_once()
+                except Exception as exc:LOG.warning('OWNER_NOTIFICATION_FAILED error=%s',type(exc).__name__)
+                last_notification=time.monotonic()
+            if not uploaded:await asyncio.sleep(3)

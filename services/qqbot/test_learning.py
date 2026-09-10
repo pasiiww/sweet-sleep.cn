@@ -52,6 +52,24 @@ class LearningBotTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(await learner.flush_once())
         finally:await runner.cleanup()
 
+    async def test_owner_notification_private_delivery_and_failure_receipt(self):
+        receipts=[]
+        async def claim(request):
+            self.assertEqual(request.headers['Authorization'],'Bearer learning-secret')
+            return web.json_response({'ids':[1],'receipt':'r'*48,'openid':'owner-private','content':'知识库更新'})
+        async def ack(request):receipts.append(await request.json());return web.json_response({'ok':True})
+        app=web.Application();app.router.add_post('/owner-notifications/claim',claim);app.router.add_post('/owner-notifications/ack',ack)
+        runner=web.AppRunner(app);await runner.setup();site=web.TCPSite(runner,'127.0.0.1',0);await site.start()
+        try:
+            learner=Learner(self.seen.conn,f'http://127.0.0.1:{site._server.sockets[0].getsockname()[1]}/learning/events','learning-secret','kb')
+            learner.api=SimpleNamespace(post_c2c_message=AsyncMock(return_value={'id':'sent'}))
+            await learner.notify_once()
+            learner.api.post_c2c_message.assert_awaited_once_with(openid='owner-private',msg_type=0,content='知识库更新')
+            self.assertEqual(receipts[-1]['status'],'delivered')
+            learner.api.post_c2c_message.side_effect=RuntimeError('private details')
+            await learner.notify_once();self.assertEqual(receipts[-1]['status'],'failed');self.assertEqual(receipts[-1]['error'],'RuntimeError')
+        finally:await runner.cleanup()
+
     async def test_reply_metadata_for_full_and_at_events(self):
         dispatched=[];state=ConnectionState(lambda e,m:dispatched.append((e,m)),None);state.robot=SimpleNamespace(id='own_bot')
         data={'id':'reply','content':'100元','author':{'member_openid':'owner001'},'group_openid':'group001','message_type':103,

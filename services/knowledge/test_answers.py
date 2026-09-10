@@ -67,7 +67,7 @@ class AnswerTests(unittest.TestCase):
         with patch.object(answers, 'complete', return_value={'supported': False, 'answer':'这个还不确定，请找落落确认呀～'}) as model:
             result = self.ask('xyznotpresent')
             self.assertEqual(result['reason'], 'no_results')
-            self.assertEqual(result['mention_openids'], ['admin123456'])
+            self.assertEqual(result['mention_openids'], [])
             model.assert_called_once()
             self.assertEqual(model.call_args.args[2], [])
             self.assertEqual(result['answer'], '这个还不确定，请找落落确认呀～')

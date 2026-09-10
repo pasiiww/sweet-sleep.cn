@@ -35,7 +35,7 @@ if (target / 'server.py').exists():
     shutil.copytree(target, backup_dir / 'app')
 if unit_path.exists():
     shutil.copy2(unit_path, backup_dir / 'sweet-knowledge.service')
-for filename in ('server.py', 'answers.py', 'entities.py', 'traces.py', 'qa.py', 'learning.py', 'stickers.py'):
+for filename in ('server.py', 'answers.py', 'entities.py', 'traces.py', 'qa.py', 'learning.py', 'stickers.py', 'notifications.py'):
     shutil.copy2(source / filename, target / filename)
     (target / filename).chmod(0o644)
 for filename in ('index.html', 'style.css', 'app.js'):
