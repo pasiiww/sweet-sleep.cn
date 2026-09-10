@@ -4,7 +4,7 @@ import secrets
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlsplit
 
-FIELDS = {'series':150, 'character':150, 'image':2000, 'notes':4000}
+FIELDS = {'series':150, 'character':2000, 'image':2000, 'notes':4000}
 LABELS = {'series':'制品系列', 'character':'角色名字', 'image':'制品图片', 'notes':'备注'}
 
 def initialize(c):
@@ -14,7 +14,19 @@ def initialize(c):
       document_id TEXT REFERENCES documents(id) ON DELETE SET NULL)''')
 
 def public(row):
-    return dict(row) | json.loads(row['value'])
+    result=dict(row) | json.loads(row['value'])
+    result.setdefault('characters',[result['character']])
+    result.setdefault('variants',[])
+    return result
+
+def money(app,price):
+    if price:
+        try:
+            amount=Decimal(price)
+            if not amount.is_finite() or amount<0 or amount>10000000 or amount.as_tuple().exponent < -2:raise InvalidOperation()
+            return format(amount,'f')
+        except InvalidOperation:app.fail(400,'金额需为非负数字，最多两位小数；未知请留空')
+    return ''
 
 def handle(app,c,method,segments,data,params):
     if len(segments)==1 and method=='GET':
@@ -33,7 +45,12 @@ def handle(app,c,method,segments,data,params):
     if not ((method=='POST' and len(segments)==1) or (method=='PUT' and old)):
         app.fail(405,'不支持此操作')
     kb=app.base(c,old['kb_id'] if old else app.string(data,'kb_id',80,True))
-    item={k:app.string(data,k,limit,k=='character') for k,limit in FIELDS.items()}
+    item={k:app.string(data,k,limit) for k,limit in FIELDS.items()}
+    characters=data.get('characters',[item['character']] if item['character'] else [])
+    if not isinstance(characters,list) or not 1<=len(characters)<=30:app.fail(400,'请填写1–30个角色')
+    if any(not isinstance(v,str) or not v.strip() or len(v)>60 for v in characters):app.fail(400,'角色名字不能为空，最多60字')
+    item['characters']=list(dict.fromkeys(v.strip() for v in characters))
+    item['character']='、'.join(item['characters'])
     types=data.get('types',[]);links=data.get('links',[])
     if not isinstance(types,list) or not 1<=len(types)<=30:app.fail(400,'请添加1–30种制品类型')
     if not isinstance(links,list) or len(links)>20:app.fail(400,'最多20个平台链接')
@@ -43,13 +60,20 @@ def handle(app,c,method,segments,data,params):
         name=app.string(entry,'name',80,True);price=app.string(entry,'price',30)
         if name.casefold() in names:app.fail(400,'制品类型不能重复')
         names.add(name.casefold())
-        if price:
-            try:
-                amount=Decimal(price)
-                if not amount.is_finite() or amount<0 or amount>10000000 or amount.as_tuple().exponent < -2: raise InvalidOperation()
-                price=format(amount,'f')
-            except InvalidOperation:app.fail(400,'金额需为非负数字，最多两位小数；未知请留空')
+        price=money(app,price)
         item['types'].append({'name':name,'price':price})
+    variants=data.get('variants',[])
+    if not isinstance(variants,list) or len(variants)>900:app.fail(400,'最多900个角色与类型组合')
+    item['variants']=[];pairs=set();type_names={t['name'] for t in item['types']}
+    for v in variants:
+        if not isinstance(v,dict):app.fail(400,'规格格式错误')
+        character=app.string(v,'character',60,True);kind=app.string(v,'type',80,True)
+        pair=(character,kind)
+        if character not in item['characters'] or kind not in type_names:app.fail(400,'规格中的角色或类型不在当前列表，请修改或删除对应规格')
+        if pair in pairs:app.fail(400,'同一角色与类型不能重复配置')
+        pairs.add(pair);status=app.string(v,'status',20,True)
+        if status not in ('待确认','在售','售罄','不售卖'):app.fail(400,'规格状态无效')
+        item['variants'].append({'character':character,'type':kind,'price':money(app,app.string(v,'price',30)),'status':status})
     def valid_link(value):
         url=urlsplit(value)
         if url.scheme not in ('https','http') or not url.hostname or url.username or url.password:
@@ -72,6 +96,8 @@ def handle(app,c,method,segments,data,params):
     if item['searchable']:
         content='\n'.join(LABELS[k]+'：'+item[k] for k in FIELDS if item[k])
         content+='\n参考价格（人民币元，仅供参考，具体价格请到平台查询）：\n'+'\n'.join(t['name']+'：'+(t['price']+'元' if t['price'] else '请查询平台') for t in item['types'])
+        content+='\n角色和类型是商品选项，不代表任意组合都有货。未维护的组合价格与售卖情况请到平台确认；不从起步价或优惠价推断具体规格价格。'
+        content+='\n单独维护的规格（优先于类型参考价）：\n'+'\n'.join(v['character']+' / '+v['type']+'：'+v['status']+'；'+('参考价'+v['price']+'元' if v['price'] else '未单独报价，参考类型价格，具体以平台为准') for v in item['variants'])
         content+='\n平台链接：\n'+'\n'.join(t['name']+'：'+t['url'] for t in item['links'])
         doc=app.save_document(c,kb,{'title':((item['series']+' · ' if item['series'] else '')+item['character'])[:200],'content':content,
                                   'source':'社团制品后台'},doc)['id']
