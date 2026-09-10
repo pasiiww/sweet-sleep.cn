@@ -46,6 +46,17 @@ class LearningTests(unittest.TestCase):
         self.assertEqual(result['results'][0]['updated_at'],qa['updated_at'])
         self.assertEqual(row['details']['changes'][0]['qq'],'1229837719')
         self.assertEqual(row['details']['model_calls'][0]['stage'],'learning')
+    def test_short_source_restored_and_noise_skips_model(self):
+        job=self.event('original-long-id','凯伊售价100元',is_reply=True)['job_id']
+        row=self.run_job(job,[self.fact('m1')])
+        self.assertEqual(row['status'],'completed')
+        self.assertEqual(row['details']['changes'][0]['source_id'],'original-long-id')
+        provenance=json.loads(row['details']['changes'][0]['after']['source_context'])
+        self.assertEqual(provenance['source_id'],'original-long-id')
+        job=self.event('noise-only','<faceType=6,faceId="0">',is_reply=True)['job_id']
+        with patch.object(answers,'_model_call') as call:
+            self.assertTrue(learning.run_once(app));call.assert_not_called()
+        self.assertEqual(self.api('GET','learning/jobs/'+job)['status'],'completed')
     def test_newer_updates_old_arrival_cannot_overwrite(self):
         first=self.batch('a');r=self.run_job(first,[self.fact('a1')]);qid=r['details']['changes'][0]['qa_id']
         newer=self.batch('b',self.at+20);self.run_job(newer,[self.fact('b1',answer='凯伊售价200元。')])
@@ -166,7 +177,8 @@ class LearningTests(unittest.TestCase):
         payload=json.loads(row['details']['model_calls'][0]['messages'][-1]['content'])
         self.assertNotIn('mention_context_by_source',payload)
         self.assertNotIn('pair_context_by_source',payload)
-        self.assertEqual(payload['context_by_source'],d['context_by_source'])
+        ids=row['details']['context_preprocessing']['message_ids']
+        self.assertEqual({ids[k]:[ids[v] for v in values] for k,values in payload['context_by_source'].items()},{'reply':['g0','h']})
 
     def test_guest_mention_no_trigger_and_admin_mention_resets_silence(self):
         self.event('normal')
@@ -287,6 +299,6 @@ class LearningTests(unittest.TestCase):
             self.assertIn('用户自己的额外提取规则。',saved)
             self.assertNotIn('普通发言取前10条',saved)
             self.assertEqual(c.execute('SELECT status FROM learning_jobs WHERE id=?',(job,)).fetchone()[0],'pending')
-        self.assertEqual(learning.model_prompt(legacy),learning.PROMPT)
+        self.assertEqual(learning.model_prompt(legacy),learning.model_prompt(learning.PROMPT))
         self.assertEqual(learning.model_prompt(legacy).count('只输出 JSON'),1)
         self.assertNotIn('前1小时',learning.model_prompt(custom))

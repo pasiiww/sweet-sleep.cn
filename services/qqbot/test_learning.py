@@ -31,6 +31,17 @@ class LearningBotTests(unittest.IsolatedAsyncioTestCase):
         msg=self.message();msg.sweet_mentioned=True
         await self.bot.on_group_message_create(msg);await self.bot.on_group_at_message_create(msg)
         self.assertEqual(self.retriever.search.await_count,1);self.assertEqual(msg.reply.await_count,1)
+    async def test_full_event_platform_self_mention(self):
+        for mention, expected in [({'id':'group_scoped_bot','is_you':True},True),
+                                  ({'id':'another_bot','bot':True},False),
+                                  ({'id':'member','is_you':'false'},False),
+                                  ({'id':'own_bot'},True)]:
+            msg=compat.FullGroupMessage(None,'event',{'id':'message','content':'/帮助',
+                'group_openid':'group001','author':{'member_openid':'user'},
+                'mentions':[mention]},'own_bot')
+            self.assertEqual(msg.sweet_mentioned,expected)
+            if mention.get('is_you') is True:
+                self.assertEqual(msg.sweet_learning['mentions'],[])
     async def test_outbox_persistence_and_dedup(self):
         learner=Learner(self.seen.conn,'http://unused','token','kb');msg=self.message()
         learner.observe(msg);learner.observe(msg)

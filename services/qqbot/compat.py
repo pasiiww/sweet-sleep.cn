@@ -1,5 +1,6 @@
 """Preserve full-group events and quoted-reply metadata in qq-botpy 1.2.1."""
 import os
+import logging
 from botpy.connection import ConnectionState
 from botpy.message import GroupMessage, C2CMessage
 
@@ -27,7 +28,7 @@ def reference_metadata(data, own_ids=()):
     mentions=[]
     raw_mentions=data.get('mentions') or []
     for m in (raw_mentions if isinstance(raw_mentions,list) else [])[:20]:
-        if not isinstance(m,dict) or m.get('bot'):continue
+        if not isinstance(m,dict) or m.get('bot') or m.get('is_you') is True:continue
         member=m.get('member_openid') or m.get('id')
         if isinstance(member,str) and member and len(member)<=128 and member not in own_ids and member not in mentions:mentions.append(member)
     author=data.get('author') or {}
@@ -43,7 +44,12 @@ class FullGroupMessage(GroupMessage):
         super().__init__(api, event_id, data)
         own_ids = {str(v) for v in (robot_id, os.environ.get('QQ_APP_ID')) if v}
         mentions = data.get('mentions') or []
-        self.sweet_mentioned = any(isinstance(m,dict) and str(m.get('id','')) in own_ids
+        logging.getLogger('knowledge-bot').info(
+            'GROUP_MENTION_META group=%s own_ids=%s mentions=%s',
+            data.get('group_openid', ''), sorted(own_ids),
+            [{k: m.get(k) for k in ('id', 'member_openid', 'bot', 'is_you')} for m in
+             (mentions if isinstance(mentions, list) else [])[:20] if isinstance(m, dict)])
+        self.sweet_mentioned = any(isinstance(m,dict) and (m.get('is_you') is True or str(m.get('id','')) in own_ids)
                                    for m in (mentions if isinstance(mentions,list) else []))
         self.sweet_learning=reference_metadata(data,own_ids)
         self.sweet_author_bot=self.sweet_learning['author_bot']

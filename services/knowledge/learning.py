@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 import answers
 import entities
+import learning_context
 
 ADMINS = ('1229837719', '471718054')
 PROMPT = '''你是午觉糖水铺的知识整理子 agent，先判断本批消息是否涉及店铺、购买或咨询知识，再整理平台 member_role=owner 的群主或已绑定管理员明确确认的事实。
@@ -27,7 +28,8 @@ def clean_prompt(prompt):
 
 def model_prompt(prompt):
     prompt=clean_prompt(prompt).strip()
-    return PROMPT if prompt==PROMPT else prompt+'\n\n必须遵守的提取规则：'+PROMPT
+    base = PROMPT if prompt==PROMPT else prompt+'\n\n必须遵守的提取规则：'+PROMPT
+    return base+'\nmessage_id/source_id 使用 m 开头的短编号，member_id 使用 u 开头的短编号。trusted=true 表示已确认的群主或绑定管理员。source_id 必须原样返回本批消息短编号。'
 
 
 def defaults():
@@ -232,6 +234,9 @@ def process(app, job):
     started=time.monotonic()
     details=json.loads(job['details']); cfg=details['settings']
     details['retrievals']=[]
+    compact, compression = learning_context.prepare(details)
+    details['context_preprocessing'] = compression
+    compact_by_id = {compression['message_ids'][r['message_id']]:r for r in compact['context']}
     job['_details']=details
     with app.db() as c:
         model_cfg=app.answer_config(c)
@@ -241,9 +246,11 @@ def process(app, job):
     candidates={};documents={}
     for event in details['context']:
         if event['message_id'] not in details['batch_source_ids']: continue
+        if event['message_id'] not in compact_by_id: continue
         preceding_ids=details['context_by_source'].get(event['message_id'],[])
-        preceding=' '.join(r['content'] for r in details['context'] if r['message_id'] in preceding_ids)
-        query=catalog.normalize(event['content'][:1000]+' '+ ' '.join(q['content'] for q in event.get('reference',{}).get('quotes',[]))[:600]+' '+preceding[-600:])[:2000]
+        preceding=' '.join(r['content'] for mid,r in compact_by_id.items() if mid in preceding_ids)
+        cleaned=compact_by_id[event['message_id']]
+        query=catalog.normalize(cleaned['content'][:1000]+' '+ ' '.join(q['content'] for q in cleaned.get('reference',{}).get('quotes',[]))[:600]+' '+preceding[-600:])[:2000]
         result=app.retrieve({'kb_id':job['kb_id'],'query':query,'mode':'keyword','top_k':20})
         details['retrievals'].append({'source_id':event['message_id'],'query':query,'results':result['results'],'elapsed_ms':result['elapsed_ms']})
         for r in result['results']:
@@ -255,8 +262,8 @@ def process(app, job):
     model_cfg=model_cfg|{'_trace':model_trace,'_stage':'learning'}
     details['model_calls']=model_trace['model_calls']
     text=answers.model_call(model_cfg,[{'role':'system','content':model_prompt(cfg['prompt'])},
-        {'role':'user','content':json.dumps({'current_date':answers.current_date(),'context':[{k:r.get(k,[] if k=='mentions' else None) for k in ('message_id','member_id','qq','content','at','is_reply','reference','mentions','member_role')} for r in details['context']],
-          'trigger':details['trigger'],'context_by_source':details['context_by_source'],'batch_source_ids':details['batch_source_ids'],'aliases':catalog.variants,'existing_documents':list(documents.values())[:30],'existing_qa':[{k:r[k] for k in ('id','question','answer','updated_at','origin')} for r in existing]},ensure_ascii=False)}],json_mode=True,max_tokens=2400)
+        {'role':'user','content':json.dumps({'current_date':answers.current_date(),**compact,
+          'trigger':details['trigger'],'aliases':catalog.variants,'existing_documents':list(documents.values())[:30],'existing_qa':[{k:r[k] for k in ('id','question','answer','updated_at','origin')} for r in existing]},ensure_ascii=False)}],json_mode=True,max_tokens=2400) if compact['batch_source_ids'] else json.dumps({'facts':[],'relevant':False,'reason':'本批消息清洗后没有有效文本'})
     details['model_calls']=model_trace['model_calls']
     try:
         parsed=json.loads(text)
@@ -269,9 +276,11 @@ def process(app, job):
         source={r['message_id']:r for r in details['context'] if r['qq'] and r['message_id'] in details['batch_source_ids']}
         for f in facts:
             if not isinstance(f,dict): raise ValueError()
+            if isinstance(f.get('source_id'),str):
+                f['source_id']=compression['message_ids'].get(f['source_id'],f['source_id'])
             for key,limit in [('subject',150),('attribute',150),('question',1000),('answer',4000),('quote',2000),('source_id',200)]:
                 if not isinstance(f.get(key),str) or not 1<=len(f[key].strip())<=limit: raise ValueError()
-            if f['source_id'] not in source or f['quote'] not in source[f['source_id']]['content']: raise ValueError()
+            if f['source_id'] not in source or f['source_id'] not in compact_by_id or f['quote'] not in source[f['source_id']]['content']: raise ValueError()
             if not isinstance(f.get('scope',''),str) or len(f.get('scope',''))>200: raise ValueError()
             confidence=f.get('confidence',0)
             if type(confidence) not in (int,float) or not 0<=confidence<=100:raise ValueError()

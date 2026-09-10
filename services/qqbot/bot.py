@@ -179,6 +179,8 @@ class KnowledgeBot(botpy.Client):
         await self.answer(message, 'c2c')
 
     async def on_group_at_message_create(self, message):
+        LOG.info('GROUP_RECEIVED event=at group=%s bot=%s mentioned=True',
+                 getattr(message, 'group_openid', ''), compat.is_bot(message))
         if compat.is_bot(message):return
         if self.learner: self.learner.observe(message)
         # The platform event certifies this bot was mentioned; text may omit the tag.
@@ -186,6 +188,9 @@ class KnowledgeBot(botpy.Client):
 
     async def on_group_message_create(self, message):
         # Only delivered platform events can be observed; learning never sends a reply.
+        LOG.info('GROUP_RECEIVED event=all group=%s bot=%s mentioned=%s',
+                 getattr(message, 'group_openid', ''), compat.is_bot(message),
+                 getattr(message, 'sweet_mentioned', False))
         if compat.is_bot(message):return
         if self.learner: self.learner.observe(message)
         if getattr(message, 'sweet_mentioned', False):
@@ -196,6 +201,7 @@ class KnowledgeBot(botpy.Client):
         if kind == 'group' and not mentioned:
             return
         if not message.id or not self.seen.claim(kind + ':' + message.id):
+            LOG.info('MESSAGE_SKIPPED kind=%s reason=duplicate_or_missing_id', kind)
             return
         session = conversation_key(message, kind, self.retriever.kb_id)
         # Serialize generation AND delivery for each conversation; release unused locks.
