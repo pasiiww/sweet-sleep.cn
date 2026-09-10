@@ -26,6 +26,7 @@ import learning
 import stickers
 import notifications
 import products
+import maintenance
 import sys
 
 DATA = Path(os.environ.get('KB_DATA_DIR', '/var/lib/sweet-knowledge'))
@@ -99,6 +100,7 @@ def initialize():
         stickers.initialize(c)
         notifications.initialize(c)
         products.initialize(c)
+        maintenance.initialize(c)
 
 
 def now():
@@ -627,6 +629,8 @@ def respond_pipeline(data, details):
 
 def api(method, path, data, params):
     segments = path.removeprefix('/knowledge/api/').strip('/').split('/')
+    if segments == ['private-maintenance'] and method == 'POST':
+        return maintenance.respond(sys.modules[__name__],data)
     if segments == ['retrieve'] and method == 'POST':
         return retrieve(data)
     if segments == ['answer'] and method == 'POST':
@@ -668,6 +672,10 @@ def api(method, path, data, params):
             data=dict(data,name=stickers.generate_name(cfg,naming_image));auto_sticker_name=True
         except ValueError as exc:fail(400,str(exc))
     with WRITE_LOCK, db() as c:
+        if segments==['private-maintenance-settings']:
+            if method not in ('GET','PUT'):fail(405,'不支持此操作')
+            try:return maintenance.settings(c,data if method=='PUT' else None)
+            except ValueError as exc:fail(400,str(exc))
         if segments[0]=='products' and len(segments) in (1,2):
             return products.handle(sys.modules[__name__],c,method,segments,data,params)
         if segments==['owner-notifications'] and method=='GET':
@@ -981,7 +989,7 @@ class Handler(BaseHTTPRequestHandler):
             learner = bool(LEARN_TOKEN) and hmac.compare_digest(supplied.encode(), LEARN_TOKEN.encode())
             if not admin and not reader and not learner:
                 fail(401, '请输入有效的访问密钥')
-            if learner and not admin and not (parsed.path in ('/knowledge/api/learning/events','/knowledge/api/owner-notifications/claim','/knowledge/api/owner-notifications/ack') and self.command == 'POST'):
+            if learner and not admin and not (parsed.path in ('/knowledge/api/private-maintenance','/knowledge/api/learning/events','/knowledge/api/owner-notifications/claim','/knowledge/api/owner-notifications/ack') and self.command == 'POST'):
                 fail(403, '学习密钥仅可提交聊天事件')
             if not admin and not learner and not (parsed.path in ('/knowledge/api/retrieve', '/knowledge/api/answer', '/knowledge/api/trace-delivery') and self.command == 'POST'):
                 fail(403, '召回密钥仅可调用检索接口')

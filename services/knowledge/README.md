@@ -225,3 +225,13 @@ PE1 支持 `{"query_groups":[]}` 表示无需检索：问候、感谢和没有�
 回答历史清洗仅移除 QQ 表情编码、提及标签和空问答对，保留自然表情、短确认和事实细节；旧表情包发送记录规范成 `[名称]`。引用原文通过 `reply_reference`（最多1800字符）送入两阶段当前消息，并在发送成功后随用户问题保存。平台未提供引用正文时不编造。Trace 保留清洗后的历史、引用内容与20轮/24000字符策略。
 
 DeepSeek 统一调用层启用 `thinking.type=enabled`、`reasoning_effort=low`，包括检索规划、回答、学习和表情命名。思考与最终输出的合计预算至少8192 tokens；仅最终 `content` 用于业务回复及后续历史，不记录/转发 `reasoning_content`。Trace 记录思考开关、强度、预算与实际 usage。
+
+### 私聊维护工具
+
+私聊 `/help` 查看指令，`/modify 知识库 修改要求`、`/modify qa 修改要求`、`/add 商品库 商品信息` 开始维护。后续自然语言沿用所选库，最近30分钟最多6轮维护历史与顾客咨询隔离；`/退出` 结束。群聊不开放写操作，维护不占顾客20次咨询额度。
+
+后台「模型设置 → 私聊维护权限」配置独立私聊 OpenID 白名单，通知收件人不自动获得权限。`GET/PUT /private-maintenance-settings` 仅管理密钥可访问，`POST /private-maintenance` 仅服务端学习密钥或管理密钥可访问；普通召回密钥不可调用。QQ 端传入平台真实 user_openid、消息ID和固定知识库ID。
+
+原生 function calling 提供 search_records、read_record、update_record、add_product，按指令限定工具；最多4次模型调用、每次一个工具、每条消息最多写一条。修改必须先读取同库原文并核对摘要以避免并发覆盖。新增商品复用后台字段验证。缺字段或目标不明确时追问；未知价格、链接、图片不猜测，商品默认不用于召回。暂不接收私聊图片附件，图片可提供URL或后续后台上传。
+
+同一消息7天内幂等，写入结果与数据变更在同一事务提交。对话 Trace 的「私聊维护操作」显示工具、参数、修改前后内容；QA 的 updated_by 标为 private_admin_ai，原始指令保留在 trace。thinking 工具循环按协议在内存回传 reasoning_content，不存入 trace、历史或发送给 QQ。

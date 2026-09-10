@@ -80,6 +80,8 @@ def model_call(cfg, messages, json_mode=False, max_tokens=1000):
 def _model_call(cfg, messages, json_mode=False, max_tokens=1000):
     payload = {'model': cfg['model'], 'thinking': {'type': 'enabled'}, 'reasoning_effort': 'low',
                'max_tokens': max(max_tokens, 8192), 'stream': False, 'messages': messages}
+    if cfg.get('_tools'):
+        payload.update(tools=cfg['_tools'], parallel_tool_calls=False)
     if json_mode:
         payload['response_format'] = {'type': 'json_object'}
     req = request.Request('https://api.deepseek.com/chat/completions',
@@ -94,6 +96,10 @@ def _model_call(cfg, messages, json_mode=False, max_tokens=1000):
             if '_usage' in cfg and isinstance(parsed.get('usage'),dict):
                 cfg['_usage'].update({k:v for k,v in parsed['usage'].items() if k in ('prompt_tokens','completion_tokens','total_tokens','prompt_cache_hit_tokens','prompt_cache_miss_tokens') and type(v) is int})
             choice = parsed['choices'][0]
+            if cfg.get('_tools') and choice.get('finish_reason') in ('stop', 'tool_calls'):
+                message = choice['message']
+                if not isinstance(message, dict):raise ModelError('invalid_response')
+                return message
             if choice.get('finish_reason') != 'stop':
                 raise ModelError('output_truncated' if choice.get('finish_reason') == 'length' else 'invalid_response')
             text = choice['message']['content']
@@ -205,3 +211,19 @@ def validate_groups(value):
         if any(not isinstance(i, str) or not re.fullmatch(pattern, i) for i in ids):
             raise ValueError('管理员 OpenID 格式不正确')
     return value
+
+
+def tool_turn(cfg, messages, tools):
+    """Keep provider reasoning in the in-memory tool loop, never in traces or replies."""
+    started=time.monotonic(); usage={}
+    record={'stage':'maintenance','thinking':'enabled','reasoning_effort':'low',
+            'messages':[{k:v for k,v in m.items() if k!='reasoning_content'} for m in messages]}
+    try:
+        message=_model_call(cfg|{'_tools':tools,'_usage':usage,'_timeout':15},messages,max_tokens=8192)
+        record['output']={k:v for k,v in message.items() if k!='reasoning_content'}
+        return message
+    except ModelError as exc:
+        record['error']=str(exc);raise
+    finally:
+        record.update(elapsed_ms=round((time.monotonic()-started)*1000),usage=usage)
+        if '_trace' in cfg:cfg['_trace']['model_calls'].append(record)

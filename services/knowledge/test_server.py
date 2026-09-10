@@ -134,6 +134,9 @@ class KnowledgeTests(unittest.TestCase):
                 return exc.code, exc.read()
         try:
             self.assertEqual(req('api/bases')[0], 401)
+            self.assertEqual(req('api/private-maintenance',app.READ_TOKEN,{'user_id':'authorized-user'})[0],403)
+            self.assertEqual(req('api/private-maintenance-settings',app.LEARN_TOKEN)[0],403)
+            self.assertEqual(req('api/private-maintenance',app.LEARN_TOKEN,{'kb_id':self.kb,'user_id':'unknown-user','message_id':'m1','query':'/modify qa'})[0],200)
             self.assertEqual(req('api/products?kb_id='+self.kb,app.READ_TOKEN)[0],403)
             self.assertEqual(req('api/products/upload',app.LEARN_TOKEN,{})[0],403)
             self.assertEqual(req('api/products?kb_id='+self.kb,app.ADMIN_TOKEN)[0],200)

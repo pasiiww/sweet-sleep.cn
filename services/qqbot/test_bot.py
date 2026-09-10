@@ -201,6 +201,21 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.retriever.search.await_count, count)
         self.assertEqual(self.seen.history(key), [])
 
+    async def test_private_maintenance_routing_and_isolation(self):
+        self.retriever.maintain=AsyncMock(return_value={'answer':'要修改哪一条？','active':True})
+        await self.bot.answer(self.identified('/modify qa', 'manage1'),'c2c')
+        self.retriever.search.assert_not_awaited()
+        await self.bot.answer(self.identified('凯伊下单说明', 'manage2'),'c2c')
+        self.assertEqual(self.retriever.maintain.await_count,2)
+        key=conversation_key(self.identified('x','x'),'c2c','test')
+        self.assertEqual(self.seen.history(key),[])
+        await self.bot.answer(self.identified('/add 商品库 凯伊', 'manage3'),'group',mentioned=True)
+        self.assertEqual(self.retriever.maintain.await_count,2)
+        self.retriever.search.assert_not_awaited()
+        self.retriever.maintain.return_value={'answer':'已退出','active':False}
+        await self.bot.answer(self.identified('/退出', 'manage4'),'c2c')
+        self.assertFalse(self.seen.maintenance_active(key))
+
     async def test_quoted_question_in_context_and_history(self):
         msg = self.identified('这个怎么买', 'quote-question')
         msg.sweet_learning = {'reference':{'quotes':[{'content':'kei毛绒', 'member_id':'opaque-id'}, {'content':'kei毛绒'}]}}

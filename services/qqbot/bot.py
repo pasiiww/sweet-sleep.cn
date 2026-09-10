@@ -67,6 +67,7 @@ class SeenMessages:
         self.conn.execute('CREATE TABLE IF NOT EXISTS seen(id TEXT PRIMARY KEY, expires REAL)')
         self.conn.execute('CREATE TABLE IF NOT EXISTS dialogue(id INTEGER PRIMARY KEY AUTOINCREMENT, session TEXT NOT NULL, query TEXT NOT NULL, reply TEXT NOT NULL, at REAL NOT NULL)')
         self.conn.execute('CREATE TABLE IF NOT EXISTS sticker_state(session TEXT PRIMARY KEY, sent INTEGER NOT NULL, at REAL NOT NULL)')
+        self.conn.execute('CREATE TABLE IF NOT EXISTS private_maintenance_session (id TEXT PRIMARY KEY, at REAL NOT NULL)')
         self.conn.execute('CREATE INDEX IF NOT EXISTS dialogue_session ON dialogue(session,id)')
         self.conn.execute('CREATE INDEX IF NOT EXISTS dialogue_time ON dialogue(at)')
         self.conn.commit()
@@ -98,6 +99,15 @@ class SeenMessages:
             self.conn.execute('DELETE FROM dialogue WHERE at<=?', (time.time() - 1800,))
             self.conn.execute('INSERT INTO dialogue(session,query,reply,at) VALUES(?,?,?,?)', (session, query, reply, time.time()))
             self.conn.execute('DELETE FROM dialogue WHERE session=? AND id NOT IN (SELECT id FROM dialogue WHERE session=? ORDER BY id DESC LIMIT 20)', (session, session))
+
+    def maintenance_active(self, session):
+        return bool(self.conn.execute('SELECT 1 FROM private_maintenance_session WHERE id=? AND at>?',(session,time.time()-1800)).fetchone())
+
+    def set_maintenance(self, session, active):
+        with self.conn:
+            self.conn.execute('DELETE FROM private_maintenance_session WHERE at<=?',(time.time()-1800,))
+            self.conn.execute('DELETE FROM private_maintenance_session WHERE id=?',(session,))
+            if active:self.conn.execute('INSERT INTO private_maintenance_session VALUES(?,?)',(session,time.time()))
 
     def last_sticker_sent(self, session):
         if not session:return False
@@ -138,6 +148,15 @@ class Retriever:
                     raise RuntimeError(f'Knowledge HTTP {response.status}')
                 return await response.json()
 
+
+    async def maintain(self, query, user_id, message_id):
+        token=os.environ.get('KB_LEARN_TOKEN','')
+        if not token:return {'answer':'维护通道尚未配置，请到知识库后台处理。','active':False}
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=80)) as session:
+            async with session.post(self.url.rsplit('/',1)[0]+'/private-maintenance',
+                headers={'Authorization':'Bearer '+token},json={'kb_id':self.kb_id,'query':query,'user_id':user_id,'message_id':message_id}) as response:
+                if response.status!=200:raise RuntimeError('Maintenance HTTP '+str(response.status))
+                return await response.json()
 
     async def report_delivery(self, trace, status, content, error=''):
         if not trace.get('trace_id') or not trace.get('trace_receipt'):
@@ -257,6 +276,16 @@ class KnowledgeBot(botpy.Client):
         try:
             if not query or query.lower() in ('帮助', '/帮助', '/help', 'help', '/start'):
                 reply = HELP
+                if kind=='c2c':reply+='\n\n私聊维护：\n/modify 知识库 修改要求\n/modify qa 修改要求\n/add 商品库 商品信息\n/退出 结束维护（仅授权账号可写入）'
+            elif kind=='c2c' and (re.match(r'^/(?:modify|add)(?:\s|$)',query,re.I) or query in ('/退出','/cancel') or self.seen.maintenance_active(session)):
+                if len(query)>2000:reply='指令请控制在2000字以内。'
+                else:
+                    async with self.capacity:
+                        trace=await self.retriever.maintain(query,getattr(message.author,'user_openid',''),message.id)
+                    reply=plain(trace['answer'])[:1700]
+                    self.seen.set_maintenance(session,trace.get('active',False))
+            elif kind=='group' and re.match(r'^/(?:modify|add)(?:\s|$)',query,re.I):
+                reply='维护指令请私聊机器人发送，仅已授权账号可使用。'
             elif query in ('/新对话', '/清空上下文'):
                 self.seen.clear_history(session)
                 reply = '已清空当前对话的上下文，我们重新开始。'
