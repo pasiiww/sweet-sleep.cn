@@ -106,7 +106,7 @@ curl https://sweet-sleep.cn/knowledge/api/retrieve \
 
 ## DeepSeek 客服回答
 
-`/knowledge/` →「模型设置」新增独立的客服配置：启用开关、API Key、模型名（默认 `deepseek-v4-flash`）、PE1 检索词提示词（`keyword_prompt`）、PE2 System Prompt（`system_prompt`）、按群的人工联系人，以及不发 QQ 消息的回答预览。Embedding 配置独立保存，修改客服模型不会清空向量。客服配置保存在 SQLite `app_settings` 中，读取不返回 API Key；空密钥保留，勾选清除后移除。配置每请求读取，保存立即生效。
+`/knowledge/` →「模型设置」新增独立的客服配置：启用开关、API Key、模型名（默认 `deepseek-flash`）、PE1 检索词提示词（`keyword_prompt`）、PE2 System Prompt（`system_prompt`）、按群的人工联系人，以及不发 QQ 消息的回答预览。Embedding 配置独立保存，修改客服模型不会清空向量。客服配置保存在 SQLite `app_settings` 中，读取不返回 API Key；空密钥保留，勾选清除后移除。配置每请求读取，保存立即生效。
 
 - `GET/PUT /knowledge/api/answer-settings`：仅管理密钥可读写；PUT 字段 `enabled`、`model`、`api_key`、`clear_key`、`system_prompt`、`handoff_groups`（群 OpenID 到最多3个成员 OpenID 的映射）。
 - `POST /knowledge/api/answer-settings/test`：管理者用已保存配置发送一条测试请求，会产生服务商调用费用。
@@ -190,7 +190,7 @@ QA 的 FTS 索引严格只写 Q，A 从不参与匹配。关键词召回同时�
 
 PE2 只接收启用名称列表，提示词列出 `[名称]` 表情上下文，模型以 `[玲纱-开心]` 等精确名称选择 0 或 1 张（兼容旧标记），服务端校验后移除标记并返回 `sticker` 描述。群聊与私聊通过 QQ 文件上传接口（`file_type=1, srv_send_msg=false`）取得 `file_info`，再用 `msg_type=7` 随文字被动回复。图片上传或发送失败会尝试保留原文字回复；Trace 记录选图与发送状态，不保存临时 `file_info`。模型不可用时原文回退不附图。
 
-上传或添加时名称可留空，使用现有回答 API Key 调用 `deepseek-v4-flash-vision-exp` 看图命名；手动名称不调用模型。同名自动追加序号，失败提示手动命名或重试。GIF 保留动画原文件，以 `image/gif` 提供下载并交给 QQ 富媒体接口，QQ 拒绝图片时仍保留文字回复。
+上传或添加时名称可留空，使用现有回答 API Key 和后台模型配置（默认 `deepseek-flash`）看图命名；手动名称不调用模型。同名自动追加序号，失败提示手动命名或重试。GIF 保留动画原文件，以 `image/gif` 提供下载并交给 QQ 富媒体接口，QQ 拒绝图片时仍保留文字回复。
 
 PE1 支持 `{"query_groups":[]}` 表示无需检索：问候、感谢和没有具体咨询内容的开场白（例如“你知道吗”）不会被历史商品或 QA 示例扩展成查询。空计划跳过原文召回与空召回重试，PE2 收到 `retrieval_skipped=true` 后自然接话；有明确意图的“多少钱”“定金呢”仍结合历史补全实体。Trace 标记跳过原因。
 
@@ -203,3 +203,5 @@ PE1 支持 `{"query_groups":[]}` 表示无需检索：问候、感谢和没有�
 「持续学习 → 知识更新 · 通知 bot owner」配置 owner（471718054）的私聊 OpenID 并启用。Owner 私聊机器人发送 `/身份` 可查看自己的 C2C OpenID；QQ 号与群成员 OpenID 不可替代。通知需要 QQ 允许该机器人向收件人主动发送私信，平台拒收显示失败。尚未绑定时不自动猜测收件人、不发送。
 
 文档新增/内容修改、QA 生效/更新在同一数据库事务中写通知队列；待审核不通知，审核生效后通知；回滚不产生通知。同知识库最多8条变更合成摘要。机器人用 QQ C2C 主动消息发送，不伪造 msg_id。结果写入通知状态；失败或结果未知不自动重复发送，可在后台人工重试。通知最多保留7天。Owner OpenID 和通知内容不进入回答模型上下文。
+
+2026-09-10 实测 `deepseek-flash` 支持文本 JSON 和图片理解。PE1、PE2、持续学习、表情包命名统一读取后台回答模型配置，不再固定使用独立视觉模型。

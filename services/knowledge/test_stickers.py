@@ -95,7 +95,9 @@ class StickerTests(unittest.TestCase):
    self.api('POST',d={'name':'手动','path':'/c.gif'});self.assertEqual(model.call_count,2)
   with patch.object(answers,'model_call',return_value='玲纱-开心') as model:
    self.assertEqual(stickers.generate_name({'api_key':'test'},'https://example.com/a.gif'),'玲纱-开心')
-   self.assertEqual(model.call_args.args[0]['model'],'deepseek-v4-flash-vision-exp')
+   self.assertEqual(model.call_args.args[0]['model'],'deepseek-flash')
+   stickers.generate_name({'api_key':'test','model':'configured-model'},'https://example.com/a.gif')
+   self.assertEqual(model.call_args.args[0]['model'],'configured-model')
   with patch.object(answers,'model_call',side_effect=answers.ModelError('invalid_key')):
    with self.assertRaises(ValueError):stickers.generate_name({'api_key':'test'},'https://example.com/a.gif')
 

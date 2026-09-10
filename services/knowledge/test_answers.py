@@ -37,7 +37,7 @@ class AnswerTests(unittest.TestCase):
 
     def test_defaults_secret_preservation_and_embedding_isolation(self):
         cfg = self.call('GET', 'answer-settings')
-        self.assertEqual(cfg['model'], 'deepseek-v4.1-flash-expires-on-0910')
+        self.assertEqual(cfg['model'], 'deepseek-flash')
         self.assertFalse(cfg['has_key'])
         with app.db() as c:
             embedding_before = app.config(c)

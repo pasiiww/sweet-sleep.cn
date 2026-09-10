@@ -37,7 +37,7 @@ def messages(cfg, system, current):
 
 
 def defaults():
-    return {'enabled': True, 'model': 'deepseek-v4.1-flash-expires-on-0910', 'api_key': '',
+    return {'enabled': True, 'model': 'deepseek-flash', 'api_key': '',
             'system_prompt': DEFAULT_PROMPT, 'keyword_prompt': KEYWORD_PROMPT, 'handoff_groups': {}, 'admin_qq': '471718054', 'admin_name': '落落', 'revision': ''}
 
 
