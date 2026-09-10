@@ -224,4 +224,4 @@ PE1 支持 `{"query_groups":[]}` 表示无需检索：问候、感谢和没有�
 
 回答历史清洗仅移除 QQ 表情编码、提及标签和空问答对，保留自然表情、短确认和事实细节；旧表情包发送记录规范成 `[名称]`。引用原文通过 `reply_reference`（最多1800字符）送入两阶段当前消息，并在发送成功后随用户问题保存。平台未提供引用正文时不编造。Trace 保留清洗后的历史、引用内容与20轮/24000字符策略。
 
-DeepSeek 统一调用层启用 `thinking.type=enabled`、`reasoning_effort=high`，包括检索规划、回答、学习和表情命名。思考与最终输出的合计预算至少8192 tokens；仅最终 `content` 用于业务回复及后续历史，不记录/转发 `reasoning_content`。Trace 记录思考开关、强度、预算与实际 usage。
+DeepSeek 统一调用层启用 `thinking.type=enabled`、`reasoning_effort=low`，包括检索规划、回答、学习和表情命名。思考与最终输出的合计预算至少8192 tokens；仅最终 `content` 用于业务回复及后续历史，不记录/转发 `reasoning_content`。Trace 记录思考开关、强度、预算与实际 usage。

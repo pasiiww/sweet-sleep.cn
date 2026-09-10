@@ -170,7 +170,7 @@ class AnswerTests(unittest.TestCase):
             payload = json.loads(req.data)
             self.assertEqual(req.full_url, 'https://api.deepseek.com/chat/completions')
             self.assertEqual(payload['thinking'], {'type': 'enabled'})
-            self.assertEqual(payload['reasoning_effort'], 'high')
+            self.assertEqual(payload['reasoning_effort'], 'low')
             self.assertGreaterEqual(payload['max_tokens'], 8192)
             self.assertNotIn('internal reasoning', json.dumps(result))
             self.assertNotIn('response_format', payload)

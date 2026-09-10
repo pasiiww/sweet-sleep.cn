@@ -59,7 +59,7 @@ def model_call(cfg, messages, json_mode=False, max_tokens=1000):
     max_tokens = max(max_tokens, 8192)
     started = time.monotonic()
     record = {'stage': cfg.get('_stage') or ('keywords' if json_mode else 'answer'),
-              'messages': messages, 'max_tokens': max_tokens, 'thinking': 'enabled', 'reasoning_effort': 'high'}
+              'messages': messages, 'max_tokens': max_tokens, 'thinking': 'enabled', 'reasoning_effort': 'low'}
     try:
         usage={}
         text = _model_call(cfg | {'_usage':usage}, messages, json_mode, max_tokens)
@@ -78,7 +78,7 @@ def model_call(cfg, messages, json_mode=False, max_tokens=1000):
 
 
 def _model_call(cfg, messages, json_mode=False, max_tokens=1000):
-    payload = {'model': cfg['model'], 'thinking': {'type': 'enabled'}, 'reasoning_effort': 'high',
+    payload = {'model': cfg['model'], 'thinking': {'type': 'enabled'}, 'reasoning_effort': 'low',
                'max_tokens': max(max_tokens, 8192), 'stream': False, 'messages': messages}
     if json_mode:
         payload['response_format'] = {'type': 'json_object'}
