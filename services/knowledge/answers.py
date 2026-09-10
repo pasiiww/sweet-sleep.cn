@@ -55,9 +55,11 @@ class NoRedirect(request.HTTPRedirectHandler):
 
 
 def model_call(cfg, messages, json_mode=False, max_tokens=1000):
+    # Thinking and final output share the completion budget.
+    max_tokens = max(max_tokens, 8192)
     started = time.monotonic()
     record = {'stage': cfg.get('_stage') or ('keywords' if json_mode else 'answer'),
-              'messages': messages, 'max_tokens': max_tokens}
+              'messages': messages, 'max_tokens': max_tokens, 'thinking': 'enabled', 'reasoning_effort': 'high'}
     try:
         usage={}
         text = _model_call(cfg | {'_usage':usage}, messages, json_mode, max_tokens)
@@ -76,8 +78,8 @@ def model_call(cfg, messages, json_mode=False, max_tokens=1000):
 
 
 def _model_call(cfg, messages, json_mode=False, max_tokens=1000):
-    payload = {'model': cfg['model'], 'thinking': {'type': 'disabled'},
-               'max_tokens': max_tokens, 'stream': False, 'messages': messages}
+    payload = {'model': cfg['model'], 'thinking': {'type': 'enabled'}, 'reasoning_effort': 'high',
+               'max_tokens': max(max_tokens, 8192), 'stream': False, 'messages': messages}
     if json_mode:
         payload['response_format'] = {'type': 'json_object'}
     req = request.Request('https://api.deepseek.com/chat/completions',

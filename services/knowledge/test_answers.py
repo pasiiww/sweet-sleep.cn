@@ -158,7 +158,7 @@ class AnswerTests(unittest.TestCase):
 
     def test_real_protocol_payload_and_response(self):
         rows = [{'citation': 1, 'title': '营业说明', 'content': '上午十点营业。'}]
-        response = {'choices': [{'finish_reason': 'stop', 'message': {'content': '上午十点营业。'}}]}
+        response = {'choices': [{'finish_reason': 'stop', 'message': {'content': '上午十点营业。', 'reasoning_content': 'internal reasoning'}}]}
         class Response:
             def __enter__(self): return self
             def __exit__(self, *args): pass
@@ -169,7 +169,10 @@ class AnswerTests(unittest.TestCase):
             req = opener.return_value.open.call_args.args[0]
             payload = json.loads(req.data)
             self.assertEqual(req.full_url, 'https://api.deepseek.com/chat/completions')
-            self.assertEqual(payload['thinking'], {'type': 'disabled'})
+            self.assertEqual(payload['thinking'], {'type': 'enabled'})
+            self.assertEqual(payload['reasoning_effort'], 'high')
+            self.assertGreaterEqual(payload['max_tokens'], 8192)
+            self.assertNotIn('internal reasoning', json.dumps(result))
             self.assertNotIn('response_format', payload)
             self.assertEqual(result['answer'], '上午十点营业。')
             self.assertIn(answers.OUTPUT_RULE, payload['messages'][0]['content'])
