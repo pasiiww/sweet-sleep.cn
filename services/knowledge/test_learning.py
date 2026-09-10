@@ -164,7 +164,9 @@ class LearningTests(unittest.TestCase):
         self.assertEqual(d['context'][-1]['reference']['quotes'][0]['message_id'],'g0')
         row=self.run_job(job,[self.fact('reply')]);self.assertEqual(row['status'],'completed')
         payload=json.loads(row['details']['model_calls'][0]['messages'][-1]['content'])
-        self.assertEqual(payload['mention_context_by_source'],d['mention_context_by_source'])
+        self.assertNotIn('mention_context_by_source',payload)
+        self.assertNotIn('pair_context_by_source',payload)
+        self.assertEqual(payload['context_by_source'],d['context_by_source'])
 
     def test_guest_mention_no_trigger_and_admin_mention_resets_silence(self):
         self.event('normal')
@@ -271,3 +273,20 @@ class LearningTests(unittest.TestCase):
         d=self.api('GET','learning/jobs/'+result['job_id'])['details']
         self.assertEqual(d['context_by_source']['reply'],['boundary','within'])
         self.assertEqual(d['pair_context_by_source']['reply']['window_seconds'],3600)
+
+    def test_prompt_cleanup_preserves_custom_text_and_existing_jobs(self):
+        legacy=learning.PROMPT.replace(learning.CONTEXT_DESCRIPTION,learning.LEGACY_CONTEXT_DESCRIPTION)
+        custom=legacy+'\n用户自己的额外提取规则。'
+        job=self.batch('before-migration')
+        with app.db() as c:
+            cfg=learning.config(c,self.kb);cfg['prompt']=custom
+            c.execute('UPDATE learning_settings SET value=? WHERE kb_id=?',(json.dumps(cfg),self.kb))
+        app.initialize()
+        with app.db() as c:
+            saved=learning.config(c,self.kb)['prompt']
+            self.assertIn('用户自己的额外提取规则。',saved)
+            self.assertNotIn('普通发言取前10条',saved)
+            self.assertEqual(c.execute('SELECT status FROM learning_jobs WHERE id=?',(job,)).fetchone()[0],'pending')
+        self.assertEqual(learning.model_prompt(legacy),learning.PROMPT)
+        self.assertEqual(learning.model_prompt(legacy).count('只输出 JSON'),1)
+        self.assertNotIn('前1小时',learning.model_prompt(custom))
