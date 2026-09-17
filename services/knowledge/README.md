@@ -237,3 +237,5 @@ DeepSeek 统一调用层启用 `thinking.type=enabled`、`reasoning_effort=low`�
 同一消息7天内幂等，写入结果与数据变更在同一事务提交。对话 Trace 的「私聊维护操作」显示工具、参数、修改前后内容；QA 的 updated_by 标为 private_admin_ai，原始指令保留在 trace。thinking 工具循环按协议在内存回传 reasoning_content，不存入 trace、历史或发送给 QQ。
 
 Owner 通知接收人与私聊维护权限均支持最多20个私聊 OpenID，后台可按行、空格或中英文逗号分隔。通知配置使用 `openids` 数组；旧 `openid` 自动迁移并兼容旧接口。每位收件人独立生成待发送通知和回执，某人的发送失败不会阻止其他人，移出列表后其待发通知不会再认领。两份权限名单保持独立。
+
+群总结接口：POST `/knowledge/api/group-summary`，由现有只读密钥鉴权，参数 `kb_id` 与 `transcript`（1–15000字符）。复用已启用客服模型与4并发槽，使用独立群聊总结提示词；不检索、不写知识库、不扣客服咨询额度。返回 `ok` 和 `answer`，机器人仅在 ok 且发送成功后推进群总结位置。部署需包含 `summaries.py`。

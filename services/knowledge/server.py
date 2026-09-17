@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Small, authenticated knowledge service. Python 3.11+, SQLite FTS5, no pip dependencies."""
+import summaries
 import contextlib
 import hashlib
 import hmac
@@ -629,6 +630,8 @@ def respond_pipeline(data, details):
 
 def api(method, path, data, params):
     segments = path.removeprefix('/knowledge/api/').strip('/').split('/')
+    if segments == ['group-summary'] and method == 'POST':
+        return summaries.respond(sys.modules[__name__], data)
     if segments == ['private-maintenance'] and method == 'POST':
         return maintenance.respond(sys.modules[__name__],data)
     if segments == ['retrieve'] and method == 'POST':
@@ -991,7 +994,7 @@ class Handler(BaseHTTPRequestHandler):
                 fail(401, '请输入有效的访问密钥')
             if learner and not admin and not (parsed.path in ('/knowledge/api/private-maintenance','/knowledge/api/learning/events','/knowledge/api/owner-notifications/claim','/knowledge/api/owner-notifications/ack') and self.command == 'POST'):
                 fail(403, '学习密钥仅可提交聊天事件')
-            if not admin and not learner and not (parsed.path in ('/knowledge/api/retrieve', '/knowledge/api/answer', '/knowledge/api/trace-delivery') and self.command == 'POST'):
+            if not admin and not learner and not (parsed.path in ('/knowledge/api/retrieve', '/knowledge/api/answer', '/knowledge/api/trace-delivery', '/knowledge/api/group-summary') and self.command == 'POST'):
                 fail(403, '召回密钥仅可调用检索接口')
             if parsed.path in ('/knowledge/api/stickers/upload','/knowledge/api/products/upload') and self.command=='POST':
                 if self.headers.get('Transfer-Encoding'):fail(400,'不支持分块请求体')

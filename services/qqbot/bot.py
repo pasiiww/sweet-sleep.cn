@@ -16,10 +16,11 @@ import botpy.gateway
 import botpy.http
 from learner import Learner
 from image_history import ImageHistory
+from group_summary import GroupSummary, timestamp as summary_timestamp
 import compat
 
 LOG = logging.getLogger('knowledge-bot')
-HELP = '群内引用图片发送 /old，可查询本群记录次数、首次发送者和时间。\n我是午觉糖水铺的客服机器人。\n直接发送问题，或输入：/检索 你的问题\n我会根据知识库资料回答，资料不足时请群主或管理员确认。模型不可用时返回最相关文档。\n同一会话保留最近30分钟的问答，可发送 /新对话 清空。\n每天共20次咨询额度，群聊和私聊共享，北京时间零点恢复。\n管理员可在群内发送 /身份，获取后台人工接管配置需要的 OpenID。'
+HELP = '群内发送 /总结：总结上次成功总结后、最近10小时、最多400条和15000字以内的聊天。\n群内引用图片发送 /old，可查询本群记录次数、首次发送者和时间。\n我是午觉糖水铺的客服机器人。\n直接发送问题，或输入：/检索 你的问题\n我会根据知识库资料回答，资料不足时请群主或管理员确认。模型不可用时返回最相关文档。\n同一会话保留最近30分钟的问答，可发送 /新对话 清空。\n每天共20次咨询额度，群聊和私聊共享，北京时间零点恢复。\n管理员可在群内发送 /身份，获取后台人工接管配置需要的 OpenID。'
 
 
 def normalize(text):
@@ -150,6 +151,15 @@ class Retriever:
                 return await response.json()
 
 
+    async def summarize(self, transcript):
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=55)) as session:
+            async with session.post(self.url.rsplit('/',1)[0] + '/group-summary',
+                headers={'Authorization': 'Bearer ' + self.token},
+                json={'kb_id': self.kb_id, 'transcript': transcript}) as response:
+                if response.status != 200:
+                    raise RuntimeError('Summary HTTP ' + str(response.status))
+                return await response.json()
+
     async def maintain(self, query, user_id, message_id):
         token=os.environ.get('KB_LEARN_TOKEN','')
         if not token:return {'answer':'维护通道尚未配置，请到知识库后台处理。','active':False}
@@ -181,6 +191,7 @@ class KnowledgeBot(botpy.Client):
                          log_level=logging.INFO, ext_handlers=False, **kwargs)
         self.retriever, self.seen = retriever, seen
         self.images = ImageHistory(seen.conn)
+        self.summaries = GroupSummary(seen.conn)
         self.capacity = asyncio.Semaphore(4)
         self.conversations = {}
         self.learner = None
@@ -203,6 +214,7 @@ class KnowledgeBot(botpy.Client):
         LOG.info('GROUP_RECEIVED event=at group=%s bot=%s mentioned=True',
                  getattr(message, 'group_openid', ''), compat.is_bot(message))
         if compat.is_bot(message):return
+        self.summaries.observe(message)
         await self.images.observe(message)
         if self.learner: self.learner.observe(message)
         # The platform event certifies this bot was mentioned; text may omit the tag.
@@ -214,17 +226,21 @@ class KnowledgeBot(botpy.Client):
                  getattr(message, 'group_openid', ''), compat.is_bot(message),
                  getattr(message, 'sweet_mentioned', False))
         if compat.is_bot(message):return
+        self.summaries.observe(message)
         await self.images.observe(message)
         if self.learner: self.learner.observe(message)
-        if getattr(message, 'sweet_mentioned', False) or normalize(message.content).lower() == '/old':
+        if getattr(message, 'sweet_mentioned', False) or normalize(message.content).lower() in ('/old', '/总结'):
             await self.answer(message, 'group', mentioned=getattr(message, 'sweet_mentioned', False))
 
     async def answer(self, message, kind, mentioned=False):
         if compat.is_bot(message):return
-        if kind == 'group' and not mentioned and normalize(message.content).lower() != '/old':
+        if kind == 'group' and not mentioned and normalize(message.content).lower() not in ('/old', '/总结'):
             return
         if not message.id or not self.seen.claim(kind + ':' + message.id):
             LOG.info('MESSAGE_SKIPPED kind=%s reason=duplicate_or_missing_id', kind)
+            return
+        if normalize(message.content) == '/总结':
+            await self.summarize(message, kind)
             return
         session = conversation_key(message, kind, self.retriever.kb_id)
         # Serialize generation AND delivery for each conversation; release unused locks.
@@ -238,6 +254,35 @@ class KnowledgeBot(botpy.Client):
             entry[1] -= 1
             if not entry[1]:
                 self.conversations.pop(lock_key, None)
+
+    async def summarize(self, message, kind):
+        group = getattr(message, 'group_openid', '')
+        if kind != 'group' or not group:
+            await message.reply(content='请在群内发送 /总结。', msg_type=0, msg_seq=1)
+            return
+        if group in self.summaries.busy:
+            await message.reply(content='本群正在生成总结，请稍候。', msg_type=0, msg_seq=1)
+            return
+        self.summaries.busy.add(group)
+        try:
+            transcript, checkpoint, count = self.summaries.snapshot(group, summary_timestamp(message))
+            if not transcript:
+                await message.reply(content='当前范围内没有可总结的新内容（已过滤复读和表情包）。', msg_type=0, msg_seq=1)
+                return
+            result = await self.retriever.summarize(transcript)
+            reply = ('群聊总结（清理后' + str(count) + '条发言）\n' if result.get('ok') else '') + plain(result['answer'])[:1500]
+            sent = await message.reply(content=reply, msg_type=0, msg_seq=1)
+            if sent and result.get('ok'):
+                self.summaries.delivered(group, checkpoint, reply)
+            LOG.info('SUMMARY_DELIVERY ok=%s messages=%s', bool(sent and result.get('ok')), count)
+        except Exception as exc:
+            LOG.warning('SUMMARY_FAILED error=%s', type(exc).__name__)
+            try:
+                await message.reply(content='总结暂时失败，请稍后重试；总结进度没有更新。', msg_type=0, msg_seq=1)
+            except Exception:
+                LOG.warning('SUMMARY_REPLY_FAILED')
+        finally:
+            self.summaries.busy.discard(group)
 
     async def send_answer(self, message, kind, reply, trace, session=''):
         sticker = (trace or {}).get('sticker')
