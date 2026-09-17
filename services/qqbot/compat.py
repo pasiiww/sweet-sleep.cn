@@ -38,7 +38,7 @@ def reference_metadata(data, own_ids=()):
 
 
 class FullGroupMessage(GroupMessage):
-    __slots__ = ('sweet_mentioned','sweet_learning','sweet_author_bot')
+    __slots__ = ('sweet_mentioned','sweet_learning','sweet_author_bot','sweet_sender_name')
 
     def __init__(self, api, event_id, data, robot_id):
         super().__init__(api, event_id, data)
@@ -51,7 +51,12 @@ class FullGroupMessage(GroupMessage):
              (mentions if isinstance(mentions, list) else [])[:20] if isinstance(m, dict)])
         self.sweet_mentioned = any(isinstance(m,dict) and (m.get('is_you') is True or str(m.get('id','')) in own_ids)
                                    for m in (mentions if isinstance(mentions,list) else []))
+        self.sweet_sender_name=str((data.get('author') or {}).get('username') or (data.get('author') or {}).get('nickname') or '')[:100]
         self.sweet_learning=reference_metadata(data,own_ids)
+        if self.sweet_learning['is_reply'] and not self.sweet_learning['reference']['msg_idx']:
+            elements=data.get('msg_elements') or []
+            if isinstance(elements,list) and elements and isinstance(elements[0],dict):
+                self.sweet_learning['reference']['msg_idx']=str(elements[0].get('msg_idx') or '')[:200]
         self.sweet_author_bot=self.sweet_learning['author_bot']
 
 

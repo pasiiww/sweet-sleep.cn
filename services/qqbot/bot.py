@@ -15,10 +15,11 @@ import botpy
 import botpy.gateway
 import botpy.http
 from learner import Learner
+from image_history import ImageHistory
 import compat
 
 LOG = logging.getLogger('knowledge-bot')
-HELP = '我是午觉糖水铺的客服机器人。\n直接发送问题，或输入：/检索 你的问题\n我会根据知识库资料回答，资料不足时请群主或管理员确认。模型不可用时返回最相关文档。\n同一会话保留最近30分钟的问答，可发送 /新对话 清空。\n每天共20次咨询额度，群聊和私聊共享，北京时间零点恢复。\n管理员可在群内发送 /身份，获取后台人工接管配置需要的 OpenID。'
+HELP = '群内引用图片发送 /old，可查询本群记录次数、首次发送者和时间。\n我是午觉糖水铺的客服机器人。\n直接发送问题，或输入：/检索 你的问题\n我会根据知识库资料回答，资料不足时请群主或管理员确认。模型不可用时返回最相关文档。\n同一会话保留最近30分钟的问答，可发送 /新对话 清空。\n每天共20次咨询额度，群聊和私聊共享，北京时间零点恢复。\n管理员可在群内发送 /身份，获取后台人工接管配置需要的 OpenID。'
 
 
 def normalize(text):
@@ -179,6 +180,7 @@ class KnowledgeBot(botpy.Client):
         super().__init__(intents=botpy.Intents(public_messages=True), timeout=15,
                          log_level=logging.INFO, ext_handlers=False, **kwargs)
         self.retriever, self.seen = retriever, seen
+        self.images = ImageHistory(seen.conn)
         self.capacity = asyncio.Semaphore(4)
         self.conversations = {}
         self.learner = None
@@ -201,6 +203,7 @@ class KnowledgeBot(botpy.Client):
         LOG.info('GROUP_RECEIVED event=at group=%s bot=%s mentioned=True',
                  getattr(message, 'group_openid', ''), compat.is_bot(message))
         if compat.is_bot(message):return
+        await self.images.observe(message)
         if self.learner: self.learner.observe(message)
         # The platform event certifies this bot was mentioned; text may omit the tag.
         await self.answer(message, 'group', mentioned=True)
@@ -211,13 +214,14 @@ class KnowledgeBot(botpy.Client):
                  getattr(message, 'group_openid', ''), compat.is_bot(message),
                  getattr(message, 'sweet_mentioned', False))
         if compat.is_bot(message):return
+        await self.images.observe(message)
         if self.learner: self.learner.observe(message)
-        if getattr(message, 'sweet_mentioned', False):
-            await self.answer(message, 'group', mentioned=True)
+        if getattr(message, 'sweet_mentioned', False) or normalize(message.content).lower() == '/old':
+            await self.answer(message, 'group', mentioned=getattr(message, 'sweet_mentioned', False))
 
     async def answer(self, message, kind, mentioned=False):
         if compat.is_bot(message):return
-        if kind == 'group' and not mentioned:
+        if kind == 'group' and not mentioned and normalize(message.content).lower() != '/old':
             return
         if not message.id or not self.seen.claim(kind + ':' + message.id):
             LOG.info('MESSAGE_SKIPPED kind=%s reason=duplicate_or_missing_id', kind)
@@ -274,7 +278,9 @@ class KnowledgeBot(botpy.Client):
         remember = False
         trace, delivery, sent, delivery_error = None, 'failed', '', ''
         try:
-            if not query or query.lower() in ('帮助', '/帮助', '/help', 'help', '/start'):
+            if query.lower() == '/old':
+                reply = await self.images.lookup(message) if kind == 'group' else '请在群内引用图片消息并发送 /old。'
+            elif not query or query.lower() in ('帮助', '/帮助', '/help', 'help', '/start'):
                 reply = HELP
                 if kind=='c2c':reply+='\n\n私聊维护：\n/modify 知识库 修改要求\n/modify qa 修改要求\n/add 商品库 商品信息\n/退出 结束维护（仅授权账号可写入）'
             elif kind=='c2c' and (re.match(r'^/(?:modify|add)(?:\s|$)',query,re.I) or query in ('/退出','/cancel') or self.seen.maintenance_active(session)):
