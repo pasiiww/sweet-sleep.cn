@@ -76,7 +76,7 @@ class ImageTests(unittest.IsolatedAsyncioTestCase):
         await self.bot.on_group_message_create(self.message(images=3))
         answer = await self.bot.images.lookup(self.message(images=0, ref='picture'))
         self.assertIn('图片 1：这张图在本群已记录 2 次', answer)
-        self.assertIn('图片 2：这张图在本群已记录 1 次', answer)
+        self.assertIn('图片 2：这是第一次发送。这张图在本群已记录 1 次', answer)
         self.assertIn('图片 3：这张图在本群已记录 2 次', answer)
 
     async def test_missing_reference_unseen_foreign_group_and_failed_download(self):
@@ -106,6 +106,30 @@ class ImageTests(unittest.IsolatedAsyncioTestCase):
         await record
         self.assertIn('1 次', await query)
 
+    async def test_quoted_hash_fallback_first_repeat_and_group_isolation(self):
+        await self.bot.on_group_message_create(self.message())
+        query = self.message(mid='command', images=0, content='/old', ref_idx='different-platform-index')
+        query.sweet_quoted_images = [{'content_type': 'image/jpeg', 'url': 'https://gchat.qpic.cn/quoted'}]
+        answer = await self.bot.images.lookup(query)
+        self.assertIn('这是第一次发送', answer)
+        self.assertIn('1 次', answer)
+        await self.bot.images.lookup(query)
+        self.assertEqual(self.seen.conn.execute('SELECT count(*) FROM image_occurrences').fetchone()[0], 1)
+        await self.bot.on_group_message_create(self.message(mid='second', member='second'))
+        answer = await self.bot.images.lookup(query)
+        self.assertIn('2 次', answer)
+        self.assertNotIn('这是第一次', answer)
+        query.group_openid = 'another-group'
+        self.assertIn('还没有', await self.bot.images.lookup(query))
+
+    async def test_quoted_hash_failure_does_not_report_first(self):
+        query = self.message(images=0, ref_idx='unknown')
+        query.sweet_quoted_images = [{'content_type': 'image/jpeg', 'url': 'https://gchat.qpic.cn/quoted'}]
+        self.hash.side_effect = asyncio.TimeoutError()
+        answer = await self.bot.images.lookup(query)
+        self.assertIn('下载失败', answer)
+        self.assertNotIn('这是第一次', answer)
+
     async def test_bot_messages_not_recorded(self):
         message = self.message()
         message.sweet_author_bot = True
@@ -120,8 +144,9 @@ class ImageTests(unittest.IsolatedAsyncioTestCase):
         message = FullGroupMessage(self.api, 'event', data, 'bot')
         self.assertEqual(message.sweet_learning['reference']['msg_idx'], 'quoted-index')
         await self.bot.on_group_message_create(message)
-        self.hash.assert_not_awaited()
-        self.assertIn('没有找到', self.api.post_group_message.call_args.kwargs['content'])
+        self.hash.assert_awaited_once()
+        self.assertIn('还没有', self.api.post_group_message.call_args.kwargs['content'])
+        self.assertEqual(self.seen.conn.execute('SELECT count(*) FROM image_occurrences').fetchone()[0], 0)
 
 
 class DownloadTests(unittest.IsolatedAsyncioTestCase):

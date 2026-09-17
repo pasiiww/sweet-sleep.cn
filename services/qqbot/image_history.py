@@ -148,7 +148,8 @@ class ImageHistory:
         meta = field(message, 'sweet_learning', {}) or {}
         ref = meta.get('reference') or {}
         mid, idx = ref.get('message_id', ''), ref.get('msg_idx', '')
-        if not mid and not idx:
+        quoted = field(message, 'sweet_quoted_images', []) or []
+        if not mid and not idx and not quoted:
             return '请引用一条图片消息，再发送 /old。'
         group = field(message, 'group_openid')
         def rows():
@@ -161,7 +162,20 @@ class ImageHistory:
             if task:
                 await asyncio.shield(task)
         records = rows()
+        if not records and quoted:
+            # QQ reference indices need not equal the original delivery index.
+            # Match the quoted bytes against existing group history without incrementing it.
+            for slot, attachment in enumerate(quoted):
+                try:
+                    async with self.capacity:
+                        digest = await hash_image(field(attachment, 'url'), field(message, '_api', None))
+                    records.append(('', slot, digest))
+                except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, OSError, RuntimeError) as exc:
+                    LOG.warning('IMAGE_QUOTE_HASH_FAILED error=%s', type(exc).__name__)
+                    records.append(('', slot, None))
+            LOG.info('IMAGE_QUOTE_LOOKUP images=%s', len(records))
         if not records:
+            LOG.info('IMAGE_REFERENCE_MISS has_mid=%s has_idx=%s quoted_images=%s', bool(mid), bool(idx), len(quoted))
             return '没有找到这条引用消息的图片记录。只能查询启用后机器人在本群收到的图片。'
         parts = []
         for _, slot, digest in records[:10]:
@@ -170,11 +184,15 @@ class ImageHistory:
                 parts.append(prefix + '图片未能完成哈希记录（下载失败或超过20MB），暂时无法统计。')
                 continue
             count = self.conn.execute('SELECT count(*) FROM image_occurrences WHERE group_id=? AND hash=?', (group, digest)).fetchone()[0]
+            if not count:
+                parts.append(prefix + '本群还没有这张图的发送记录，无法确认首次发送者。请重新发送原图后再引用查询。')
+                continue
             member, name, at = self.conn.execute('''SELECT member_id,member_name,sent_at FROM image_occurrences
                 WHERE group_id=? AND hash=? ORDER BY sent_at,message_id,slot LIMIT 1''', (group, digest)).fetchone()
             safe_name = re.sub(r'[@<>\x00-\x1f]', '', name)[:60]
             identity = f'<qqbot-at-user id="{member}" />' if re.fullmatch(r'[A-Za-z0-9_-]{1,128}', member) else '未知成员'
-            parts.append(f'{prefix}这张图在本群已记录 {count} 次。\n最早发送：{safe_name + " " if safe_name else ""}{identity}\n首次时间：{datetime.fromtimestamp(at, BEIJING):%Y-%m-%d %H:%M:%S}（北京时间）')
+            first = '这是第一次发送。' if count == 1 else ''
+            parts.append(f'{prefix}{first}这张图在本群已记录 {count} 次。\n最早发送：{safe_name + " " if safe_name else ""}{identity}\n首次时间：{datetime.fromtimestamp(at, BEIJING):%Y-%m-%d %H:%M:%S}（北京时间）')
         if len(records) > 10:
             parts.append('本条消息图片较多，仅展示前10张的统计。')
         return '\n\n'.join(parts)

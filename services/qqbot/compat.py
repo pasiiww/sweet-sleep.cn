@@ -38,7 +38,7 @@ def reference_metadata(data, own_ids=()):
 
 
 class FullGroupMessage(GroupMessage):
-    __slots__ = ('sweet_mentioned','sweet_learning','sweet_author_bot','sweet_sender_name')
+    __slots__ = ('sweet_mentioned','sweet_learning','sweet_author_bot','sweet_sender_name','sweet_quoted_images')
 
     def __init__(self, api, event_id, data, robot_id):
         super().__init__(api, event_id, data)
@@ -57,6 +57,15 @@ class FullGroupMessage(GroupMessage):
             elements=data.get('msg_elements') or []
             if isinstance(elements,list) and elements and isinstance(elements[0],dict):
                 self.sweet_learning['reference']['msg_idx']=str(elements[0].get('msg_idx') or '')[:200]
+        # Quoted attachments are ephemeral lookup inputs, never new sends or learning data.
+        self.sweet_quoted_images=[]
+        if self.sweet_learning['is_reply']:
+            elements=data.get('msg_elements') or []
+            if isinstance(elements,list) and elements and isinstance(elements[0],dict):
+                attachments=elements[0].get('attachments') or []
+                if isinstance(attachments,list):
+                    self.sweet_quoted_images=[{'content_type':a.get('content_type',''), 'url':a.get('url','')}
+                        for a in attachments if isinstance(a,dict) and str(a.get('content_type','')).lower().split('/')[0]=='image'][:10]
         self.sweet_author_bot=self.sweet_learning['author_bot']
 
 
