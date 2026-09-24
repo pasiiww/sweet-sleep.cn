@@ -132,6 +132,7 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_group_member_join_gets_one_event_reply(self):
         self.bot.api.post_group_message = AsyncMock(return_value={'id': 'welcome'})
+        self.retriever.group_welcome = AsyncMock(return_value='可编辑的新人欢迎词\n请先看群公告')
         event = SimpleNamespace(event_id='join-event-1', group_openid='group-1',
                                 member_openid='member-1')
         await self.bot.on_group_member_add(event)
@@ -140,8 +141,8 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
         kwargs = self.bot.api.post_group_message.call_args.kwargs
         self.assertEqual(kwargs['group_openid'], 'group-1')
         self.assertEqual(kwargs['event_id'], 'join-event-1')
-        self.assertIn('蔚蓝档案', kwargs['content'])
-        self.assertIn('@ 我提问', kwargs['content'])
+        self.assertEqual(kwargs['content'], '可编辑的新人欢迎词\n请先看群公告')
+        self.retriever.group_welcome.assert_awaited_once_with()
 
     async def test_bounded_plain_text_and_persistent_claim(self):
         text = format_results({'results': [{'title': '@everyone <tag>', 'content': '长' * 10000, 'ordinal': 0}] * 10})
@@ -172,6 +173,23 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(received['group_id'], '')
             self.assertEqual(received['history'], [])
             self.assertEqual(result['results'][0]['content'], 'test')
+        finally:
+            await runner.cleanup()
+
+    async def test_group_welcome_uses_read_only_configuration_endpoint(self):
+        async def handler(request):
+            self.assertEqual(request.headers['Authorization'], 'Bearer read-test')
+            return web.json_response({'welcome': '后台设置的欢迎词'})
+        app = web.Application()
+        app.router.add_get('/group-welcome', handler)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, '127.0.0.1', 0)
+        await site.start()
+        try:
+            port = site._server.sockets[0].getsockname()[1]
+            retriever = Retriever(f'http://127.0.0.1:{port}/retrieve', 'read-test', 'kb-test')
+            self.assertEqual(await retriever.group_welcome(), '后台设置的欢迎词')
         finally:
             await runner.cleanup()
 

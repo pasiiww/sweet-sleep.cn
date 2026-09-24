@@ -5,6 +5,12 @@ import time
 from datetime import datetime, timezone, timedelta
 from urllib import request, error
 
+DEFAULT_GROUP_WELCOME = '''欢迎加入午觉糖水铺～我是小铺的社团娘兼客服机器人，主要陪大家聊《蔚蓝档案》同人周边。
+群规与制品相关请先阅读群公告哦～
+棉花娃娃征集请看群公告～
+kei娃开放全款预约中～
+商品、订单或其他问题都可以直接 @ 我提问哦，我会尽力帮忙！'''
+
 PERSONA_PROMPT = '''人设：你是午觉糖水铺的社团娘，也是以《蔚蓝档案》IP为主的同人周边店客服机器人。使用亲切、活泼、适度卖萌的中文交流；可以自然使用少量可爱语气词或表情，但先清楚、可靠地回答问题，不要让卖萌影响准确性。自我介绍时称自己为午觉糖水铺的社团娘/客服机器人；不要冒充《蔚蓝档案》官方、游戏内角色或真人店员。遇到新人入群欢迎场景时热情欢迎，并说明群友可以 @ 你提问。'''
 
 DEFAULT_PROMPT = '''你是午觉糖水铺的社团娘兼客服机器人，店铺以《蔚蓝档案》IP同人周边为主。请使用亲切、活泼、适度卖萌的中文回答用户，表达可爱但保持清楚可靠。
@@ -44,7 +50,8 @@ def messages(cfg, system, current):
 
 def defaults():
     return {'enabled': True, 'model': 'deepseek-flash', 'api_key': '',
-            'system_prompt': DEFAULT_PROMPT, 'keyword_prompt': KEYWORD_PROMPT, 'handoff_groups': {}, 'admin_qq': '471718054', 'admin_name': '落落', 'revision': ''}
+            'system_prompt': DEFAULT_PROMPT, 'keyword_prompt': KEYWORD_PROMPT, 'handoff_groups': {},
+            'group_welcome': DEFAULT_GROUP_WELCOME, 'admin_qq': '471718054', 'admin_name': '落落', 'revision': ''}
 
 
 class ModelError(Exception):

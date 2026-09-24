@@ -39,6 +39,8 @@ class AnswerTests(unittest.TestCase):
         cfg = self.call('GET', 'answer-settings')
         self.assertEqual(cfg['model'], 'deepseek-flash')
         self.assertFalse(cfg['has_key'])
+        self.assertIn('棉花娃娃征集请看群公告', cfg['group_welcome'])
+        self.assertEqual(cfg['default_group_welcome'], cfg['group_welcome'])
         with app.db() as c:
             embedding_before = app.config(c)
         self.configure(keyword_prompt='仅提取当前问题的词')
@@ -51,6 +53,14 @@ class AnswerTests(unittest.TestCase):
             self.assertEqual(app.config(c), embedding_before)
         self.configure(api_key='', clear_key=True)
         self.assertFalse(self.call('GET', 'answer-settings')['has_key'])
+
+    def test_group_welcome_is_configurable_and_readable_by_bot(self):
+        welcome = '欢迎新同学～请先看群公告！'
+        self.configure(group_welcome=welcome)
+        self.assertEqual(self.call('GET', 'answer-settings')['group_welcome'], welcome)
+        self.assertEqual(self.call('GET', 'group-welcome')['welcome'], welcome)
+        with self.assertRaises(app.Problem):
+            self.configure(group_welcome=' ')
 
     def test_missing_key_and_disabled_return_only_top_document(self):
         with patch.object(answers, 'complete') as model:

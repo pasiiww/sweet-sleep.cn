@@ -110,9 +110,10 @@ curl https://sweet-sleep.cn/knowledge/api/retrieve \
 
 ## DeepSeek 客服回答
 
-`/knowledge/` →「模型设置」新增独立的客服配置：启用开关、API Key、模型名（默认 `deepseek-flash`）、PE1 检索词提示词（`keyword_prompt`）、PE2 System Prompt（`system_prompt`）、按群的人工联系人，以及不发 QQ 消息的回答预览。Embedding 配置独立保存，修改客服模型不会清空向量。客服配置保存在 SQLite `app_settings` 中，读取不返回 API Key；空密钥保留，勾选清除后移除。配置每请求读取，保存立即生效。
+`/knowledge/` →「模型设置」新增独立的客服配置：启用开关、API Key、模型名（默认 `deepseek-flash`）、PE1 检索词提示词（`keyword_prompt`）、PE2 System Prompt（`system_prompt`）、按群的人工联系人、可配置的 QQ 入群欢迎词，以及不发 QQ 消息的回答预览。Embedding 配置独立保存，修改客服模型不会清空向量。客服配置保存在 SQLite `app_settings` 中，读取不返回 API Key；空密钥保留，勾选清除后移除。配置每请求读取，保存立即生效。
 
-- `GET/PUT /knowledge/api/answer-settings`：仅管理密钥可读写；PUT 字段 `enabled`、`model`、`api_key`、`clear_key`、`system_prompt`、`handoff_groups`（群 OpenID 到最多3个成员 OpenID 的映射）。
+- `GET/PUT /knowledge/api/answer-settings`：仅管理密钥可读写；PUT 字段 `enabled`、`model`、`api_key`、`clear_key`、`system_prompt`、`group_welcome`、`handoff_groups`（群 OpenID 到最多3个成员 OpenID 的映射）。
+- `GET /knowledge/api/group-welcome`：召回密钥只读获取群入群欢迎词，供 QQ 机器人发送；响应只包含欢迎词。
 - `POST /knowledge/api/answer-settings/test`：管理者用已保存配置发送一条测试请求，会产生服务商调用费用。
 - `POST /knowledge/api/answer`：管理密钥或召回密钥可调用，参数 `kb_id`、`query`、可选 `group_id`。配置了模型后，此接口可产生调用费用。机器人不能修改提示词或模型配置。
 - `POST /knowledge/api/agent/answer`：QQ 机器人使用的 LangChain 回答入口；沿用每日额度、会话历史与 trace。全部工具合计最多调用6次，最多调用8次模型；第7次工具调用会被系统拦截，由模型根据已取得的资料直接完成回复。群聊默认携带本群最近10条聊天，需要更多时 agent 才调用与 stdio MCP 共用的 `get_recent_chat_messages` 查询当前群最近7天记录；聊天记录会附带最多12字的发送者昵称。群聊长期记忆按群共享，私聊记忆按用户独立。BA 问题优先查 GameKee，资料不足时可再查 Blue Archive Wikiru。

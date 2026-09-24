@@ -1,6 +1,6 @@
 # QQ 知识库客服机器人
 
-使用腾讯官方 [`qq-botpy`](https://github.com/tencent-connect/botpy) 1.2.1，监听 `public_messages` 中的 QQ 私聊消息和群 @消息，并通过兼容层订阅群成员加入事件。新人入群时机器人用该事件被动发送欢迎，介绍自己是午觉糖水铺的《蔚蓝档案》同人周边店社团娘客服，并邀请群友 @ 她提问。收到问题后调用知识库 `/knowledge/api/agent/answer`，由知识库服务使用 LangChain agent 自主检索并调用 DeepSeek。QQ 进程不读取模型密钥。
+使用腾讯官方 [`qq-botpy`](https://github.com/tencent-connect/botpy) 1.2.1，监听 `public_messages` 中的 QQ 私聊消息和群 @消息，并通过兼容层订阅群成员加入事件。新人入群时机器人用该事件被动发送欢迎，介绍自己是午觉糖水铺的《蔚蓝档案》同人周边店社团娘客服，并邀请群友 @ 她提问。欢迎词可在知识库后台「模型设置」修改，保存后下次入群即生效；读取失败时使用机器人内置默认文案。收到问题后调用知识库 `/knowledge/api/agent/answer`，由知识库服务使用 LangChain agent 自主检索并调用 DeepSeek。QQ 进程不读取模型密钥。
 
 ## 使用
 

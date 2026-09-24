@@ -255,6 +255,7 @@ async function loadAnswerSettings() {
   $('answer-key').value = '';
   $('answer-clear-key').checked = false;
   $('answer-prompt').value = cfg.system_prompt;
+  $('group-welcome').value = cfg.group_welcome || cfg.default_group_welcome;
   $('handoff-groups').value = Object.entries(cfg.handoff_groups).map(([group, ids]) => [group, ...ids].join(' ')).join('\n');
   $('answer-key-status').textContent = cfg.has_key ? '已保存密钥，留空保留原密钥。' : '尚未保存 DeepSeek 密钥。';
   $('answer-status').textContent = !cfg.enabled ? answerReasons.disabled : !cfg.has_key ? answerReasons.missing_key : cfg.last_status ? '最近状态：' + (answerReasons[cfg.last_status.reason] || cfg.last_status.reason) + ' · ' + new Date(cfg.last_status.at).toLocaleString('zh-CN') : '已配置，下一次提问将调用模型。';
@@ -268,7 +269,7 @@ $('answer-settings-form').onsubmit = event => { event.preventDefault(); busy(eve
     if (Object.hasOwn(groups, group)) throw new Error('同一个群请写在同一行');
     groups[group] = ids;
   }
-  await api('answer-settings', 'PUT', { enabled: $('answer-enabled').checked, model: $('answer-model').value, api_key: $('answer-key').value, clear_key: $('answer-clear-key').checked, system_prompt: $('answer-prompt').value, keyword_prompt: $('keyword-prompt').value, admin_qq: $('admin-qq').value, admin_name: $('admin-name').value, handoff_groups: groups });
+  await api('answer-settings', 'PUT', { enabled: $('answer-enabled').checked, model: $('answer-model').value, api_key: $('answer-key').value, clear_key: $('answer-clear-key').checked, system_prompt: $('answer-prompt').value, keyword_prompt: $('keyword-prompt').value, group_welcome: $('group-welcome').value, admin_qq: $('admin-qq').value, admin_name: $('admin-name').value, handoff_groups: groups });
   await loadAnswerSettings(); $('answer-test-status').textContent = ''; toast('客服配置已保存，下次提问立即生效');
 }); };
 $('test-answer-model').onclick = () => busy($('test-answer-model'), async () => {

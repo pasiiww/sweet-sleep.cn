@@ -697,6 +697,8 @@ def api(method, path, data, params):
             if method not in ('GET','PUT'):fail(405,'不支持此操作')
             try:return maintenance.settings(c,data if method=='PUT' else None)
             except ValueError as exc:fail(400,str(exc))
+        if segments==['group-welcome'] and method=='GET':
+            return {'welcome':answer_config(c)['group_welcome']}
         if segments[0]=='products' and len(segments) in (1,2):
             return products.handle(sys.modules[__name__],c,method,segments,data,params)
         if segments==['owner-notifications'] and method=='GET':
@@ -810,6 +812,7 @@ def api(method, path, data, params):
                        'admin_name': string(data, 'admin_name', 40) or cfg['admin_name'],
                        'system_prompt': string(data, 'system_prompt', 12000, True),
                        'keyword_prompt': string(data, 'keyword_prompt', 12000, True) if 'keyword_prompt' in data else cfg['keyword_prompt'],
+                       'group_welcome': string(data, 'group_welcome', 1000, True) if 'group_welcome' in data else cfg['group_welcome'],
                        'api_key': key or ('' if data.get('clear_key') else cfg['api_key']),
                        'handoff_groups': groups, 'revision': secrets.token_hex(8)}
                 c.execute('UPDATE app_settings SET value=? WHERE name=?', (json.dumps(cfg), 'answer'))
@@ -819,6 +822,7 @@ def api(method, path, data, params):
             status = c.execute("SELECT value FROM app_settings WHERE name='answer_status'").fetchone()
             return {k: v for k, v in cfg.items() if k not in ('api_key', 'revision')} | {
                 'has_key': bool(cfg['api_key']), 'default_prompt': answers.DEFAULT_PROMPT, 'default_keyword_prompt': answers.KEYWORD_PROMPT,
+                'default_group_welcome': answers.DEFAULT_GROUP_WELCOME,
                 'last_status': json.loads(status[0]) if status else None}
         if segments == ['settings']:
             cfg = config(c)
@@ -1012,7 +1016,8 @@ class Handler(BaseHTTPRequestHandler):
                 fail(401, '请输入有效的访问密钥')
             if learner and not admin and not (parsed.path in ('/knowledge/api/private-maintenance','/knowledge/api/agent/private-maintenance','/knowledge/api/learning/events','/knowledge/api/owner-notifications/claim','/knowledge/api/owner-notifications/ack') and self.command == 'POST'):
                 fail(403, '学习密钥仅可提交聊天事件')
-            if not admin and not learner and not (parsed.path in ('/knowledge/api/retrieve', '/knowledge/api/answer', '/knowledge/api/agent/answer', '/knowledge/api/agent/memory', '/knowledge/api/trace-delivery', '/knowledge/api/group-summary') and self.command == 'POST'):
+            read_paths = (parsed.path in ('/knowledge/api/retrieve', '/knowledge/api/answer', '/knowledge/api/agent/answer', '/knowledge/api/agent/memory', '/knowledge/api/trace-delivery', '/knowledge/api/group-summary') and self.command == 'POST') or (parsed.path == '/knowledge/api/group-welcome' and self.command == 'GET')
+            if not admin and not learner and not read_paths:
                 fail(403, '召回密钥仅可调用检索接口')
             if parsed.path in ('/knowledge/api/stickers/upload','/knowledge/api/products/upload') and self.command=='POST':
                 if self.headers.get('Transfer-Encoding'):fail(400,'不支持分块请求体')
