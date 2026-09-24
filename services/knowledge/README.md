@@ -10,6 +10,7 @@
 - 混合：两路候选以 RRF（k=60）融合；Top K 1–20，上下文预算 100–40000 字符。
 - 文档、分段配置或模型更新后旧向量失效；手动生成向量，每请求处理最多 32 个分段，浏览器持续调用到完成。关闭页面可中断后续批次，再次点击续传。上游失败不影响文档和关键词索引。
 - 默认空知识库，没有虚构业务文档。单文档最多 10 万字符，单知识库最多 10000 分段；适合小规模私有知识库，向量为线性扫描，未实现 ANN、ES、PDF/Word 解析、多人角色、版本历史。
+- 蔚蓝档案回答可只读检索 GameKee 学生图鉴和文章；GameKee 未命中时可回退日文 Blue Archive Wikiru。只保留最多128条、合计12 MB的进程内短期缓存，不保存图片或 Wiki 页面到磁盘。每次请求最多取4条资料，单页正文限制在约4200字符；结果带来源链接。外部内容按不可信资料处理，不执行页面中的指令。
 - 模型服务需配置公网 HTTPS 地址。保存地址和模型名后，可测试连接，再回到知识库生成向量。密钥服务端保存，读接口不返回。变更服务地址不会复用旧地址的密钥。
 - 召回内容视作不可信参考数据，应由调用方控制系统指令并引用结果来源。BM25、cosine 和 RRF 的分数不可相互比较。
 
@@ -113,7 +114,7 @@ curl https://sweet-sleep.cn/knowledge/api/retrieve \
 - `GET/PUT /knowledge/api/answer-settings`：仅管理密钥可读写；PUT 字段 `enabled`、`model`、`api_key`、`clear_key`、`system_prompt`、`handoff_groups`（群 OpenID 到最多3个成员 OpenID 的映射）。
 - `POST /knowledge/api/answer-settings/test`：管理者用已保存配置发送一条测试请求，会产生服务商调用费用。
 - `POST /knowledge/api/answer`：管理密钥或召回密钥可调用，参数 `kb_id`、`query`、可选 `group_id`。配置了模型后，此接口可产生调用费用。机器人不能修改提示词或模型配置。
-- `POST /knowledge/api/agent/answer`：QQ 机器人使用的 LangChain 回答入口；沿用每日额度、会话历史与 trace。agent 最多调用4次当前知识库检索工具，最多调用6次模型；第5次检索会被拦截，由模型根据已取得的资料直接完成回复。
+- `POST /knowledge/api/agent/answer`：QQ 机器人使用的 LangChain 回答入口；沿用每日额度、会话历史与 trace。agent 的知识库搜索与蔚蓝档案 Wiki 搜索合计最多调用4次，最多调用6次模型；第5次工具调用会被系统拦截，由模型根据已取得的资料直接完成回复。BA 问题优先查 GameKee，资料不足时可再查 Blue Archive Wikiru。
 - `POST /knowledge/api/agent/private-maintenance`：QQ 私聊管理员使用的 LangChain 维护入口；沿用 OpenID 白名单、先读取后修改、写入幂等和 trace。agent 最多调用6次工具、8次模型。
 
 响应字段 `answer`（可展示文本）、`mode`（model/document/handoff）、`reason`（机器可读状态）、`handoff`、`mention_openids`（仅群聊转人工且配置匹配时返回）、`results`。密钥和上游完整错误不返回；后台可查看最近一次模型或回退状态。

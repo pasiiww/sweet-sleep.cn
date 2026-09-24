@@ -39,6 +39,7 @@ def load_environment():
 load_environment()
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import server as knowledge  # noqa: E402
+import ba_wiki  # noqa: E402
 
 
 PROTOCOL_VERSION = '2025-03-26'
@@ -58,6 +59,11 @@ TOOLS = [
      'annotations': {'destructiveHint': True}},
     {'name': 'search_knowledge', 'description': '在指定知识库按关键词检索文档和已生效问答，返回可引用原文片段。',
      'inputSchema': {'type': 'object', 'properties': {'kb_id': {'type': 'string'}, 'query': {'type': 'string'}, 'top_k': {'type': 'integer', 'minimum': 1, 'maximum': 20}}, 'required': ['kb_id', 'query'], 'additionalProperties': False},
+     'annotations': {'readOnlyHint': True}},
+    {'name': 'search_ba_wiki', 'description': '只读检索蔚蓝档案角色、剧情和玩法资料。auto 优先 GameKee，未命中时回退日文 Blue Archive Wikiru；也可指定 wiki 来源。',
+     'inputSchema': {'type': 'object', 'properties': {'query': {'type': 'string', 'minLength': 1, 'maxLength': 120},
+         'source': {'type': 'string', 'enum': ['auto', 'gamekee', 'bluearchivewiki'], 'default': 'auto'},
+         'limit': {'type': 'integer', 'minimum': 1, 'maximum': 4}}, 'required': ['query'], 'additionalProperties': False},
      'annotations': {'readOnlyHint': True}},
     {'name': 'search_documents', 'description': '按标题或正文搜索文档，返回摘要与ID。',
      'inputSchema': {'type': 'object', 'properties': {'kb_id': {'type': 'string'}, 'query': {'type': 'string'}}, 'required': ['kb_id'], 'additionalProperties': False},
@@ -121,6 +127,13 @@ def bounded_int(args, key, default, low, high):
 def tool(name, args):
     if not isinstance(args, dict):
         raise ValueError('arguments 必须是对象')
+    if name == 'search_ba_wiki':
+        query = args.get('query')
+        source = args.get('source', 'auto')
+        limit = bounded_int(args, 'limit', 3, 1, 4)
+        if not isinstance(query, str) or not query.strip() or len(query) > 120:
+            raise ValueError('query 必须为1到120字符')
+        return ba_wiki.search(query, source=source, limit=limit)
     if name == 'list_knowledge_bases':
         return api('GET', 'bases')
     if name == 'get_knowledge_base':
@@ -283,7 +296,7 @@ def handle(message):
         version = requested if requested in ('2025-06-18', '2025-03-26', '2024-11-05') else PROTOCOL_VERSION
         return response(msg_id, {'protocolVersion': version, 'capabilities': {'tools': {'listChanged': False}},
                                  'serverInfo': {'name': 'sweet-sleep-knowledge', 'version': '1.0.0'},
-                                 'instructions': '提供 QQ 群最近聊天读取，以及绑定知识库、文档、QA 的增删改查和群成员置顶工具。写操作会更新正式知识库。'})
+                                 'instructions': '提供 QQ 群最近聊天读取、蔚蓝档案公开 Wiki 只读检索，以及绑定知识库、文档、QA 的增删改查和群成员置顶工具。写操作会更新正式知识库。'})
     if method == 'ping':
         return response(msg_id, {})
     if method == 'tools/list':

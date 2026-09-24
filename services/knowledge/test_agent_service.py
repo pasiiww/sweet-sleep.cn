@@ -59,6 +59,26 @@ class AgentServiceTests(unittest.TestCase):
         self.assertEqual(response['mode'], 'handoff')
         self.assertNotIn('100元', response['answer'])
 
+    def test_ba_wiki_tool_adds_cited_evidence_for_the_answer(self):
+        wiki_result = {'query': '日奈', 'source': 'GameKee', 'source_errors': [], 'results': [
+            {'title': '日奈', 'content': '日奈是格黑娜学园风纪委员会委员长。', 'source': 'GameKee',
+             'source_type': 'wiki', 'url': 'https://www.gamekee.com/ba/tj/59934.html', 'updated_at': 1}]}
+
+        def fake_run(cfg, tools, messages, prompt, limit):
+            self.assertEqual(limit, 4)
+            by_name = {item.name: item for item in tools}
+            self.assertIn('search_ba_wiki', by_name)
+            self.assertIn('GameKee', by_name['search_ba_wiki'].invoke({'search_query': '日奈'}) )
+            return {'messages': [AIMessage(content='日奈是格黑娜风纪委员会委员长。')]}
+
+        with patch.object(agent_service.ba_wiki, 'search', return_value=wiki_result), \
+             patch.object(agent_service, 'run', side_effect=fake_run):
+            response = app.api('POST', '/knowledge/api/agent/answer',
+                               {'kb_id': self.kb, 'query': '日奈是什么人'}, {})
+        self.assertEqual(response['mode'], 'model')
+        self.assertEqual(response['results'][0]['source_type'], 'wiki')
+        self.assertEqual(response['results'][0]['url'], 'https://www.gamekee.com/ba/tj/59934.html')
+
     def test_fifth_search_is_blocked_then_model_answers_without_tools(self):
         app.api('POST', f'/knowledge/api/bases/{self.kb}/documents',
                 {'title': '凯伊毛绒', 'content': '凯伊毛绒售价100元。'}, {})
