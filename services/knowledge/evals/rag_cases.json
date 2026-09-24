@@ -1,0 +1,268 @@
+{
+  "description": "从 2026-09 的 QQ 咨询与已核实 QA 人工改写；不含聊天原文、用户标识、订单和私密链接。正例核验正确证据是否进入前五条，反例核验是否混入相近但不对应的商品知识。",
+  "cases": [
+    {
+      "id": "kei_stock_short",
+      "query": "还有几个kei猫",
+      "kind": "answer",
+      "gold_qa": [
+        "凯伊翻面猫二团当前余量是多少？"
+      ],
+      "source": "historical_qq_question"
+    },
+    {
+      "id": "kei_stock_full",
+      "query": "凯伊翻面猫还有多少个",
+      "kind": "answer",
+      "gold_qa": [
+        "凯伊翻面猫二团当前余量是多少？"
+      ],
+      "source": "historical_qq_question"
+    },
+    {
+      "id": "kei_balance_without_deposit",
+      "query": "二团普通尾款没付定金可以拍吗",
+      "kind": "answer",
+      "gold_qa": [
+        "凯伊二团普通尾款没拍定金可以拍吗？"
+      ],
+      "source": "historical_topic"
+    },
+    {
+      "id": "kei_purchase",
+      "query": "凯伊娃怎么买",
+      "kind": "answer",
+      "gold_documents": [
+        "凯伊娃娃购买"
+      ],
+      "source": "historical_qq_question"
+    },
+    {
+      "id": "pdd_name",
+      "query": "拼多多店名",
+      "kind": "answer",
+      "gold_qa": [
+        "午觉糖水铺在拼多多上的店铺叫什么？"
+      ],
+      "source": "historical_qq_question"
+    },
+    {
+      "id": "alo_deadline",
+      "query": "阿洛普拉翻面猫尾款什么时候截止",
+      "kind": "answer",
+      "gold_qa": [
+        "阿洛普拉翻面猫的尾款截止到什么时候？"
+      ],
+      "source": "historical_topic"
+    },
+    {
+      "id": "alo_full_purchase",
+      "query": "阿洛普拉翻面猫没预定怎么买",
+      "kind": "answer",
+      "gold_qa": [
+        "没预定阿洛普拉翻面猫的话怎么购买，链接是什么？"
+      ],
+      "source": "historical_topic"
+    },
+    {
+      "id": "project_threshold",
+      "query": "新企划意向金满多少开工",
+      "kind": "answer",
+      "gold_qa": [
+        "午觉糖水铺新企划的意向金达到多少份会开工？"
+      ],
+      "source": "historical_topic"
+    },
+    {
+      "id": "project_amount_vs_count",
+      "query": "新企划意向金是50元吗",
+      "kind": "answer",
+      "gold_qa": [
+        "午觉糖水铺新企划意向金多少钱，能抵扣多少？",
+        "午觉糖水铺新企划的意向金达到多少份会开工？"
+      ],
+      "source": "historical_topic"
+    },
+    {
+      "id": "plana_progress",
+      "query": "双马尾普拉娜做了几个",
+      "kind": "answer",
+      "gold_qa": [
+        "午觉糖水铺新企划双马尾普拉娜当前生产进度是多少？"
+      ],
+      "source": "historical_topic"
+    },
+    {
+      "id": "hoshino_progress",
+      "query": "盘发星野进度",
+      "kind": "answer",
+      "gold_qa": [
+        "午觉糖水铺新企划盘发星野当前生产进度是多少？"
+      ],
+      "source": "historical_topic"
+    },
+    {
+      "id": "kanoe_japan",
+      "query": "鹿江手偶日本余量哪里买",
+      "kind": "answer",
+      "gold_qa": [
+        "鹿江手偶在日本的少量余量在哪里销售？"
+      ],
+      "source": "historical_topic"
+    },
+    {
+      "id": "kei_address",
+      "query": "凯伊猫二团收货地址怎么改",
+      "kind": "answer",
+      "gold_qa": [
+        "凯伊翻面猫需要修改收货地址时该怎么操作？"
+      ],
+      "source": "historical_topic"
+    },
+    {
+      "id": "project_sizes",
+      "query": "新企划意向金能跨尺寸用吗",
+      "kind": "answer",
+      "gold_qa": [
+        "午觉糖水铺新企划同一角色不同尺寸的意向金能通用吗？"
+      ],
+      "source": "historical_topic"
+    },
+    {
+      "id": "kei_full_payment",
+      "query": "凯伊翻面猫全款还要补钱吗",
+      "kind": "answer",
+      "gold_qa": [
+        "凯伊翻面猫全款是多少、还需要补款吗？"
+      ],
+      "source": "historical_topic"
+    },
+    {
+      "id": "kei_birth_card",
+      "query": "凯伊出生卡要加钱买吗",
+      "kind": "answer",
+      "gold_qa": [
+        "凯伊的出生卡需要加购吗？"
+      ],
+      "source": "historical_topic"
+    },
+    {
+      "id": "hoshino_short_progress",
+      "query": "新企划短发星野生产进度",
+      "kind": "answer",
+      "gold_qa": [
+        "午觉糖水铺新企划短发星野当前生产进度是多少？"
+      ],
+      "source": "historical_topic"
+    },
+    {
+      "id": "kei_cat_price",
+      "query": "凯伊翻面猫多少钱",
+      "kind": "answer",
+      "gold_qa": [
+        "凯伊翻面猫全款是多少、还需要补款吗？"
+      ],
+      "source": "historical_topic"
+    },
+    {
+      "id": "kei_multi_intent",
+      "query": "凯伊章鱼猫还有货吗 哪里买 多少钱",
+      "kind": "answer",
+      "gold_qa": [
+        "凯伊翻面猫二团当前余量是多少？",
+        "凯伊翻面猫全款是多少、还需要补款吗？"
+      ],
+      "source": "historical_qq_question"
+    },
+    {
+      "id": "alo_balance_link",
+      "query": "阿洛普拉翻面猫尾款链接",
+      "kind": "answer",
+      "gold_qa": [
+        "阿洛普拉翻面猫的尾款链接是什么？"
+      ],
+      "source": "historical_topic"
+    },
+    {
+      "id": "kei_first_batch",
+      "query": "第一批凯伊翻面猫场贩还有货吗",
+      "kind": "answer",
+      "gold_qa": [
+        "截至2026年9月24日，第一批凯伊翻面猫场贩还有现货吗？"
+      ],
+      "source": "historical_topic"
+    },
+    {
+      "id": "holiday_events",
+      "query": "午觉糖水铺中秋国庆去哪参展",
+      "kind": "answer",
+      "gold_qa": [
+        "午觉糖水铺2026年中秋国庆的参展计划是什么？"
+      ],
+      "source": "historical_topic"
+    },
+    {
+      "id": "kei_preorder_time",
+      "query": "凯伊二团全款预约有截止日期吗",
+      "kind": "answer",
+      "gold_qa": [
+        "凯伊二团全款预约是限时的吗？"
+      ],
+      "source": "historical_topic"
+    },
+    {
+      "id": "project_size_choice",
+      "query": "新企划三个尺寸哪个开做",
+      "kind": "answer",
+      "gold_qa": [
+        "午觉糖水铺新企划开做时选择哪个尺寸？"
+      ],
+      "source": "historical_topic"
+    },
+    {
+      "id": "kei_balance_open",
+      "query": "凯伊普通尾款开放了吗",
+      "kind": "answer",
+      "gold_qa": [
+        "凯伊二团普通尾款现在开放了吗？"
+      ],
+      "source": "historical_topic"
+    },
+    {
+      "id": "alo_work_countdown",
+      "query": "阿洛普拉翻面猫工期还有几天",
+      "kind": "answer",
+      "gold_qa": [
+        "截至2026年9月24日，阿洛普拉翻面猫的工期倒计时是多少天？"
+      ],
+      "source": "historical_topic"
+    },
+    {
+      "id": "alice_stock_unknown",
+      "query": "爱丽丝场贩还有吗",
+      "kind": "handoff",
+      "avoid_qa": [
+        "截至2026年9月24日，第一批凯伊翻面猫场贩还有现货吗？"
+      ],
+      "source": "historical_topic"
+    },
+    {
+      "id": "kanoe_sales_unknown",
+      "query": "鹿江娃娃现在卖了多少个",
+      "kind": "handoff",
+      "avoid_qa": [
+        "鹿江手偶在日本的少量余量在哪里销售？"
+      ],
+      "source": "historical_qq_question"
+    },
+    {
+      "id": "plana_open_unknown",
+      "query": "普拉娜翻面猫什么时候开团",
+      "kind": "handoff",
+      "avoid_qa": [
+        "阿洛普拉翻面猫的尾款截止到什么时候？"
+      ],
+      "source": "historical_qq_question"
+    }
+  ]
+}

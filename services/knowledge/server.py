@@ -23,6 +23,7 @@ import answers
 import entities
 import traces
 import qa
+import rag_rank
 import learning
 import stickers
 import notifications
@@ -419,7 +420,7 @@ def answer_status(cfg, mode, reason):
                       ('answer_status', json.dumps({'mode': mode, 'reason': reason, 'at': now()})))
 
 
-def search_terms(kb_id, terms, original_query=''):
+def search_terms(kb_id, terms, original_query='', catalog=None):
     # Fuse rankings, deduplicate chunk IDs and identical text, then apply a shared budget.
     candidates, searches = {}, []
     searches_to_run=([original_query] if original_query else [])+list(terms)
@@ -428,23 +429,31 @@ def search_terms(kb_id, terms, original_query=''):
         if term not in unique:unique.append(term)
     for term in unique:
         search = {'query_groups': [term]} if isinstance(term, list) else {'query': term}
+        # Widen candidates before reranking; only the final eight consume model context.
         result = retrieve({'kb_id': kb_id, **search, 'mode': 'keyword',
-                           'top_k': 12, 'max_context_chars': 12000})
+                           'top_k': 20, 'max_context_chars': 40000})
         searches.append({'query': term, 'kind':'original' if isinstance(term,str) and term==original_query else 'generated', 'elapsed_ms': result.get('elapsed_ms', 0), 'hits': [{'chunk_id': row['chunk_id'], 'title': row['title'], 'source_type': row.get('source_type','document'), 'score': row.get('score')} for row in result['results']]})
         for rank, row in enumerate(result['results'], 1):
             key = row['chunk_id']
             if key not in candidates:
                 candidates[key] = {'row': row, 'rank': 0}
             candidates[key]['rank'] += 1 / (60 + rank)
-    catalog=entities.Catalog([])
-    if original_query:
-        with db() as c:catalog=entities.Catalog(entity_catalog(c,kb_id))
+    if catalog is None:
+        catalog=entities.Catalog([])
+        if original_query:
+            with db() as c:catalog=entities.Catalog(entity_catalog(c,kb_id))
+    ranking_query=original_query or next((term for term in terms if isinstance(term,str)), '')
+    if not ranking_query:
+        ranking_query=' '.join(str(term) for group in terms if isinstance(group,list) for term in group)
     generated=list(dict.fromkeys(t for group in terms if isinstance(group,list) for t in group))
+    candidates={key:item for key,item in candidates.items() if not rag_rank.conflicts(ranking_query,item['row'],catalog)}
     for item in candidates.values():
         row=item['row'];text=(row.get('question','') if row.get('source_type')=='qa' else row.get('title','')+' '+row['content']).casefold()
         item['matched_terms']=[term for term in generated if any(v.casefold() in text for v in catalog.expand(term))]
     selected, seen, remaining = [], set(), 6000
-    for item in sorted(candidates.values(), key=lambda x:(len(x['matched_terms']),x['rank']), reverse=True):
+    for item in candidates.values():
+        item['relevance']=rag_rank.score(ranking_query,item['row'],catalog,item['rank'])
+    for item in sorted(candidates.values(), key=lambda x:(x['relevance'],len(x['matched_terms']),x['rank']), reverse=True):
         row = dict(item['row'])
         identity = ((row.get('question','') + '\n') if row.get('source_type') == 'qa' else '') + ' '.join(row['content'].split())
         key = hashlib.sha256(identity.encode()).hexdigest()
@@ -550,7 +559,7 @@ def respond_pipeline(data, details):
     details.update(reply_reference=reply_reference, history_policy={'max_turns':20,'max_chars':24000,'roles':'user/assistant'},current_date=cfg['current_date'],qa_hints=qa_hints,history=history, model=cfg['model'], system_prompt=cfg['system_prompt'], keyword_prompt=cfg['keyword_prompt'])
     def search(terms):
         started = time.monotonic()
-        result = search_terms(kb_id, terms, original_query=query)
+        result = search_terms(kb_id, terms, original_query=query, catalog=catalog)
         details['retrievals'].append({'original_query':query,'terms': terms, 'elapsed_ms': round((time.monotonic() - started) * 1000), **result})
         return result
     terms = [catalog.normalize(query)[:2000]]
