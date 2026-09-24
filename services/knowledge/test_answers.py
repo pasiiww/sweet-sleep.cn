@@ -239,6 +239,7 @@ class KeywordTests(unittest.TestCase):
         self.assertNotIn(cfg['alias_context'],first[0]['content'])
         self.assertNotIn('日本語で回答',first[0]['content'])
         self.assertTrue(second[0]['content'].startswith('日本語で回答'))
+        self.assertIn(answers.PERSONA_PROMPT, second[0]['content'])
         self.assertNotIn('给用户的中文回复',second[0]['content'])
         self.assertNotIn('检索阶段自定义',second[0]['content'])
         self.assertEqual(second[1:3],cfg['conversation_history'])

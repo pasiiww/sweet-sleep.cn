@@ -2,7 +2,9 @@
 import os
 import logging
 import re
+from types import SimpleNamespace
 from botpy.connection import ConnectionState
+from botpy.flags import Flag, Intents
 from botpy.message import GroupMessage, C2CMessage
 
 
@@ -91,6 +93,20 @@ def parse_at_group(self,payload):
     self._dispatch('group_at_message_create',message)
 
 
+def parse_group_member_add(self,payload):
+    data=payload.get('d') or {}
+    event=SimpleNamespace(
+        event_id=str(payload.get('id') or data.get('event_id') or ''),
+        group_openid=str(data.get('group_openid') or ''),
+        member_openid=str(data.get('member_openid') or ''),
+        user_openid=str(data.get('user_openid') or ''),
+        username=str(data.get('username') or ''),
+        timestamp=str(data.get('timestamp') or ''),
+        raw=data,
+    )
+    self._dispatch('group_member_add',event)
+
+
 class FullC2CMessage(C2CMessage):
     __slots__=('sweet_author_bot',)
     def __init__(self,api,event_id,data):
@@ -107,6 +123,12 @@ def is_bot(message):
 
 
 def install():
+    # qq-botpy 1.2.1 predates QQ group-member events. Keep the newer gateway
+    # intent and parser available without replacing the deployed SDK.
+    if 'group_member_event' not in Intents.VALID_FLAGS:
+        Intents.group_member_event=Flag(lambda _: 1 << 24)
+        Intents.VALID_FLAGS['group_member_event']=1 << 24
     ConnectionState.parse_c2c_message_create = parse_c2c
     ConnectionState.parse_group_message_create = parse_full_group
     ConnectionState.parse_group_at_message_create = parse_at_group
+    ConnectionState.parse_group_member_add = parse_group_member_add

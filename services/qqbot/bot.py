@@ -22,7 +22,8 @@ import compat
 LOG = logging.getLogger('knowledge-bot')
 MEMORY_COMMANDS = ('/记忆', '/清除记忆', '/关闭记忆', '/开启记忆')
 GROUP_COMMANDS = ('/old', '/总结', '/新对话', '/清空上下文', *MEMORY_COMMANDS)
-HELP = '群内发送 /总结：总结上次成功总结后、最近10小时、最多400条和15000字以内的聊天。\n群内引用图片发送 /old，可查询本群记录次数、首次发送者和时间。\n长期记忆：群内共享、私聊按用户独立；发送 /记忆 查看，/清除记忆 删除，/关闭记忆 暂停，/开启记忆 恢复。\n我是午觉糖水铺的客服机器人。\n直接发送问题，或输入：/检索 你的问题\n我会根据知识库资料回答，资料不足时请群主或管理员确认。模型不可用时返回最相关文档。\n群聊回答默认参考本群最近10条发言；同一私聊保留最近30分钟的问答，可发送 /新对话 清空。\n每天共20次咨询额度，群聊和私聊共享，北京时间零点恢复。\n管理员可在群内发送 /身份，获取后台人工接管配置需要的 OpenID。'
+WELCOME_MESSAGE = '欢迎加入午觉糖水铺～我是小铺的社团娘兼客服机器人，主要陪大家聊《蔚蓝档案》同人周边。商品、订单或其他问题都可以直接 @ 我提问哦，我会尽力帮忙！'
+HELP = '群内发送 /总结：总结上次成功总结后、最近10小时、最多400条和15000字以内的聊天。\n群内引用图片发送 /old，可查询本群记录次数、首次发送者和时间。\n长期记忆：群内共享、私聊按用户独立；发送 /记忆 查看，/清除记忆 删除，/关闭记忆 暂停，/开启记忆 恢复。\n我是午觉糖水铺的社团娘兼客服机器人，主要陪大家聊《蔚蓝档案》同人周边；有问题在群里直接 @ 我提问哦～\n直接发送问题，或输入：/检索 你的问题\n我会根据知识库资料回答，资料不足时请群主或管理员确认。模型不可用时返回最相关文档。\n群聊回答默认参考本群最近10条发言；同一私聊保留最近30分钟的问答，可发送 /新对话 清空。\n每天共20次咨询额度，群聊和私聊共享，北京时间零点恢复。\n管理员可在群内发送 /身份，获取后台人工接管配置需要的 OpenID。'
 
 
 def normalize(text):
@@ -302,7 +303,7 @@ class Retriever:
 class KnowledgeBot(botpy.Client):
     def __init__(self, retriever, seen, **kwargs):
         compat.install()
-        super().__init__(intents=botpy.Intents(public_messages=True), timeout=15,
+        super().__init__(intents=botpy.Intents(public_messages=True, group_member_event=True), timeout=15,
                          log_level=logging.INFO, ext_handlers=False, **kwargs)
         self.retriever, self.seen = retriever, seen
         self.images = ImageHistory(seen.conn)
@@ -321,6 +322,22 @@ class KnowledgeBot(botpy.Client):
 
     async def on_error(self, event_method, *args, **kwargs):
         LOG.error('EVENT_ERROR event=%s', event_method)
+
+    async def on_group_member_add(self, event):
+        group = getattr(event, 'group_openid', '')
+        event_id = getattr(event, 'event_id', '')
+        member = getattr(event, 'member_openid', '')
+        if not group or not event_id or not member:
+            LOG.warning('GROUP_WELCOME_SKIPPED reason=missing_event_fields')
+            return
+        if not self.seen.claim('welcome:' + str(event_id)):
+            return
+        try:
+            await self.api.post_group_message(group_openid=group, content=WELCOME_MESSAGE,
+                msg_type=0, event_id=event_id, msg_seq=1)
+            LOG.info('GROUP_WELCOME_SENT group=%s', group)
+        except Exception as exc:
+            LOG.warning('GROUP_WELCOME_FAILED error=%s', type(exc).__name__)
 
     async def on_c2c_message_create(self, message):
         await self.answer(message, 'c2c')

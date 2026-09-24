@@ -269,7 +269,8 @@ def answer(app, data, details):
             return json.dumps(result, ensure_ascii=False)
         tools.append(manage_memory)
 
-    system = (cfg['system_prompt'] + '\n所有工具合计最多调用6次，达到上限后系统会拦截后续调用并根据已取得内容直接回答。回答店铺事实前必须检索；第一次没找到或资料不足时换关键词再查。'
+    system = (cfg['system_prompt'] + '\n' + answers.PERSONA_PROMPT
+              + '\n所有工具合计最多调用6次，达到上限后系统会拦截后续调用并根据已取得内容直接回答。回答店铺事实前必须检索；第一次没找到或资料不足时换关键词再查。'
               '\n回答《蔚蓝档案》角色、剧情和玩法问题时使用 search_ba_wiki，先选 auto（GameKee）；资料未命中或不足时可改用 bluearchivewiki（日文 Blue Archive Wikiru）。'
               '角色变体、服务器和版本可能不同，回答数值或技能前先核对角色形态与来源资料；必要时把日文资料翻译成中文，引用外部 Wiki 时可在正文附一个资料页链接。'
               '\n回答店铺问题时核对具体商品、款式、批次和属性；相近商品或旧批次不能代替直接证据。库存、进度、截止日期优先核对较新的同范围记录，无法核实时转人工。'

@@ -119,6 +119,8 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
         await self.bot.answer(message, 'c2c')
         self.retriever.search.assert_not_awaited()
         self.assertIn('直接发送问题', message.reply.call_args.kwargs['content'])
+        self.assertIn('社团娘', message.reply.call_args.kwargs['content'])
+        self.assertIn('@ 我提问', message.reply.call_args.kwargs['content'])
         self.retriever.search.return_value = {'results': []}
         message = self.message('不存在', 'm2')
         await self.bot.answer(message, 'c2c')
@@ -127,6 +129,19 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
         message = self.message('超时', 'm3')
         await self.bot.answer(message, 'c2c')
         self.assertIn('暂时不可用', message.reply.call_args.kwargs['content'])
+
+    async def test_group_member_join_gets_one_event_reply(self):
+        self.bot.api.post_group_message = AsyncMock(return_value={'id': 'welcome'})
+        event = SimpleNamespace(event_id='join-event-1', group_openid='group-1',
+                                member_openid='member-1')
+        await self.bot.on_group_member_add(event)
+        await self.bot.on_group_member_add(event)
+        self.bot.api.post_group_message.assert_awaited_once()
+        kwargs = self.bot.api.post_group_message.call_args.kwargs
+        self.assertEqual(kwargs['group_openid'], 'group-1')
+        self.assertEqual(kwargs['event_id'], 'join-event-1')
+        self.assertIn('蔚蓝档案', kwargs['content'])
+        self.assertIn('@ 我提问', kwargs['content'])
 
     async def test_bounded_plain_text_and_persistent_claim(self):
         text = format_results({'results': [{'title': '@everyone <tag>', 'content': '长' * 10000, 'ordinal': 0}] * 10})

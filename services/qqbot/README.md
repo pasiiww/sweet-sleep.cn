@@ -1,6 +1,6 @@
 # QQ 知识库客服机器人
 
-使用腾讯官方 [`qq-botpy`](https://github.com/tencent-connect/botpy) 1.2.1，监听 `public_messages` 中的 QQ 私聊消息和群 @消息。收到问题后调用知识库 `/knowledge/api/agent/answer`，由知识库服务使用 LangChain agent 自主检索并调用 DeepSeek。QQ 进程不读取模型密钥。
+使用腾讯官方 [`qq-botpy`](https://github.com/tencent-connect/botpy) 1.2.1，监听 `public_messages` 中的 QQ 私聊消息和群 @消息，并通过兼容层订阅群成员加入事件。新人入群时机器人用该事件被动发送欢迎，介绍自己是午觉糖水铺的《蔚蓝档案》同人周边店社团娘客服，并邀请群友 @ 她提问。收到问题后调用知识库 `/knowledge/api/agent/answer`，由知识库服务使用 LangChain agent 自主检索并调用 DeepSeek。QQ 进程不读取模型密钥。
 
 ## 使用
 
@@ -27,7 +27,7 @@ KB_API_URL=http://127.0.0.1:8765/knowledge/api/retrieve
 KB_READ_TOKEN=<只读召回密钥>
 ```
 
-普通问答只查询指定知识库，不支持从聊天中切换库；仅白名单内的私聊管理员可用维护指令修改知识。QQ 平台侧的测试成员、可用群聊、消息事件权限和发布状态以开发后台实际配置为准。
+普通问答只查询指定知识库，不支持从聊天中切换库；仅白名单内的私聊管理员可用维护指令修改知识。QQ 平台侧需在开发后台为应用开放群成员加入事件权限；测试成员、可用群聊和发布状态也以开发后台实际配置为准。
 
 当前配置绑定「午觉糖水铺客服知识库」。演示说明明确标为演示，不代表店铺营业时间、价格或售后政策。添加真实资料后立即可检索；修改绑定 ID 后重启机器人。
 

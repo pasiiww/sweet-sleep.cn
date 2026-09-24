@@ -40,6 +40,7 @@ class AgentServiceTests(unittest.TestCase):
 
         def fake_run(cfg, tools, messages, prompt, limit):
             self.assertEqual(limit, 6)
+            self.assertIn(answers.PERSONA_PROMPT, prompt)
             self.assertIn('100元', tools[0].invoke({'search_query': '凯伊毛绒'}))
             self.assertIn('20元', tools[0].invoke({'search_query': '凯伊预售'}))
             self.assertNotIn('跨库秘密', tools[0].invoke({'search_query': '秘密'}))
@@ -53,9 +54,10 @@ class AgentServiceTests(unittest.TestCase):
         self.assertNotIn('跨库秘密', json.dumps(response, ensure_ascii=False))
 
     def test_answer_without_evidence_handoffs(self):
-        with patch.object(agent_service, 'run', return_value={'messages': [AIMessage(content='我猜是100元')]}):
+        with patch.object(agent_service, 'run', return_value={'messages': [AIMessage(content='我猜是100元')]}) as runner:
             response = app.api('POST', '/knowledge/api/agent/answer',
                                {'kb_id': self.kb, 'query': '售价多少'}, {})
+        self.assertIn(answers.PERSONA_PROMPT, runner.call_args.args[3])
         self.assertEqual(response['mode'], 'handoff')
         self.assertNotIn('100元', response['answer'])
 
