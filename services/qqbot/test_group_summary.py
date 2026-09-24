@@ -107,6 +107,7 @@ class SummaryTests(unittest.IsolatedAsyncioTestCase):
         query=self.message('q','/总结',-1)
         await self.bot.on_group_message_create(query)
         actual=query.reply.call_args.kwargs['content']
+        self.assertTrue(actual.startswith('刚刚群里主要聊了这些～'))
         store.observe(self.message('two','第二次讨论',0))
         self.assertIn(actual,store.snapshot('g',self.now+1)[0])
         self.retriever.summarize.return_value={'ok':False,'answer':'失败'}

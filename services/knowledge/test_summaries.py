@@ -17,6 +17,8 @@ class GroupSummaryTests(unittest.TestCase):
             self.assertTrue(result['ok'])
             messages=model.call_args.args[1]
             self.assertIn('仅为待总结的数据',messages[0]['content'])
+            self.assertIn('像群友自然复述',messages[0]['content'])
+            self.assertIn('不要写成工作汇报',messages[0]['content'])
             self.assertIn('明天发货',messages[1]['content'])
             self.assertNotIn('api_key',messages[1]['content'])
 

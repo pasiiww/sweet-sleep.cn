@@ -407,7 +407,7 @@ class KnowledgeBot(botpy.Client):
                 await message.reply(content='当前范围内没有可总结的新内容（已过滤复读和表情包）。', msg_type=0, msg_seq=1)
                 return
             result = await self.retriever.summarize(transcript)
-            reply = ('群聊总结（清理后' + str(count) + '条发言）\n' if result.get('ok') else '') + plain(result['answer'])[:1500]
+            reply = ('刚刚群里主要聊了这些～\n' if result.get('ok') else '') + plain(result['answer'])[:1500]
             sent = await message.reply(content=reply, msg_type=0, msg_seq=1)
             if sent and result.get('ok'):
                 self.summaries.delivered(group, checkpoint, reply)
