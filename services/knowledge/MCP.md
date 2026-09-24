@@ -17,7 +17,7 @@ The client opens a standard input/output SSH session for the MCP process. The se
 
 ## Tools
 
-- `list_recent_chat_groups`, `get_recent_chat_messages`: read member chat text retained by the learning service (up to seven days), with group, time, keyword, member-ID, and page limits. `limit` sets the number of messages; `offset` pages older results.
+- `list_recent_chat_groups`, `get_recent_chat_messages`: read member chat text retained by the learning service (up to seven days), with group, time, keyword, member-ID, and page limits. `limit` sets the number of messages; `offset` pages older results. Results include the sender nickname when available, capped at 12 characters.
 - `pin_chat_member`, `unpin_chat_member`, `list_pinned_chat_members`: persist up to 100 pinned member IDs per group. Get a `member_id` from the recent-chat result, then pin it with an optional label. Call `get_recent_chat_messages` with `pinned_only: true` to view only pinned members. You can instead pass `member_ids` to inspect selected members without pinning them.
 - `list_knowledge_bases`, `get_knowledge_base`, `create_knowledge_base`, `update_knowledge_base`, `delete_knowledge_base`.
 - `search_knowledge`, `search_documents`, `get_document`, `create_document`, `update_document`, `delete_document`.

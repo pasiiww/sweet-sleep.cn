@@ -191,7 +191,10 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_group_uses_shared_recent_ten_and_records_bot_replies(self):
         for index in range(12):
-            self.seen.observe_group_message(self.identified(f'群消息{index}', f'old-{index}', user='member'+str(index%2)))
+            old = self.identified(f'群消息{index}', f'old-{index}', user='member'+str(index%2))
+            if index == 11:
+                old.sweet_sender_name = '昵称超出十二字的群友测试'
+            self.seen.observe_group_message(old)
         current = self.identified('<@!1905586446> 这件事呢', 'group-current')
         await self.bot.answer(current, 'group', mentioned=True)
         call = self.retriever.search.call_args
@@ -199,6 +202,7 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
         group_context = call.kwargs['group_context']
         self.assertEqual(len(group_context), 10)
         self.assertIn('群消息11', group_context[-1]['content'])
+        self.assertIn('昵称超出十二字的', group_context[-1]['content'])
         self.assertNotIn('群消息0', str(group_context))
         self.assertEqual(self.bot.conversations, {})
         next_message = self.identified('<@!1905586446> 接着说', 'group-next')

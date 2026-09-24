@@ -38,6 +38,16 @@ class LearningTests(unittest.TestCase):
         job=self.event('c')['job_id'];row=self.run_job(job,[])
         self.assertEqual(row['status'],'completed');self.assertEqual(row['details']['changes'],[])
         self.assertEqual(len(row['details']['batch_source_ids']),3)
+    def test_member_name_is_limited_and_returned_by_chat_history_mcp(self):
+        name='猫猫昵称非常非常非常长太多了'
+        self.event('named-message','群里发生了什么',member='visitor1',member_name=name)
+        with app.db() as c:
+            row=c.execute("SELECT member_name FROM learning_events WHERE message_id='named-message'").fetchone()
+        self.assertEqual(row['member_name'],name[:12])
+        import mcp_server
+        result=mcp_server.tool('get_recent_chat_messages',{'group_id':'group001','hours':24,'limit':10})
+        item=next(row for row in result['items'] if row['message_id']=='named-message')
+        self.assertEqual(item['member_name'],name[:12])
     def test_new_qa_immediate_retrieval_and_provenance(self):
         job=self.batch('new');row=self.run_job(job,[self.fact('new1')]);self.assertEqual(row['status'],'completed')
         qa=row['details']['changes'][0]['after'];self.assertEqual(qa['updated_at'],learning.utc(self.at))

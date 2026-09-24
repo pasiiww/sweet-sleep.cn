@@ -103,8 +103,12 @@ class SeenMessages:
         self.conn.execute('CREATE TABLE IF NOT EXISTS private_maintenance_session (id TEXT PRIMARY KEY, at REAL NOT NULL)')
         self.conn.execute('''CREATE TABLE IF NOT EXISTS group_context_messages (
             id INTEGER PRIMARY KEY AUTOINCREMENT, group_id TEXT NOT NULL, message_id TEXT NOT NULL,
-            member_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, at REAL NOT NULL,
+            member_id TEXT NOT NULL, member_name TEXT NOT NULL DEFAULT '', role TEXT NOT NULL,
+            content TEXT NOT NULL, at REAL NOT NULL,
             UNIQUE(group_id,message_id))''')
+        context_columns = {row[1] for row in self.conn.execute('PRAGMA table_info(group_context_messages)')}
+        if 'member_name' not in context_columns:
+            self.conn.execute("ALTER TABLE group_context_messages ADD COLUMN member_name TEXT NOT NULL DEFAULT ''")
         self.conn.execute('CREATE INDEX IF NOT EXISTS dialogue_session ON dialogue(session,id)')
         self.conn.execute('CREATE INDEX IF NOT EXISTS dialogue_time ON dialogue(at)')
         self.conn.execute('CREATE INDEX IF NOT EXISTS group_context_time ON group_context_messages(group_id,at,id)')
@@ -166,7 +170,9 @@ class SeenMessages:
     def observe_group_message(self, message):
         group = getattr(message, 'group_openid', '')
         message_id = getattr(message, 'id', '')
-        member = getattr(getattr(message, 'author', None), 'member_openid', '')
+        author = getattr(message, 'author', None)
+        member = getattr(author, 'member_openid', '')
+        member_name = compat.sender_name(message)
         content = clean_group_context(getattr(message, 'content', '') or '')
         if not group or not message_id or not member or not content:
             return
@@ -174,8 +180,8 @@ class SeenMessages:
         with self.conn:
             self.conn.execute('DELETE FROM group_context_messages WHERE at<?', (time.time()-7*86400,))
             self.conn.execute('''INSERT OR IGNORE INTO group_context_messages
-                (group_id,message_id,member_id,role,content,at) VALUES(?,?,?,'user',?,?)''',
-                (group, str(message_id), member, content, at))
+                (group_id,message_id,member_id,member_name,role,content,at) VALUES(?,?,?,?,'user',?,?)''',
+                (group, str(message_id), member, member_name, content, at))
             self.conn.execute('''DELETE FROM group_context_messages WHERE group_id=? AND id NOT IN
                 (SELECT id FROM group_context_messages WHERE group_id=? ORDER BY at DESC,id DESC LIMIT 400)''', (group, group))
 
@@ -186,7 +192,7 @@ class SeenMessages:
         with self.conn:
             self.conn.execute('DELETE FROM group_context_messages WHERE at<?', (time.time()-7*86400,))
             self.conn.execute('''INSERT OR IGNORE INTO group_context_messages
-                (group_id,message_id,member_id,role,content,at) VALUES(?,?,'bot','assistant',?,?)''',
+                (group_id,message_id,member_id,member_name,role,content,at) VALUES(?,?,'bot','机器人','assistant',?,?)''',
                 (group, str(message_id), content[:1200], time.time()))
             self.conn.execute('''DELETE FROM group_context_messages WHERE group_id=? AND id NOT IN
                 (SELECT id FROM group_context_messages WHERE group_id=? ORDER BY at DESC,id DESC LIMIT 400)''', (group, group))
@@ -202,15 +208,17 @@ class SeenMessages:
         else:
             where = 'at<=?'
             params = (group, time.time(), limit)
-        rows = self.conn.execute(f'''SELECT member_id,role,content,at FROM group_context_messages
+        rows = self.conn.execute(f'''SELECT member_id,member_name,role,content,at FROM group_context_messages
             WHERE group_id=? AND {where} ORDER BY at DESC,id DESC LIMIT ?''', params).fetchall()
         rows.reverse()
         labels, result = {}, []
         for row in rows:
-            member_id, role, content, created_at = row
+            member_id, member_name, role, content, created_at = row
             if role == 'assistant':
                 speaker = '机器人'
             else:
+                if member_name:
+                    labels[member_id] = member_name
                 speaker = labels.setdefault(member_id, '群友'+str(len(labels)+1))
             at = time.strftime('%m-%d %H:%M', time.localtime(created_at))
             result.append({'role': role, 'content': f'[{at}] {speaker}：{content}'})

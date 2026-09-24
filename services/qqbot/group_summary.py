@@ -3,6 +3,7 @@ from datetime import datetime, timezone, timedelta
 import json
 import re
 import time
+import compat
 
 LIMIT = 15000
 ZONE = timezone(timedelta(hours=8))
@@ -53,8 +54,8 @@ class GroupSummary:
         self.busy = set()
         conn.executescript('''
             CREATE TABLE IF NOT EXISTS summary_messages (
-                id INTEGER PRIMARY KEY, group_id TEXT NOT NULL, message_id TEXT NOT NULL,
-                member TEXT NOT NULL, content TEXT NOT NULL, at REAL NOT NULL,
+            id INTEGER PRIMARY KEY, group_id TEXT NOT NULL, message_id TEXT NOT NULL,
+                member TEXT NOT NULL, member_name TEXT NOT NULL DEFAULT '', content TEXT NOT NULL, at REAL NOT NULL,
                 UNIQUE(group_id,message_id));
             CREATE INDEX IF NOT EXISTS summary_group_time ON summary_messages(group_id,at,id);
             CREATE TABLE IF NOT EXISTS summary_checkpoint (
@@ -62,12 +63,15 @@ class GroupSummary:
         ''')
         if 'summary' not in {r[1] for r in conn.execute('PRAGMA table_info(summary_checkpoint)')}:
             conn.execute("ALTER TABLE summary_checkpoint ADD COLUMN summary TEXT NOT NULL DEFAULT ''")
-            conn.commit()
+        if 'member_name' not in {r[1] for r in conn.execute('PRAGMA table_info(summary_messages)')}:
+            conn.execute("ALTER TABLE summary_messages ADD COLUMN member_name TEXT NOT NULL DEFAULT ''")
+        conn.commit()
 
     def observe(self, message):
         group = getattr(message, 'group_openid', '')
         mid = getattr(message, 'id', '')
         member = getattr(getattr(message, 'author', None), 'member_openid', '')
+        member_name = compat.sender_name(message)
         raw = getattr(message, 'content', '') or ''
         if not group or not mid or not member or re.sub(r'<[^>]*>', '', raw).strip().startswith('/'):
             return
@@ -76,25 +80,27 @@ class GroupSummary:
             return
         with self.conn:
             self.conn.execute('DELETE FROM summary_messages WHERE at<?', (time.time() - 36000,))
-            self.conn.execute('INSERT OR IGNORE INTO summary_messages(group_id,message_id,member,content,at) VALUES(?,?,?,?,?)',
-                              (group, mid, member, clean(raw), at))
+            self.conn.execute('INSERT OR IGNORE INTO summary_messages(group_id,message_id,member,member_name,content,at) VALUES(?,?,?,?,?,?)',
+                              (group, mid, member, member_name, clean(raw), at))
             self.conn.execute('DELETE FROM summary_messages WHERE group_id=? AND id NOT IN (SELECT id FROM summary_messages WHERE group_id=? ORDER BY at DESC,id DESC LIMIT 400)', (group, group))
 
     def snapshot(self, group, end):
         checkpoint = self.conn.execute('SELECT at,last_id,summary FROM summary_checkpoint WHERE group_id=?', (group,)).fetchone() or (0, 0, '')
-        rows = self.conn.execute('''SELECT id,member,content,at FROM summary_messages
+        rows = self.conn.execute('''SELECT id,member,member_name,content,at FROM summary_messages
             WHERE group_id=? AND at>=? AND at<=? AND (at>? OR (at=? AND id>?))
             ORDER BY at DESC,id DESC LIMIT 400''', (group, end-36000, end, checkpoint[0], checkpoint[0], checkpoint[1])).fetchall()
         last_id = max((r[0] for r in rows), default=checkpoint[1])
         selected, seen, used, names = [], set(), 0, {}
         clipped = False
-        for _, member, content, at in rows:
+        for _, member, member_name, content, at in rows:
             if not content:
                 continue
             key = ''.join(c.lower() for c in content if c.isalnum())
             if key in seen:
                 continue
             seen.add(key)
+            if member_name:
+                names[member] = member_name
             label = names.setdefault(member, '群友' + str(len(names) + 1))
             line = f'[{datetime.fromtimestamp(at, ZONE):%m-%d %H:%M}] {label}：{content}'
             if used + len(line) + 1 > LIMIT:

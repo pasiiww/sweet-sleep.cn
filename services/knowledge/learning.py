@@ -42,12 +42,19 @@ def defaults():
     return {'enabled': True, 'threshold': 4, 'bindings': [], 'prompt': PROMPT}
 
 
+def clean_member_name(value):
+    if not isinstance(value, str):
+        return ''
+    value = re.sub(r'[\x00-\x1f\x7f<>]', ' ', value).replace('@', '＠')
+    return re.sub(r'\s+', ' ', value).strip()[:12]
+
+
 def initialize(c):
     c.executescript('''
     CREATE TABLE IF NOT EXISTS learning_settings (kb_id TEXT PRIMARY KEY REFERENCES bases(id) ON DELETE CASCADE, value TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS learning_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT, kb_id TEXT NOT NULL REFERENCES bases(id) ON DELETE CASCADE,
-      group_id TEXT NOT NULL, message_id TEXT NOT NULL, member_id TEXT NOT NULL, qq TEXT NOT NULL,
+      group_id TEXT NOT NULL, message_id TEXT NOT NULL, member_id TEXT NOT NULL, member_name TEXT NOT NULL DEFAULT '', qq TEXT NOT NULL,
       content TEXT NOT NULL, at REAL NOT NULL, received REAL NOT NULL, job_id TEXT,
       UNIQUE(kb_id,group_id,message_id));
     CREATE INDEX IF NOT EXISTS learning_group ON learning_events(kb_id,group_id,id);
@@ -62,7 +69,7 @@ def initialize(c):
       PRIMARY KEY(kb_id,fact_key));
     ''')
     columns={r[1] for r in c.execute('PRAGMA table_info(learning_events)')}
-    for name,definition in [('is_reply','INTEGER NOT NULL DEFAULT 0'),('reference',"TEXT NOT NULL DEFAULT '{}'"),('msg_idx',"TEXT NOT NULL DEFAULT ''"),('mentions',"TEXT NOT NULL DEFAULT '[]'"),('member_role',"TEXT NOT NULL DEFAULT ''"),('raw_content',"TEXT NOT NULL DEFAULT ''")]:
+    for name,definition in [('member_name',"TEXT NOT NULL DEFAULT ''"),('is_reply','INTEGER NOT NULL DEFAULT 0'),('reference',"TEXT NOT NULL DEFAULT '{}'"),('msg_idx',"TEXT NOT NULL DEFAULT ''"),('mentions',"TEXT NOT NULL DEFAULT '[]'"),('member_role',"TEXT NOT NULL DEFAULT ''"),('raw_content',"TEXT NOT NULL DEFAULT ''")]:
         if name not in columns:c.execute(f'ALTER TABLE learning_events ADD COLUMN {name} {definition}')
     c.execute('CREATE INDEX IF NOT EXISTS learning_group_time ON learning_events(kb_id,group_id,at,id)')
     c.execute('CREATE INDEX IF NOT EXISTS learning_job_time ON learning_jobs(kb_id,created)')
@@ -131,6 +138,7 @@ def ingest(c, kb_id, data):
     if role not in ('','owner','admin','member'):raise ValueError('成员角色格式错误')
     if not isinstance(group,str) or not 1<=len(group)<=128:raise ValueError('群 ID 格式错误')
     content, message = data.get('content'), data.get('message_id')
+    member_name = clean_member_name(data.get('member_name', ''))
     if not all(isinstance(v,str) and 1 <= len(v) <= limit for v,limit in ((member,128),(message,200),(content,2000))):
         raise ValueError('消息 ID、成员或正文格式错误')
     if content.lstrip().startswith('/'):
@@ -153,8 +161,8 @@ def ingest(c, kb_id, data):
     mentions=data.get('mentions',[])
     if not isinstance(mentions,list) or len(mentions)>20 or any(not isinstance(v,str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}',v) for v in mentions):raise ValueError('@ 成员元数据格式错误')
     mentions=list(dict.fromkeys(v for v in mentions if v!=member))
-    inserted=c.execute('INSERT OR IGNORE INTO learning_events(kb_id,group_id,message_id,member_id,qq,content,at,received,is_reply,reference,msg_idx,mentions,member_role,raw_content) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-                      (kb_id,group,message,member,qq,content,at,time.time(),int(is_reply),json.dumps(reference),str(data.get('msg_idx',''))[:200],json.dumps(mentions),role,str(data.get('raw_content',content))[:4000])).rowcount
+    inserted=c.execute('INSERT OR IGNORE INTO learning_events(kb_id,group_id,message_id,member_id,member_name,qq,content,at,received,is_reply,reference,msg_idx,mentions,member_role,raw_content) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                      (kb_id,group,message,member,member_name,qq,content,at,time.time(),int(is_reply),json.dumps(reference),str(data.get('msg_idx',''))[:200],json.dumps(mentions),role,str(data.get('raw_content',content))[:4000])).rowcount
     if not inserted:return {'accepted':False,'reason':'duplicate'}
     if qq and (is_reply or mentions):
         batch=c.execute('SELECT * FROM learning_events WHERE kb_id=? AND group_id=? AND message_id=?',(kb_id,group,message)).fetchall()

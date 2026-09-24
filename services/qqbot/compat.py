@@ -1,8 +1,19 @@
 """Preserve full-group events and quoted-reply metadata in qq-botpy 1.2.1."""
 import os
 import logging
+import re
 from botpy.connection import ConnectionState
 from botpy.message import GroupMessage, C2CMessage
+
+
+def sender_name(message):
+    author = getattr(message, 'author', None)
+    value = (getattr(message, 'sweet_sender_name', '') or getattr(author, 'username', '')
+             or getattr(author, 'nickname', ''))
+    if not isinstance(value, str):
+        return ''
+    value = re.sub(r'[\x00-\x1f\x7f<>]', ' ', value).replace('@', '＠')
+    return re.sub(r'\s+', ' ', value).strip()[:12]
 
 
 def reference_metadata(data, own_ids=()):

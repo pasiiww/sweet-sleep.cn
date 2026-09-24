@@ -39,7 +39,7 @@ class AgentServiceTests(unittest.TestCase):
                 {'title': '秘密', 'content': '跨库秘密价格999元。'}, {})
 
         def fake_run(cfg, tools, messages, prompt, limit):
-            self.assertEqual(limit, 4)
+            self.assertEqual(limit, 6)
             self.assertIn('100元', tools[0].invoke({'search_query': '凯伊毛绒'}))
             self.assertIn('20元', tools[0].invoke({'search_query': '凯伊预售'}))
             self.assertNotIn('跨库秘密', tools[0].invoke({'search_query': '秘密'}))
@@ -65,7 +65,7 @@ class AgentServiceTests(unittest.TestCase):
              'source_type': 'wiki', 'url': 'https://www.gamekee.com/ba/tj/59934.html', 'updated_at': 1}]}
 
         def fake_run(cfg, tools, messages, prompt, limit):
-            self.assertEqual(limit, 4)
+            self.assertEqual(limit, 6)
             by_name = {item.name: item for item in tools}
             self.assertIn('search_ba_wiki', by_name)
             self.assertIn('GameKee', by_name['search_ba_wiki'].invoke({'search_query': '日奈'}) )
@@ -83,10 +83,10 @@ class AgentServiceTests(unittest.TestCase):
         now = __import__('time').time()
         with app.db() as c:
             for index in range(3):
-                c.execute('''INSERT INTO learning_events(kb_id,group_id,message_id,member_id,qq,content,at,received)
-                    VALUES(?,?,?,?,?,?,?,?)''',
-                    (self.kb, 'group-one', 'msg-'+str(index), 'member-'+str(index), '',
-                     '群历史消息'+str(index), now-index*60, now))
+                c.execute('''INSERT INTO learning_events(kb_id,group_id,message_id,member_id,member_name,qq,content,at,received)
+                    VALUES(?,?,?,?,?,?,?,?,?)''',
+                    (self.kb, 'group-one', 'msg-'+str(index), 'member-'+str(index),
+                     '历史昵称' if index == 1 else '', '', '群历史消息'+str(index), now-index*60, now))
         history_context = [{'role':'user','content':f'[群友{n}] 最近消息{n}'} for n in range(10)]
         first_data = {'kb_id':self.kb,'query':'请记住群里偏好简洁回答','origin':'qq_group',
                       'group_id':'group-one','user_id':'member-one','session_id':'opaque-session',
@@ -94,7 +94,7 @@ class AgentServiceTests(unittest.TestCase):
         observed = {}
 
         def save_memory(cfg, tools, messages, prompt, limit):
-            self.assertEqual(limit, 4)
+            self.assertEqual(limit, 6)
             by_name = {item.name:item for item in tools}
             self.assertIn('get_recent_chat_messages', by_name)
             self.assertIn('manage_memory', by_name)
@@ -109,6 +109,7 @@ class AgentServiceTests(unittest.TestCase):
         with patch.object(agent_service, 'run', side_effect=save_memory):
             app.api('POST','/knowledge/api/agent/answer',first_data,{})
         self.assertEqual(observed['older'][0]['content'], '群历史消息1')
+        self.assertEqual(observed['older'][0]['speaker'], '历史昵称')
         self.assertTrue(observed['saved']['saved'])
 
         second_data = first_data | {'query':'你好','user_id':'member-two','group_context':[]}
@@ -143,15 +144,15 @@ class AgentServiceTests(unittest.TestCase):
         self.assertEqual(call('clear','u2','g1')['deleted'], 1)
         self.assertEqual(call('list','u1','g1')['items'], [])
 
-    def test_fifth_search_is_blocked_then_model_answers_without_tools(self):
+    def test_seventh_search_is_blocked_then_model_answers_without_tools(self):
         app.api('POST', f'/knowledge/api/bases/{self.kb}/documents',
                 {'title': '凯伊毛绒', 'content': '凯伊毛绒售价100元。'}, {})
 
         def exhaust(cfg, tools, messages, prompt, limit):
-            for term in ('凯伊毛绒', '凯伊售价', '毛绒价格', '凯伊价格'):
+            for term in ('凯伊毛绒', '凯伊售价', '毛绒价格', '凯伊价格', '凯伊商品', '凯伊价格查询'):
                 tools[0].invoke({'search_query': term})
             raise agent_service.AgentLimitError from ToolCallLimitExceededError(
-                thread_count=5, run_count=5, thread_limit=None, run_limit=4)
+                thread_count=7, run_count=7, thread_limit=None, run_limit=6)
 
         direct_model = MagicMock()
         direct_model.invoke.return_value = AIMessage(content='凯伊毛绒售价100元。')
@@ -160,7 +161,7 @@ class AgentServiceTests(unittest.TestCase):
             response = app.api('POST', '/knowledge/api/agent/answer',
                                {'kb_id': self.kb, 'query': '凯伊毛绒多少钱'}, {})
         self.assertEqual(response['mode'], 'model')
-        self.assertEqual(len(response['search_terms']), 4)
+        self.assertEqual(len(response['search_terms']), 6)
         factory.assert_called_once()
         self.assertFalse(factory.call_args.kwargs['tool_calling'])
         final_messages = direct_model.invoke.call_args.args[0]
@@ -242,8 +243,8 @@ class AgentServiceTests(unittest.TestCase):
         with patch.object(agent_service, 'model', return_value=LoopModel()):
             with self.assertRaises(agent_service.AgentLimitError):
                 agent_service.run({'api_key': 'fake'}, [lookup],
-                                  [{'role': 'user', 'content': '问答'}], 'Use tools', 4)
-        self.assertEqual(len(calls), 4)
+                                  [{'role': 'user', 'content': '问答'}], 'Use tools', 6)
+        self.assertEqual(len(calls), 6)
 
 
 if __name__ == '__main__':

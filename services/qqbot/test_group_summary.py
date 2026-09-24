@@ -17,17 +17,18 @@ class SummaryTests(unittest.IsolatedAsyncioTestCase):
     def tearDown(self):
         self.seen.conn.close()
 
-    def message(self, mid, content, offset=0, group='g'):
-        return SimpleNamespace(id=mid, content=content, group_openid=group,
+    def message(self, mid, content, offset=0, group='g', name=''):
+        return SimpleNamespace(id=mid, content=content, group_openid=group, sweet_sender_name=name,
             timestamp=datetime.fromtimestamp(self.now+offset, timezone.utc).isoformat(),
             author=SimpleNamespace(member_openid='u'), reply=AsyncMock(return_value={'id':'reply'}))
 
     async def test_command_checkpoint_success_no_model_on_empty_and_group_isolation(self):
-        await self.bot.on_group_message_create(self.message('one','明天晚上八点公布结果',-3))
+        await self.bot.on_group_message_create(self.message('one','明天晚上八点公布结果',-3,name='超过十二字的群昵称样例长长长'))
         await self.bot.on_group_message_create(self.message('other','别的群的秘密',-2,'other'))
         query=self.message('q','/总结')
         await self.bot.on_group_message_create(query)
         self.assertIn('明天晚上八点',self.retriever.summarize.call_args.args[0])
+        self.assertIn('超过十二字的群昵称样例长：',self.retriever.summarize.call_args.args[0])
         self.assertNotIn('秘密',self.retriever.summarize.call_args.args[0])
         await self.bot.on_group_at_message_create(query)
         self.assertEqual(self.retriever.summarize.await_count,1)

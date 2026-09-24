@@ -23,9 +23,10 @@ class LearningBotTests(unittest.IsolatedAsyncioTestCase):
         return SimpleNamespace(id=mid,content='凯伊售价100元',timestamp='2026-09-09T20:00:00+08:00',group_openid='group001',author=SimpleNamespace(member_openid='owner001'),reply=AsyncMock(return_value={'id':'r'}))
     async def test_full_event_parser_and_no_ordinary_reply(self):
         dispatched=[];state=ConnectionState(lambda e,m:dispatched.append((e,m)),None);state.robot=SimpleNamespace(id='own_bot')
-        state.parsers['group_message_create']({'id':'event','d':{'id':'message','content':'普通发言','timestamp':'2026-09-09T20:00:00+08:00','group_openid':'group001','author':{'member_openid':'owner001'},'mentions':[{'id':'different_bot','bot':True}]}})
+        state.parsers['group_message_create']({'id':'event','d':{'id':'message','content':'普通发言','timestamp':'2026-09-09T20:00:00+08:00','group_openid':'group001','author':{'member_openid':'owner001','username':'这是超过十二字的群友昵称测试'},'mentions':[{'id':'different_bot','bot':True}]}})
         event,msg=dispatched[0];self.assertEqual(event,'group_message_create');self.assertIsInstance(msg,GroupMessage)
         self.assertEqual(msg.author.member_openid,'owner001');self.assertFalse(msg.sweet_mentioned)
+        self.assertEqual(compat.sender_name(msg), '这是超过十二字的群友昵称')
         await self.bot.on_group_message_create(msg);self.retriever.search.assert_not_awaited()
     async def test_mentioned_full_event_and_at_event_dedup(self):
         msg=self.message();msg.sweet_mentioned=True
@@ -44,9 +45,11 @@ class LearningBotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(msg.sweet_learning['mentions'],[])
     async def test_outbox_persistence_and_dedup(self):
         learner=Learner(self.seen.conn,'http://unused','token','kb');msg=self.message()
+        msg.sweet_sender_name='这是超过十二字的群友昵称测试'
         learner.observe(msg);learner.observe(msg)
         rows=self.seen.conn.execute('SELECT payload FROM learning_outbox').fetchall();self.assertEqual(len(rows),1)
         data=json.loads(rows[0][0]);self.assertEqual(data['member_id'],'owner001');self.assertEqual(data['kb_id'],'kb')
+        self.assertEqual(data['member_name'],'这是超过十二字的群友昵称')
         msg.id='command';msg.content='<@1905586446> /身份';learner.observe(msg)
         self.assertEqual(self.seen.conn.execute('SELECT count(*) FROM learning_outbox').fetchone()[0],1)
         second=SeenMessages(Path(self.temp.name)/'test.db');self.assertEqual(second.conn.execute('SELECT count(*) FROM learning_outbox').fetchone()[0],1);second.conn.close()
@@ -59,7 +62,9 @@ class LearningBotTests(unittest.IsolatedAsyncioTestCase):
         site=web.TCPSite(runner,'127.0.0.1',0);await site.start()
         try:
             learner=Learner(self.seen.conn,f'http://127.0.0.1:{site._server.sockets[0].getsockname()[1]}/learning/events','learning-secret','kb')
-            learner.observe(self.message());self.assertTrue(await learner.flush_once());self.assertEqual(received['member_id'],'owner001')
+            message=self.message();message.sweet_sender_name='群友昵称'
+            learner.observe(message);self.assertTrue(await learner.flush_once())
+            self.assertEqual(received['member_id'],'owner001');self.assertEqual(received['member_name'],'群友昵称')
             self.assertFalse(await learner.flush_once())
         finally:await runner.cleanup()
 

@@ -18,7 +18,7 @@ import maintenance
 import ba_wiki
 import memories
 
-ANSWER_TOOL_LIMIT = 4
+ANSWER_TOOL_LIMIT = 6
 MAINTENANCE_TOOL_LIMIT = 6
 MAX_WIKI_EVIDENCE_CHARS = 2200
 MAX_GROUP_CONTEXT_MESSAGES = 10
@@ -243,7 +243,12 @@ def answer(app, data, details):
             labels, items = {}, []
             for row in result.get('items', []):
                 member = row.get('member_id', '')
-                label = labels.setdefault(member, '群友' + str(len(labels) + 1))
+                member_name = row.get('member_name', '')
+                if isinstance(member_name, str) and member_name.strip():
+                    label = member_name[:12]
+                    labels[member] = label
+                else:
+                    label = labels.setdefault(member, '群友' + str(len(labels) + 1))
                 content = entities.clean_dialogue(row.get('content', ''))
                 if content:
                     items.append({'time': row.get('at', ''),
@@ -264,7 +269,7 @@ def answer(app, data, details):
             return json.dumps(result, ensure_ascii=False)
         tools.append(manage_memory)
 
-    system = (cfg['system_prompt'] + '\n所有工具合计最多调用4次，达到上限后系统会拦截后续调用并根据已取得内容直接回答。回答店铺事实前必须检索；第一次没找到或资料不足时换关键词再查。'
+    system = (cfg['system_prompt'] + '\n所有工具合计最多调用6次，达到上限后系统会拦截后续调用并根据已取得内容直接回答。回答店铺事实前必须检索；第一次没找到或资料不足时换关键词再查。'
               '\n回答《蔚蓝档案》角色、剧情和玩法问题时使用 search_ba_wiki，先选 auto（GameKee）；资料未命中或不足时可改用 bluearchivewiki（日文 Blue Archive Wikiru）。'
               '角色变体、服务器和版本可能不同，回答数值或技能前先核对角色形态与来源资料；必要时把日文资料翻译成中文，引用外部 Wiki 时可在正文附一个资料页链接。'
               '\n回答店铺问题时核对具体商品、款式、批次和属性；相近商品或旧批次不能代替直接证据。库存、进度、截止日期优先核对较新的同范围记录，无法核实时转人工。'
@@ -272,8 +277,8 @@ def answer(app, data, details):
               '\n问候或身份介绍可不检索。回复简洁，不输出工具过程、JSON、引用列表或具体管理员QQ号。'
               '\n可选表情包：' + json.dumps([s['name'] for s in cfg['stickers']], ensure_ascii=False) + '。如需发送，在结尾写[完整名称]；上一条已发送：' + str(previous_sticker_sent))
     if origin == 'qq_group':
-        system += ('\n群聊上下文包含触发前最近10条群消息；需要更多历史背景时才调用 get_recent_chat_messages，'
-                   '只能查询当前群，最多调用4次工具（搜索、聊天记录和记忆管理共用）。'
+        system += ('\n群聊上下文包含触发前最近10条群消息，并保留最多12字的发送者昵称；需要更多历史背景时才调用 get_recent_chat_messages，'
+                   '只能查询当前群，最多调用6次工具（搜索、聊天记录和记忆管理共用）。'
                    '群记忆由全群共享；只保存明确适合留在群里的稳定偏好和事实，不保存敏感个人信息、秘密或第三方隐私。')
     if memory_scope:
         system += ('\n当用户明确要求记住、忘记、清除或暂停记忆时，调用 manage_memory。'

@@ -115,7 +115,7 @@ curl https://sweet-sleep.cn/knowledge/api/retrieve \
 - `GET/PUT /knowledge/api/answer-settings`：仅管理密钥可读写；PUT 字段 `enabled`、`model`、`api_key`、`clear_key`、`system_prompt`、`handoff_groups`（群 OpenID 到最多3个成员 OpenID 的映射）。
 - `POST /knowledge/api/answer-settings/test`：管理者用已保存配置发送一条测试请求，会产生服务商调用费用。
 - `POST /knowledge/api/answer`：管理密钥或召回密钥可调用，参数 `kb_id`、`query`、可选 `group_id`。配置了模型后，此接口可产生调用费用。机器人不能修改提示词或模型配置。
-- `POST /knowledge/api/agent/answer`：QQ 机器人使用的 LangChain 回答入口；沿用每日额度、会话历史与 trace。全部工具合计最多调用4次，最多调用6次模型；第5次工具调用会被系统拦截，由模型根据已取得的资料直接完成回复。群聊默认携带本群最近10条聊天，需要更多时 agent 才调用与 stdio MCP 共用的 `get_recent_chat_messages` 查询当前群最近7天记录；群聊长期记忆按群共享，私聊记忆按用户独立。BA 问题优先查 GameKee，资料不足时可再查 Blue Archive Wikiru。
+- `POST /knowledge/api/agent/answer`：QQ 机器人使用的 LangChain 回答入口；沿用每日额度、会话历史与 trace。全部工具合计最多调用6次，最多调用8次模型；第7次工具调用会被系统拦截，由模型根据已取得的资料直接完成回复。群聊默认携带本群最近10条聊天，需要更多时 agent 才调用与 stdio MCP 共用的 `get_recent_chat_messages` 查询当前群最近7天记录；聊天记录会附带最多12字的发送者昵称。群聊长期记忆按群共享，私聊记忆按用户独立。BA 问题优先查 GameKee，资料不足时可再查 Blue Archive Wikiru。
 - `POST /knowledge/api/agent/memory`：QQ 机器人查看、清空、关闭或重新开启当前群/用户的长期记忆。机器人只提交身份和操作，不可读取其他群或用户记忆。
 - `POST /knowledge/api/agent/private-maintenance`：QQ 私聊管理员使用的 LangChain 维护入口；沿用 OpenID 白名单、先读取后修改、写入幂等和 trace。agent 最多调用6次工具、8次模型。
 

@@ -94,7 +94,7 @@ TOOLS = [
     {'name': 'list_recent_chat_groups', 'description': '列出最近7天有成员发言的群及发言数量。',
      'inputSchema': {'type': 'object', 'properties': {'limit': {'type': 'integer', 'minimum': 1, 'maximum': 100}}, 'additionalProperties': False},
      'annotations': {'readOnlyHint': True}},
-    {'name': 'get_recent_chat_messages', 'description': '按条数读取群内最近聊天。消息最多保留7天；单次最多400条，按时间正序返回。可以只看置顶成员，或指定成员ID。',
+    {'name': 'get_recent_chat_messages', 'description': '按条数读取群内最近聊天。消息最多保留7天；单次最多400条，按时间正序返回，附发送者昵称（最多12字）。可以只看置顶成员，或指定成员ID。',
      'inputSchema': {'type': 'object', 'properties': {'group_id': {'type': 'string'}, 'hours': {'type': 'integer', 'minimum': 1, 'maximum': 168}, 'limit': {'type': 'integer', 'minimum': 1, 'maximum': 400}, 'offset': {'type': 'integer', 'minimum': 0, 'maximum': 5000}, 'contains': {'type': 'string'}, 'pinned_only': {'type': 'boolean'}, 'member_ids': {'type': 'array', 'items': {'type': 'string'}, 'maxItems': 50}}, 'required': ['group_id'], 'additionalProperties': False},
      'annotations': {'readOnlyHint': True}},
     {'name': 'pin_chat_member', 'description': '在指定群置顶一位成员，之后可用 get_recent_chat_messages 的 pinned_only 查看其发言。member_id 可从聊天记录结果取得。',
@@ -273,12 +273,12 @@ def tool(name, args):
                 where += ' AND member_id IN (' + ','.join('?' for _ in member_ids) + ')'
                 params.extend(member_ids)
             total = conn.execute('SELECT count(*) FROM learning_events WHERE ' + where, params).fetchone()[0]
-            rows = conn.execute('SELECT message_id,member_id,content,at FROM learning_events WHERE ' + where + ' ORDER BY at DESC,id DESC LIMIT ? OFFSET ?',
+            rows = conn.execute('SELECT message_id,member_id,member_name,content,at FROM learning_events WHERE ' + where + ' ORDER BY at DESC,id DESC LIMIT ? OFFSET ?',
                 [*params, limit, offset]).fetchall()
         rows.reverse()
         return {'group_id': group, 'count': len(rows), 'total': total, 'hours': hours, 'offset': offset, 'pinned_only': pinned_only,
-                'items': [{'message_id': row[0], 'member_id': row[1],
-                           'at': datetime.fromtimestamp(row[3], timezone.utc).isoformat(), 'content': row[2]}
+                'items': [{'message_id': row[0], 'member_id': row[1], 'member_name': row[2],
+                           'at': datetime.fromtimestamp(row[4], timezone.utc).isoformat(), 'content': row[3]}
                           for row in rows]}
     raise LookupError('未知 MCP 工具：' + name)
 
