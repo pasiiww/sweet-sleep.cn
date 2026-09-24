@@ -1,10 +1,33 @@
 import unittest
+import json
+import os
+import tempfile
 from unittest.mock import patch
 
 import ba_wiki
 
 
 class BlueArchiveWikiTests(unittest.TestCase):
+    def test_disk_cache_survives_process_restart_and_expires_after_one_month(self):
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self, *args): pass
+            def geturl(self): return 'https://www.gamekee.com/v1/test'
+            def read(self, *args): return b'{"code":0,"data":{"answer":"cached"}}'
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {'KB_DATA_DIR': directory}), \
+             patch.object(ba_wiki, '_CACHE', {}), patch.object(ba_wiki, 'urlopen', return_value=Response()) as fetch:
+            first = ba_wiki._json_get('www.gamekee.com', '/v1/test', {})
+            self.assertEqual(first['data']['answer'], 'cached')
+            # A new module cache still reuses the durable MCP/service cache.
+            with patch.object(ba_wiki, '_CACHE', {}):
+                second = ba_wiki._json_get('www.gamekee.com', '/v1/test', {})
+            self.assertEqual(second, first)
+            fetch.assert_called_once()
+            with __import__('sqlite3').connect(os.path.join(directory, 'ba-wiki-cache.sqlite3')) as conn:
+                expiry = conn.execute('SELECT expires FROM wiki_cache').fetchone()[0]
+            self.assertAlmostEqual(expiry - ba_wiki.time.time(), ba_wiki._CACHE_TTL, delta=2)
+
     def test_student_match_supports_chinese_and_english_aliases(self):
         entries = [
             {'id': 1, 'content_id': 101, 'name': '日奈(泳装)', 'name_alias': '水日奈,Hina (Swimsuit)'},

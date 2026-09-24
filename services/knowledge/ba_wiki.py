@@ -1,13 +1,18 @@
 """Bounded, read-only lookup for Blue Archive community wikis.
 
 The module deliberately uses fixed public endpoints and never accepts a URL
-from the caller. Responses live only in a small in-process cache.
+from the caller. Responses live in a small disk cache shared by the API service
+and MCP process.
 """
+import hashlib
 import json
+import os
 import re
+import sqlite3
 import ssl
 import threading
 import time
+from pathlib import Path
 from html.parser import HTMLParser
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlsplit
@@ -33,22 +38,101 @@ _CACHE = {}
 _CACHE_LOCK = threading.Lock()
 _CACHE_MAX = 128
 _CACHE_MAX_BYTES = 12 * 1024 * 1024
-_CACHE_BYTES = 0
+_CACHE_TTL = 30 * 24 * 3600
 
 
-def _json_get(host, path, params, *, headers=None, ttl=900):
-    query = urlencode(params, doseq=True)
-    url = f'https://{host}{path}' + (f'?{query}' if query else '')
-    key = (host, path, query)
-    now = time.monotonic()
-    global _CACHE_BYTES
+def _cache_key(kind, host, path, query):
+    raw = json.dumps([kind, host, path, query], ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _cache_path():
+    data_dir = os.environ.get('KB_DATA_DIR', '').strip()
+    if not data_dir:
+        return None
+    directory = Path(data_dir)
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    return directory / 'ba-wiki-cache.sqlite3'
+
+
+def _cache_get(key):
+    now = time.time()
+    path = _cache_path()
+    if path is not None:
+        with sqlite3.connect(path, timeout=10) as conn:
+            conn.execute('PRAGMA busy_timeout=10000')
+            conn.execute('''CREATE TABLE IF NOT EXISTS wiki_cache (
+                cache_key TEXT PRIMARY KEY, expires REAL NOT NULL, payload TEXT NOT NULL,
+                size INTEGER NOT NULL, accessed REAL NOT NULL)''')
+            row = conn.execute('SELECT expires,payload FROM wiki_cache WHERE cache_key=?', (key,)).fetchone()
+            if row and row[0] > now:
+                conn.execute('UPDATE wiki_cache SET accessed=? WHERE cache_key=?', (now, key))
+                return True, json.loads(row[1])
+            if row:
+                conn.execute('DELETE FROM wiki_cache WHERE cache_key=?', (key,))
+        return False, None
     with _CACHE_LOCK:
         cached = _CACHE.get(key)
         if cached and cached[0] > now:
-            return cached[1]
+            return True, cached[1]
         if cached:
-            _CACHE_BYTES -= cached[2]
             del _CACHE[key]
+    return False, None
+
+
+def _cache_set(key, value, ttl):
+    raw = json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+    if len(raw) > _CACHE_MAX_BYTES:
+        return
+    now = time.time()
+    ttl = min(max(0, ttl), _CACHE_TTL)
+    path = _cache_path()
+    if path is not None:
+        with sqlite3.connect(path, timeout=10) as conn:
+            conn.execute('PRAGMA busy_timeout=10000')
+            conn.execute('''CREATE TABLE IF NOT EXISTS wiki_cache (
+                cache_key TEXT PRIMARY KEY, expires REAL NOT NULL, payload TEXT NOT NULL,
+                size INTEGER NOT NULL, accessed REAL NOT NULL)''')
+            conn.execute('DELETE FROM wiki_cache WHERE expires<=?', (now,))
+            conn.execute('''INSERT INTO wiki_cache(cache_key,expires,payload,size,accessed) VALUES(?,?,?,?,?)
+                ON CONFLICT(cache_key) DO UPDATE SET expires=excluded.expires,payload=excluded.payload,
+                size=excluded.size,accessed=excluded.accessed''',
+                (key, now + ttl, raw.decode('utf-8'), len(raw), now))
+            while True:
+                count, size = conn.execute('SELECT count(*),coalesce(sum(size),0) FROM wiki_cache').fetchone()
+                if count <= _CACHE_MAX and size <= _CACHE_MAX_BYTES:
+                    break
+                victim = conn.execute('SELECT cache_key FROM wiki_cache ORDER BY accessed,expires LIMIT 1').fetchone()
+                if not victim:
+                    break
+                conn.execute('DELETE FROM wiki_cache WHERE cache_key=?', victim)
+            free_pages = conn.execute('PRAGMA freelist_count').fetchone()[0]
+            conn.commit()
+            if free_pages > 64:
+                conn.execute('VACUUM')
+        try:
+            # The data directory is service-only (0700); the MCP process may run as root.
+            path.chmod(0o666)
+        except OSError:
+            pass
+        return
+    with _CACHE_LOCK:
+        for expired in [cache_key for cache_key, item in _CACHE.items() if item[0] <= now]:
+            del _CACHE[expired]
+        _CACHE.pop(key, None)
+        while _CACHE and (len(_CACHE) >= _CACHE_MAX or sum(item[2] for item in _CACHE.values()) + len(raw) > _CACHE_MAX_BYTES):
+            oldest = min(_CACHE, key=lambda item: _CACHE[item][0])
+            del _CACHE[oldest]
+        _CACHE[key] = (now + ttl, value, len(raw))
+
+
+def _json_get(host, path, params, *, headers=None, ttl=_CACHE_TTL):
+    query = urlencode(params, doseq=True)
+    url = f'https://{host}{path}' + (f'?{query}' if query else '')
+    key = _cache_key('json', host, path, query)
+    found, cached = _cache_get(key)
+    if found:
+        return cached
     request_headers = {'User-Agent': USER_AGENT, 'Accept': 'application/json'}
     if headers:
         request_headers.update(headers)
@@ -70,34 +154,15 @@ def _json_get(host, path, params, *, headers=None, ttl=900):
         value = json.loads(raw.decode('utf-8'))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError(f'{host} 返回了无法识别的数据') from exc
-    with _CACHE_LOCK:
-        for expired in [cache_key for cache_key, item in _CACHE.items() if item[0] <= now]:
-            _CACHE_BYTES -= _CACHE[expired][2]
-            del _CACHE[expired]
-        previous = _CACHE.pop(key, None)
-        if previous:
-            _CACHE_BYTES -= previous[2]
-        while _CACHE and (len(_CACHE) >= _CACHE_MAX or _CACHE_BYTES + len(raw) > _CACHE_MAX_BYTES):
-            oldest = min(_CACHE, key=lambda item: _CACHE[item][0])
-            _CACHE_BYTES -= _CACHE[oldest][2]
-            del _CACHE[oldest]
-        if len(raw) <= _CACHE_MAX_BYTES:
-            _CACHE[key] = (now + ttl, value, len(raw))
-            _CACHE_BYTES += len(raw)
+    _cache_set(key, value, ttl)
     return value
 
 
-def _text_get(host, path, *, headers=None, ttl=3600):
-    key = (host, path, '')
-    now = time.monotonic()
-    global _CACHE_BYTES
-    with _CACHE_LOCK:
-        cached = _CACHE.get(key)
-        if cached and cached[0] > now:
-            return cached[1]
-        if cached:
-            _CACHE_BYTES -= cached[2]
-            del _CACHE[key]
+def _text_get(host, path, *, headers=None, ttl=_CACHE_TTL):
+    key = _cache_key('text', host, path, '')
+    found, cached = _cache_get(key)
+    if found:
+        return cached
     request_headers = {'User-Agent': USER_AGENT, 'Accept': 'text/html'}
     if headers:
         request_headers.update(headers)
@@ -116,20 +181,7 @@ def _text_get(host, path, *, headers=None, ttl=3600):
     if len(raw) > MAX_RESPONSE_BYTES:
         raise ValueError(f'{host} 返回内容超过大小限制')
     text = raw.decode('utf-8', 'replace')
-    with _CACHE_LOCK:
-        for expired in [cache_key for cache_key, item in _CACHE.items() if item[0] <= now]:
-            _CACHE_BYTES -= _CACHE[expired][2]
-            del _CACHE[expired]
-        previous = _CACHE.pop(key, None)
-        if previous:
-            _CACHE_BYTES -= previous[2]
-        while _CACHE and (len(_CACHE) >= _CACHE_MAX or _CACHE_BYTES + len(raw) > _CACHE_MAX_BYTES):
-            oldest = min(_CACHE, key=lambda item: _CACHE[item][0])
-            _CACHE_BYTES -= _CACHE[oldest][2]
-            del _CACHE[oldest]
-        if len(raw) <= _CACHE_MAX_BYTES:
-            _CACHE[key] = (now + ttl, text, len(raw))
-            _CACHE_BYTES += len(raw)
+    _cache_set(key, text, ttl)
     return text
 
 
@@ -138,7 +190,7 @@ def _gamekee_headers():
             'Referer': 'https://www.gamekee.com/ba/'}
 
 
-def _gamekee_data(path, params, *, ttl=900):
+def _gamekee_data(path, params, *, ttl=_CACHE_TTL):
     payload = _json_get(GAMEKEE_HOST, path, params, headers=_gamekee_headers(), ttl=ttl)
     if not isinstance(payload, dict) or payload.get('code') != 0:
         raise ValueError('GameKee 没有返回可用资料')
@@ -158,7 +210,7 @@ def _flatten_entries(node):
 
 
 def _student_tree():
-    data = _gamekee_data('/v1/entry/treesByPidV1', {'pid': GAMEKEE_STUDENT_ROOT_ID}, ttl=4 * 3600)
+    data = _gamekee_data('/v1/entry/treesByPidV1', {'pid': GAMEKEE_STUDENT_ROOT_ID})
     if not isinstance(data, dict) or data.get('id') != GAMEKEE_STUDENT_ROOT_ID:
         raise ValueError('GameKee 学生图鉴暂不可用')
     return list(_flatten_entries(data))
@@ -209,7 +261,7 @@ def _student_matches(query, entries, limit):
 
 def _gamekee_student_result(entry):
     content_id = int(entry['content_id'])
-    result = _gamekee_data(f'/v1/content/detail/{content_id}', {}, ttl=3600)
+    result = _gamekee_data(f'/v1/content/detail/{content_id}', {})
     if not isinstance(result, dict) or result.get('game_id') != GAMEKEE_GAME_ID:
         return None
     title = str(result.get('title') or entry.get('name') or '蔚蓝档案角色')[:120]

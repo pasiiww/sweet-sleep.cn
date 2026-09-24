@@ -20,7 +20,9 @@ from group_summary import GroupSummary, timestamp as summary_timestamp
 import compat
 
 LOG = logging.getLogger('knowledge-bot')
-HELP = '群内发送 /总结：总结上次成功总结后、最近10小时、最多400条和15000字以内的聊天。\n群内引用图片发送 /old，可查询本群记录次数、首次发送者和时间。\n我是午觉糖水铺的客服机器人。\n直接发送问题，或输入：/检索 你的问题\n我会根据知识库资料回答，资料不足时请群主或管理员确认。模型不可用时返回最相关文档。\n同一会话保留最近30分钟的问答，可发送 /新对话 清空。\n每天共20次咨询额度，群聊和私聊共享，北京时间零点恢复。\n管理员可在群内发送 /身份，获取后台人工接管配置需要的 OpenID。'
+MEMORY_COMMANDS = ('/记忆', '/清除记忆', '/关闭记忆', '/开启记忆')
+GROUP_COMMANDS = ('/old', '/总结', '/新对话', '/清空上下文', *MEMORY_COMMANDS)
+HELP = '群内发送 /总结：总结上次成功总结后、最近10小时、最多400条和15000字以内的聊天。\n群内引用图片发送 /old，可查询本群记录次数、首次发送者和时间。\n长期记忆：群内共享、私聊按用户独立；发送 /记忆 查看，/清除记忆 删除，/关闭记忆 暂停，/开启记忆 恢复。\n我是午觉糖水铺的客服机器人。\n直接发送问题，或输入：/检索 你的问题\n我会根据知识库资料回答，资料不足时请群主或管理员确认。模型不可用时返回最相关文档。\n群聊回答默认参考本群最近10条发言；同一私聊保留最近30分钟的问答，可发送 /新对话 清空。\n每天共20次咨询额度，群聊和私聊共享，北京时间零点恢复。\n管理员可在群内发送 /身份，获取后台人工接管配置需要的 OpenID。'
 
 
 def normalize(text):
@@ -31,6 +33,35 @@ def normalize(text):
 def plain(text):
     # Prevent retrieved text from becoming QQ mentions / message markup.
     return str(text).replace('@', '＠').replace('<', '＜').replace('>', '＞').replace('\x00', '')
+
+
+def clean_group_context(text):
+    if not isinstance(text, str):
+        return ''
+    text = text.strip()
+    if text.startswith(('{', '[')):
+        try:
+            value = json.loads(text)
+            def extract(item, depth=0):
+                if depth > 5:
+                    return []
+                if isinstance(item, dict):
+                    return [item[k] for k in ('text', 'content') if isinstance(item.get(k), str)] + [
+                        part for v in item.values() if isinstance(v, list) for part in extract(v, depth+1)]
+                if isinstance(item, list):
+                    return [part for child in item[:100] for part in extract(child, depth+1)]
+                return []
+            text = '\n'.join(extract(value))
+        except (ValueError, RecursionError):
+            if text.startswith('{'):
+                return ''
+    text = re.sub(r'<@!?[A-Za-z0-9_-]+>|<qqbot-at-user\s+id="[A-Za-z0-9_-]+"\s*/>', '', text)
+    text = re.sub(r'<faceType=[^>]*>|<[^>]*>|\[CQ:[^\]]*\]|\[(?:图片|表情包|动画表情|表情|image|emoji)[^\]]*\]', '', text, flags=re.I)
+    text = re.sub(r'\s+', ' ', text).strip()
+    text = re.sub(r'^/(?:检索|搜索|search)(?:\s+|$)', '', text, flags=re.I).strip()
+    if text.startswith('/') or not re.search(r'[\w\u3400-\u9fff]', text):
+        return ''
+    return text[:1200]
 
 
 def format_results(data):
@@ -70,8 +101,13 @@ class SeenMessages:
         self.conn.execute('CREATE TABLE IF NOT EXISTS dialogue(id INTEGER PRIMARY KEY AUTOINCREMENT, session TEXT NOT NULL, query TEXT NOT NULL, reply TEXT NOT NULL, at REAL NOT NULL)')
         self.conn.execute('CREATE TABLE IF NOT EXISTS sticker_state(session TEXT PRIMARY KEY, sent INTEGER NOT NULL, at REAL NOT NULL)')
         self.conn.execute('CREATE TABLE IF NOT EXISTS private_maintenance_session (id TEXT PRIMARY KEY, at REAL NOT NULL)')
+        self.conn.execute('''CREATE TABLE IF NOT EXISTS group_context_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, group_id TEXT NOT NULL, message_id TEXT NOT NULL,
+            member_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, at REAL NOT NULL,
+            UNIQUE(group_id,message_id))''')
         self.conn.execute('CREATE INDEX IF NOT EXISTS dialogue_session ON dialogue(session,id)')
         self.conn.execute('CREATE INDEX IF NOT EXISTS dialogue_time ON dialogue(at)')
+        self.conn.execute('CREATE INDEX IF NOT EXISTS group_context_time ON group_context_messages(group_id,at,id)')
         self.conn.commit()
 
     def claim(self, key):
@@ -127,6 +163,63 @@ class SeenMessages:
             self.conn.execute('DELETE FROM dialogue WHERE session=?', (session,))
             self.conn.execute('DELETE FROM sticker_state WHERE session=?',(session,))
 
+    def observe_group_message(self, message):
+        group = getattr(message, 'group_openid', '')
+        message_id = getattr(message, 'id', '')
+        member = getattr(getattr(message, 'author', None), 'member_openid', '')
+        content = clean_group_context(getattr(message, 'content', '') or '')
+        if not group or not message_id or not member or not content:
+            return
+        at = summary_timestamp(message)
+        with self.conn:
+            self.conn.execute('DELETE FROM group_context_messages WHERE at<?', (time.time()-7*86400,))
+            self.conn.execute('''INSERT OR IGNORE INTO group_context_messages
+                (group_id,message_id,member_id,role,content,at) VALUES(?,?,?,'user',?,?)''',
+                (group, str(message_id), member, content, at))
+            self.conn.execute('''DELETE FROM group_context_messages WHERE group_id=? AND id NOT IN
+                (SELECT id FROM group_context_messages WHERE group_id=? ORDER BY at DESC,id DESC LIMIT 400)''', (group, group))
+
+    def remember_group_reply(self, group, message_id, content):
+        content = clean_group_context(content)
+        if not group or not message_id or not content:
+            return
+        with self.conn:
+            self.conn.execute('DELETE FROM group_context_messages WHERE at<?', (time.time()-7*86400,))
+            self.conn.execute('''INSERT OR IGNORE INTO group_context_messages
+                (group_id,message_id,member_id,role,content,at) VALUES(?,?,'bot','assistant',?,?)''',
+                (group, str(message_id), content[:1200], time.time()))
+            self.conn.execute('''DELETE FROM group_context_messages WHERE group_id=? AND id NOT IN
+                (SELECT id FROM group_context_messages WHERE group_id=? ORDER BY at DESC,id DESC LIMIT 400)''', (group, group))
+
+    def group_history(self, group, current_message_id, limit=10):
+        if not group:
+            return []
+        current = self.conn.execute('SELECT id,at FROM group_context_messages WHERE group_id=? AND message_id=?',
+                                    (group, str(current_message_id))).fetchone()
+        if current:
+            where = '(at<? OR (at=? AND id<?))'
+            params = (group, current[1], current[1], current[0], limit)
+        else:
+            where = 'at<=?'
+            params = (group, time.time(), limit)
+        rows = self.conn.execute(f'''SELECT member_id,role,content,at FROM group_context_messages
+            WHERE group_id=? AND {where} ORDER BY at DESC,id DESC LIMIT ?''', params).fetchall()
+        rows.reverse()
+        labels, result = {}, []
+        for row in rows:
+            member_id, role, content, created_at = row
+            if role == 'assistant':
+                speaker = '机器人'
+            else:
+                speaker = labels.setdefault(member_id, '群友'+str(len(labels)+1))
+            at = time.strftime('%m-%d %H:%M', time.localtime(created_at))
+            result.append({'role': role, 'content': f'[{at}] {speaker}：{content}'})
+        return result
+
+    def clear_group_context(self, group):
+        with self.conn:
+            self.conn.execute('DELETE FROM group_context_messages WHERE group_id=?', (group,))
+
 
 def conversation_key(message, kind, kb_id):
     author = getattr(message, 'author', None)
@@ -143,12 +236,25 @@ class Retriever:
         self.url = self.api_root + '/agent/answer'
         self.token, self.kb_id = token, kb_id
 
-    async def search(self, query, group_id='', history=None, trace_meta=None):
+    async def search(self, query, group_id='', history=None, trace_meta=None, group_context=None):
+        payload = {'kb_id': self.kb_id, 'query': query, 'group_id': group_id,
+                   'history': history or [], **(trace_meta or {})}
+        if group_context is not None:
+            payload['group_context'] = group_context
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=80)) as session:
             async with session.post(self.url, headers={'Authorization': 'Bearer ' + self.token},
-                                    json={'kb_id': self.kb_id, 'query': query, 'group_id': group_id, 'history': history or [], **(trace_meta or {})}) as response:
+                                    json=payload) as response:
                 if response.status != 200:
                     raise RuntimeError(f'Knowledge HTTP {response.status}')
+                return await response.json()
+
+    async def memory(self, action, meta):
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as session:
+            async with session.post(self.api_root + '/agent/memory',
+                headers={'Authorization': 'Bearer ' + self.token},
+                json={'kb_id': self.kb_id, 'action': action, **meta}) as response:
+                if response.status != 200:
+                    raise RuntimeError('Memory HTTP ' + str(response.status))
                 return await response.json()
 
 
@@ -216,6 +322,7 @@ class KnowledgeBot(botpy.Client):
                  getattr(message, 'group_openid', ''), compat.is_bot(message))
         if compat.is_bot(message):return
         self.summaries.observe(message)
+        self.seen.observe_group_message(message)
         await self.images.observe(message)
         if self.learner: self.learner.observe(message)
         # The platform event certifies this bot was mentioned; text may omit the tag.
@@ -228,14 +335,17 @@ class KnowledgeBot(botpy.Client):
                  getattr(message, 'sweet_mentioned', False))
         if compat.is_bot(message):return
         self.summaries.observe(message)
+        self.seen.observe_group_message(message)
         await self.images.observe(message)
         if self.learner: self.learner.observe(message)
-        if getattr(message, 'sweet_mentioned', False) or normalize(message.content).lower() in ('/old', '/总结'):
+        if getattr(message, 'sweet_mentioned', False) or normalize(message.content).lower() in GROUP_COMMANDS:
             await self.answer(message, 'group', mentioned=getattr(message, 'sweet_mentioned', False))
 
     async def answer(self, message, kind, mentioned=False):
         if compat.is_bot(message):return
-        if kind == 'group' and not mentioned and normalize(message.content).lower() not in ('/old', '/总结'):
+        if kind == 'group':
+            self.seen.observe_group_message(message)
+        if kind == 'group' and not mentioned and normalize(message.content).lower() not in GROUP_COMMANDS:
             return
         if not message.id or not self.seen.claim(kind + ':' + message.id):
             LOG.info('MESSAGE_SKIPPED kind=%s reason=duplicate_or_missing_id', kind)
@@ -245,7 +355,8 @@ class KnowledgeBot(botpy.Client):
             return
         session = conversation_key(message, kind, self.retriever.kb_id)
         # Serialize generation AND delivery for each conversation; release unused locks.
-        lock_key = session or kind + ':' + message.id
+        group_id = getattr(message, 'group_openid', '') if kind == 'group' else ''
+        lock_key = ('group:' + group_id) if group_id else (session or kind + ':' + message.id)
         entry = self.conversations.setdefault(lock_key, [asyncio.Lock(), 0])
         entry[1] += 1
         try:
@@ -317,6 +428,7 @@ class KnowledgeBot(botpy.Client):
 
     async def _answer(self, message, kind, session):
         query = normalize(message.content)
+        group_id = getattr(message, 'group_openid', '') if kind == 'group' else ''
         learning = getattr(message, 'sweet_learning', None)
         quotes = ((learning.get('reference') or {}).get('quotes') or []) if isinstance(learning, dict) else []
         quote_texts = list(dict.fromkeys(normalize(q.get('content', '')) for q in quotes if isinstance(q, dict)))
@@ -340,7 +452,33 @@ class KnowledgeBot(botpy.Client):
                 reply='维护指令请私聊机器人发送，仅已授权账号可使用。'
             elif query in ('/新对话', '/清空上下文'):
                 self.seen.clear_history(session)
+                if kind == 'group':
+                    self.seen.clear_group_context(getattr(message, 'group_openid', ''))
                 reply = '已清空当前对话的上下文，我们重新开始。'
+            elif query in MEMORY_COMMANDS:
+                author = getattr(message, 'author', None)
+                meta = {'origin': 'qq_group' if kind == 'group' else 'qq_private',
+                        'user_id': getattr(author, 'member_openid' if kind == 'group' else 'user_openid', ''),
+                        'group_id': group_id}
+                actions = {'/记忆': 'list', '/清除记忆': 'clear', '/关闭记忆': 'disable', '/开启记忆': 'enable'}
+                try:
+                    result = await self.retriever.memory(actions[query], meta)
+                    if query == '/记忆':
+                        if result.get('enabled') is False:
+                            reply = '长期记忆当前已关闭。发送 /开启记忆 可恢复。'
+                        elif result.get('items'):
+                            items = result['items'][:24]
+                            reply = '当前长期记忆：\n' + '\n'.join(f'• {plain(item)}' for item in items)
+                        else:
+                            reply = '目前还没有保存长期记忆。你可以在对话中说“记住……”来保存。'
+                    elif query == '/清除记忆':
+                        reply = '已清除' + str(result.get('deleted', 0)) + '条长期记忆。'
+                    elif query == '/关闭记忆':
+                        reply = '已暂停长期记忆；已有内容会保留但不再读取或更新。'
+                    else:
+                        reply = '已开启长期记忆。'
+                except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError):
+                    reply = '记忆服务暂时不可用，请稍后重试。'
             elif query in ('/身份', '/whoami'):
                 if kind == 'group':
                     reply = f'群 OpenID：{plain(message.group_openid)}\n你的成员 OpenID：{plain(message.author.member_openid)}\n请由管理员在知识库后台填写人工联系人。此命令不会自动赋予管理员身份。'
@@ -352,13 +490,18 @@ class KnowledgeBot(botpy.Client):
                 reply = '当前检索人数较多，请稍后重新发送问题。'
             else:
                 async with self.capacity:
-                    group_id = getattr(message, 'group_openid', '') if kind == 'group' else ''
                     author = getattr(message, 'author', None)
                     meta = {'origin': 'qq_group' if kind == 'group' else 'qq_private',
                             'user_id': getattr(author, 'member_openid' if kind == 'group' else 'user_openid', ''), 'session_id': session}
                     if reply_reference:meta['reply_reference']=reply_reference
                     if self.seen.last_sticker_sent(session):meta['previous_sticker_sent']=True
-                    trace = await self.retriever.search(query, group_id=group_id, history=self.seen.history(session), trace_meta=meta)
+                    history = [] if kind == 'group' else self.seen.history(session)
+                    group_context = self.seen.group_history(group_id, message.id) if kind == 'group' else None
+                    if kind == 'group' and group_id:
+                        trace = await self.retriever.search(query, group_id=group_id, history=history,
+                            trace_meta=meta, group_context=group_context)
+                    else:
+                        trace = await self.retriever.search(query, group_id=group_id, history=history, trace_meta=meta)
                     reply = format_reply(trace, kind)
                     remember = trace.get('mode') != 'quota'
             response = await self.send_answer(message, kind, reply, trace, session)
@@ -370,6 +513,10 @@ class KnowledgeBot(botpy.Client):
                 if (trace or {}).get('sticker_delivery',{}).get('status')=='sent':
                     history_reply+='['+trace['sticker']['name']+']'
                 self.seen.remember(session, ('引用内容：'+reply_reference+'\n本次问题：' if reply_reference else '')+query, history_reply)
+                if kind == 'group':
+                    group_reply_id = response.get('id') if isinstance(response, dict) else getattr(response, 'id', '')
+                    self.seen.remember_group_reply(getattr(message, 'group_openid', ''),
+                        group_reply_id or ('bot:' + str(message.id)), sent)
             LOG.info('REPLY_OK kind=%s chars=%s', kind, len(reply))
         except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError) as exc:
             delivery_error = type(exc).__name__

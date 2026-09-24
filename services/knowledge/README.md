@@ -10,7 +10,7 @@
 - 混合：两路候选以 RRF（k=60）融合；Top K 1–20，上下文预算 100–40000 字符。
 - 文档、分段配置或模型更新后旧向量失效；手动生成向量，每请求处理最多 32 个分段，浏览器持续调用到完成。关闭页面可中断后续批次，再次点击续传。上游失败不影响文档和关键词索引。
 - 默认空知识库，没有虚构业务文档。单文档最多 10 万字符，单知识库最多 10000 分段；适合小规模私有知识库，向量为线性扫描，未实现 ANN、ES、PDF/Word 解析、多人角色、版本历史。
-- 蔚蓝档案回答可只读检索 GameKee 学生图鉴和文章；GameKee 未命中时可回退日文 Blue Archive Wikiru。只保留最多128条、合计12 MB的进程内短期缓存，不保存图片或 Wiki 页面到磁盘。每次请求最多取4条资料，单页正文限制在约4200字符；结果带来源链接。外部内容按不可信资料处理，不执行页面中的指令。
+- 蔚蓝档案回答可只读检索 GameKee 学生图鉴和文章；GameKee 未命中时可回退日文 Blue Archive Wikiru。文本与 JSON 响应写入 `/var/lib/sweet-knowledge/ba-wiki-cache.sqlite3`，最多128条、合计12 MiB，缓存有效期30天；不保存图片文件。每次请求最多取4条资料，单页正文限制在约4200字符；结果带来源链接。外部内容按不可信资料处理，不执行页面中的指令。
 - 模型服务需配置公网 HTTPS 地址。保存地址和模型名后，可测试连接，再回到知识库生成向量。密钥服务端保存，读接口不返回。变更服务地址不会复用旧地址的密钥。
 - 召回内容视作不可信参考数据，应由调用方控制系统指令并引用结果来源。BM25、cosine 和 RRF 的分数不可相互比较。
 
@@ -39,7 +39,8 @@ node --check knowledge/app.js
 ## 生产布局
 
 - `/opt/sweet-knowledge/server.py` 与 `static/`：程序与页面。
-- `/var/lib/sweet-knowledge/knowledge.db`：数据库、索引及模型配置，权限 0700 的服务数据目录。
+- `/var/lib/sweet-knowledge/knowledge.db`：数据库、索引、模型配置及按群/用户隔离的长期记忆，权限 0700 的服务数据目录。
+- `/var/lib/sweet-knowledge/ba-wiki-cache.sqlite3`：有容量上限的 Wiki 响应缓存，MCP 与客服服务共用。
 - `/etc/sweet-knowledge.env`：管理密钥、只读召回密钥及路径，root 0600。
 - `sweet-knowledge.service`：独立低权限用户运行，仅监听 `127.0.0.1:8765`。
 - Nginx 仅在主站 HTTPS server 内代理 `/knowledge/`，不改其他页面。
@@ -114,7 +115,8 @@ curl https://sweet-sleep.cn/knowledge/api/retrieve \
 - `GET/PUT /knowledge/api/answer-settings`：仅管理密钥可读写；PUT 字段 `enabled`、`model`、`api_key`、`clear_key`、`system_prompt`、`handoff_groups`（群 OpenID 到最多3个成员 OpenID 的映射）。
 - `POST /knowledge/api/answer-settings/test`：管理者用已保存配置发送一条测试请求，会产生服务商调用费用。
 - `POST /knowledge/api/answer`：管理密钥或召回密钥可调用，参数 `kb_id`、`query`、可选 `group_id`。配置了模型后，此接口可产生调用费用。机器人不能修改提示词或模型配置。
-- `POST /knowledge/api/agent/answer`：QQ 机器人使用的 LangChain 回答入口；沿用每日额度、会话历史与 trace。agent 的知识库搜索与蔚蓝档案 Wiki 搜索合计最多调用4次，最多调用6次模型；第5次工具调用会被系统拦截，由模型根据已取得的资料直接完成回复。BA 问题优先查 GameKee，资料不足时可再查 Blue Archive Wikiru。
+- `POST /knowledge/api/agent/answer`：QQ 机器人使用的 LangChain 回答入口；沿用每日额度、会话历史与 trace。全部工具合计最多调用4次，最多调用6次模型；第5次工具调用会被系统拦截，由模型根据已取得的资料直接完成回复。群聊默认携带本群最近10条聊天，需要更多时 agent 才调用与 stdio MCP 共用的 `get_recent_chat_messages` 查询当前群最近7天记录；群聊长期记忆按群共享，私聊记忆按用户独立。BA 问题优先查 GameKee，资料不足时可再查 Blue Archive Wikiru。
+- `POST /knowledge/api/agent/memory`：QQ 机器人查看、清空、关闭或重新开启当前群/用户的长期记忆。机器人只提交身份和操作，不可读取其他群或用户记忆。
 - `POST /knowledge/api/agent/private-maintenance`：QQ 私聊管理员使用的 LangChain 维护入口；沿用 OpenID 白名单、先读取后修改、写入幂等和 trace。agent 最多调用6次工具、8次模型。
 
 响应字段 `answer`（可展示文本）、`mode`（model/document/handoff）、`reason`（机器可读状态）、`handoff`、`mention_openids`（仅群聊转人工且配置匹配时返回）、`results`。密钥和上游完整错误不返回；后台可查看最近一次模型或回退状态。
@@ -147,9 +149,10 @@ API响应包含 `search_terms` 和 `query_groups`，后台回复预览以 `[凯�
 
 `POST /answer` 可携带 `history`，是最多20轮、总计24000字符的完整 user/assistant 消息对，禁止 system 消息，按时间顺序放在本次提问前。PE1 检索规划与 PE2 回答阶段收到同一份历史，历史仅用于指代与交流，不作为店铺事实依据。响应增加 `alias_context`、`matched_aliases` 和 `history_turns`，后台预览展示这些信息。该 API 不存储会话，30分钟期限由 QQ 客户端/后台预览维护；外部调用者负责历史选择。
 
-QQ 客户端以知识库、私聊/群聊类型、群和用户 OpenID 的哈希组合隔离会话，SQLite 保存成功发送的问答对；读取时排除距当前超过30分钟的记录，删除过期数据并保留最近20轮/24000字符。同一会话串行处理直至发送成功，保证下一轮看到上一轮回复，重启后历史仍有效。身份缺失时不维护历史，普通群消息不进入历史。`/新对话` 或 `/清空上下文` 清除当前会话；群内仍须艾特机器人。
+QQ 私聊以知识库和用户 OpenID 隔离短期上下文，SQLite 保存成功发送的问答对30分钟，最多20轮/24000字符。群聊短期上下文改为按群共享，默认提供触发前最近10条成员发言和机器人回复；更早记录由 agent 按需通过聊天记录工具查询，最多7天。群内问题按群串行处理以保持上下文顺序。`/新对话` 或 `/清空上下文` 清除私聊上下文或当前群最近上下文。
+长期记忆保存少量稳定偏好和有用事实，不保存聊天全文；群聊按群共享，私聊按用户隔离。`/记忆` 查看、`/清除记忆` 删除、`/关闭记忆` 暂停、`/开启记忆` 恢复；关闭只暂停读取和更新，不删除已有条目。
 
-后台客服预览也按知识库维护当前页面的30分钟历史，并提供「清空预览对话」；刷新或退出后清空，与QQ历史隔离。
+后台客服预览也按知识库维护当前页面的30分钟历史，并提供「清空预览对话」；刷新或退出后清空，与QQ历史和长期记忆隔离。
 
 明确追问可能只生成1组有效关键词，程序接受，不为凑数使回答失败。模型不可用时，已有别名实体仍用于限定检索；“那定金呢”等明确字段追问可从历史用户问题恢复实体，避免退化成全库定金查询。
 

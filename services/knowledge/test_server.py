@@ -155,6 +155,12 @@ class KnowledgeTests(unittest.TestCase):
             self.assertEqual(req('api/answer-settings')[0], 401)
             self.assertEqual(req('api/bases', app.ADMIN_TOKEN)[0], 200)
             self.assertEqual(req('api/retrieve', app.READ_TOKEN, {'kb_id': self.kb, 'query': '退款'})[0], 200)
+            memory_status, memory_body = req('api/agent/memory', app.READ_TOKEN, {
+                'kb_id':self.kb,'origin':'qq_group','group_id':'group-one','user_id':'member-one','action':'list'})
+            self.assertEqual(memory_status, 200)
+            self.assertEqual(json.loads(memory_body)['items'], [])
+            self.assertEqual(req('api/agent/memory', app.READ_TOKEN, {
+                'kb_id':self.kb,'origin':'qq_group','user_id':'member-one','action':'list'})[0], 400)
             status, body = req('api/answer', app.READ_TOKEN, {'kb_id': self.kb, 'query': '退款'})
             self.assertEqual(status, 200)
             self.assertEqual(json.loads(body)['reason'], 'missing_key')

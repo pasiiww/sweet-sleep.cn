@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 from aiohttp import web
 from botpy.message import C2CMessage, GroupMessage
-from bot import KnowledgeBot, Retriever, SeenMessages, format_results, format_reply, normalize, conversation_key
+from bot import KnowledgeBot, Retriever, SeenMessages, clean_group_context, format_results, format_reply, normalize, conversation_key
 
 
 class BotTests(unittest.IsolatedAsyncioTestCase):
@@ -15,7 +15,8 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.seen = SeenMessages(Path(self.temp.name) / 'seen.db')
         self.retriever = SimpleNamespace(kb_id='test', search=AsyncMock(return_value={'results': [
-            {'title': '说明', 'content': '机器人返回原文。', 'source': '演示', 'ordinal': 0}]}))
+            {'title': '说明', 'content': '机器人返回原文。', 'source': '演示', 'ordinal': 0}]}),
+            memory=AsyncMock(return_value={'ok': True, 'enabled': True, 'items': []}))
         self.bot = KnowledgeBot(self.retriever, self.seen)
 
     async def asyncTearDown(self):
@@ -188,6 +189,28 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(conversation_key(first, 'c2c', 'kb1'), conversation_key(first, 'c2c', 'kb2'))
         self.assertEqual(conversation_key(self.message('匿名'), 'c2c', 'kb1'), '')
 
+    async def test_group_uses_shared_recent_ten_and_records_bot_replies(self):
+        for index in range(12):
+            self.seen.observe_group_message(self.identified(f'群消息{index}', f'old-{index}', user='member'+str(index%2)))
+        current = self.identified('<@!1905586446> 这件事呢', 'group-current')
+        await self.bot.answer(current, 'group', mentioned=True)
+        call = self.retriever.search.call_args
+        self.assertEqual(call.kwargs['history'], [])
+        group_context = call.kwargs['group_context']
+        self.assertEqual(len(group_context), 10)
+        self.assertIn('群消息11', group_context[-1]['content'])
+        self.assertNotIn('群消息0', str(group_context))
+        self.assertEqual(self.bot.conversations, {})
+        next_message = self.identified('<@!1905586446> 接着说', 'group-next')
+        await self.bot.answer(next_message, 'group', mentioned=True)
+        next_context = self.retriever.search.call_args.kwargs['group_context']
+        self.assertTrue(any(row['role'] == 'assistant' and '机器人返回原文' in row['content'] for row in next_context))
+
+    def test_group_context_keeps_search_queries_and_drops_transport_noise(self):
+        self.assertEqual(clean_group_context('/检索 凯伊怎么预约'), '凯伊怎么预约')
+        self.assertEqual(clean_group_context('[CQ:image,file=abc]'), '')
+        self.assertEqual(clean_group_context('/总结'), '')
+
     async def test_failed_delivery_not_saved_and_clear_command(self):
         msg = self.identified('不会发送成功', 'failed-send')
         msg.reply.side_effect = RuntimeError('send failed')
@@ -200,6 +223,53 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
         await self.bot.answer(clear, 'c2c')
         self.assertEqual(self.retriever.search.await_count, count)
         self.assertEqual(self.seen.history(key), [])
+
+    async def test_memory_commands_call_scoped_service_without_search(self):
+        msg = self.identified('/记忆', 'memory-list')
+        await self.bot.answer(msg, 'group')
+        self.retriever.memory.assert_awaited_once_with('list', {
+            'origin': 'qq_group', 'user_id': 'user1', 'group_id': 'group1'})
+        self.assertIn('还没有保存长期记忆', msg.reply.call_args.kwargs['content'])
+        self.retriever.search.assert_not_awaited()
+        clear = self.identified('/清除记忆', 'memory-clear')
+        self.retriever.memory.return_value = {'ok': True, 'deleted': 3, 'items': []}
+        await self.bot.answer(clear, 'group')
+        self.assertIn('清除3条', clear.reply.call_args.kwargs['content'])
+
+    async def test_group_memory_command_works_without_mention_and_new_chat_clears_shared_context(self):
+        command = self.identified('/记忆', 'group-memory-command')
+        await self.bot.on_group_message_create(command)
+        self.retriever.memory.assert_awaited_once()
+        self.retriever.search.assert_not_awaited()
+        self.seen.observe_group_message(self.identified('旧上下文', 'old-context'))
+        clear = self.identified('/新对话', 'group-clear-command')
+        await self.bot.on_group_message_create(clear)
+        self.assertEqual(self.seen.group_history('group1', 'future-message'), [])
+
+    async def test_http_group_context_and_memory_contract(self):
+        received = []
+        async def handler(request):
+            received.append((request.path, await request.json()))
+            return web.json_response({'ok': True, 'items': []})
+        app = web.Application()
+        app.router.add_post('/agent/answer', handler)
+        app.router.add_post('/agent/memory', handler)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, '127.0.0.1', 0)
+        await site.start()
+        try:
+            port = site._server.sockets[0].getsockname()[1]
+            retriever = Retriever(f'http://127.0.0.1:{port}/retrieve', 'read-test', 'kb-test')
+            context = [{'role':'user','content':'[群友1] 上一句'}]
+            await retriever.search('这个呢', group_id='g1', history=[], group_context=context,
+                trace_meta={'origin':'qq_group','user_id':'u1'})
+            await retriever.memory('list', {'origin':'qq_group','user_id':'u1','group_id':'g1'})
+            self.assertEqual(received[0][1]['group_context'], context)
+            self.assertEqual(received[1][0], '/agent/memory')
+            self.assertEqual(received[1][1]['action'], 'list')
+        finally:
+            await runner.cleanup()
 
     async def test_private_maintenance_routing_and_isolation(self):
         self.retriever.maintain=AsyncMock(return_value={'answer':'要修改哪一条？','active':True})

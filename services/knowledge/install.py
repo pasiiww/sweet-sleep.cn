@@ -38,7 +38,7 @@ if unit_path.exists():
 for filename in ('server.py', 'answers.py', 'entities.py', 'traces.py', 'qa.py', 'rag_rank.py',
                  'learning.py', 'learning_context.py', 'stickers.py', 'notifications.py',
                  'products.py', 'maintenance.py', 'summaries.py', 'agent_service.py',
-                 'ba_wiki.py', 'mcp_server.py'):
+                 'memories.py', 'ba_wiki.py', 'mcp_server.py'):
     shutil.copy2(source / filename, target / filename)
     (target / filename).chmod(0o644)
 for filename in ('index.html', 'style.css', 'app.js'):

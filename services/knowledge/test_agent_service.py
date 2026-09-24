@@ -79,6 +79,70 @@ class AgentServiceTests(unittest.TestCase):
         self.assertEqual(response['results'][0]['source_type'], 'wiki')
         self.assertEqual(response['results'][0]['url'], 'https://www.gamekee.com/ba/tj/59934.html')
 
+    def test_group_context_chat_lookup_and_memory_are_group_shared(self):
+        now = __import__('time').time()
+        with app.db() as c:
+            for index in range(3):
+                c.execute('''INSERT INTO learning_events(kb_id,group_id,message_id,member_id,qq,content,at,received)
+                    VALUES(?,?,?,?,?,?,?,?)''',
+                    (self.kb, 'group-one', 'msg-'+str(index), 'member-'+str(index), '',
+                     '群历史消息'+str(index), now-index*60, now))
+        history_context = [{'role':'user','content':f'[群友{n}] 最近消息{n}'} for n in range(10)]
+        first_data = {'kb_id':self.kb,'query':'请记住群里偏好简洁回答','origin':'qq_group',
+                      'group_id':'group-one','user_id':'member-one','session_id':'opaque-session',
+                      'group_context':history_context}
+        observed = {}
+
+        def save_memory(cfg, tools, messages, prompt, limit):
+            self.assertEqual(limit, 4)
+            by_name = {item.name:item for item in tools}
+            self.assertIn('get_recent_chat_messages', by_name)
+            self.assertIn('manage_memory', by_name)
+            payload = json.loads(messages[-1]['content'])
+            self.assertEqual(payload['recent_group_context'], history_context)
+            older = json.loads(by_name['get_recent_chat_messages'].invoke({'limit':1,'offset':1,'hours':24}))
+            observed['older'] = older['group_messages']
+            saved = json.loads(by_name['manage_memory'].invoke({'action':'save','content':'群里偏好简洁回答'}))
+            observed['saved'] = saved
+            return {'messages':[AIMessage(content='记下了。')]}
+
+        with patch.object(agent_service, 'run', side_effect=save_memory):
+            app.api('POST','/knowledge/api/agent/answer',first_data,{})
+        self.assertEqual(observed['older'][0]['content'], '群历史消息1')
+        self.assertTrue(observed['saved']['saved'])
+
+        second_data = first_data | {'query':'你好','user_id':'member-two','group_context':[]}
+        def inspect_memory(cfg, tools, messages, prompt, limit):
+            payload = json.loads(messages[-1]['content'])
+            self.assertEqual(payload['long_term_memory'], ['群里偏好简洁回答'])
+            self.assertNotIn('群里偏好简洁回答', prompt)
+            return {'messages':[AIMessage(content='你好呀。')]}
+        with patch.object(agent_service, 'run', side_effect=inspect_memory):
+            response = app.api('POST','/knowledge/api/agent/answer',second_data,{})
+        self.assertEqual(response['mode'], 'model')
+
+        other_group = second_data | {'group_id':'group-two'}
+        def inspect_no_memory(cfg, tools, messages, prompt, limit):
+            self.assertEqual(json.loads(messages[-1]['content'])['long_term_memory'], [])
+            return {'messages':[AIMessage(content='你好呀。')]}
+        with patch.object(agent_service, 'run', side_effect=inspect_no_memory):
+            app.api('POST','/knowledge/api/agent/answer',other_group,{})
+
+    def test_memory_manage_api_is_scoped_and_user_controllable(self):
+        def call(action, user='u1', group='g1'):
+            return app.api('POST','/knowledge/api/agent/memory',{
+                'kb_id':self.kb,'origin':'qq_group','user_id':user,'group_id':group,'action':action},{})
+        first = app.api('POST','/knowledge/api/agent/memory',{
+            'kb_id':self.kb,'origin':'qq_group','user_id':'u1','group_id':'g1',
+            'action':'save','content':'群里使用中文回答'}, {})
+        self.assertTrue(first['saved'])
+        self.assertEqual(call('list','u2','g1')['items'], ['群里使用中文回答'])
+        self.assertEqual(call('list','u1','g2')['items'], [])
+        self.assertFalse(call('disable','u2','g1')['enabled'])
+        self.assertEqual(call('list','u1','g1')['items'], ['群里使用中文回答'])
+        self.assertEqual(call('clear','u2','g1')['deleted'], 1)
+        self.assertEqual(call('list','u1','g1')['items'], [])
+
     def test_fifth_search_is_blocked_then_model_answers_without_tools(self):
         app.api('POST', f'/knowledge/api/bases/{self.kb}/documents',
                 {'title': '凯伊毛绒', 'content': '凯伊毛绒售价100元。'}, {})
