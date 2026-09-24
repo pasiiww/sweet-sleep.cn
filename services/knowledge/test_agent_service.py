@@ -2,12 +2,13 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import tool
+from langchain.agents.middleware.tool_call_limit import ToolCallLimitExceededError
 
 import agent_service
 import answers
@@ -58,6 +59,34 @@ class AgentServiceTests(unittest.TestCase):
         self.assertEqual(response['mode'], 'handoff')
         self.assertNotIn('100元', response['answer'])
 
+    def test_fifth_search_is_blocked_then_model_answers_without_tools(self):
+        app.api('POST', f'/knowledge/api/bases/{self.kb}/documents',
+                {'title': '凯伊毛绒', 'content': '凯伊毛绒售价100元。'}, {})
+
+        def exhaust(cfg, tools, messages, prompt, limit):
+            for term in ('凯伊毛绒', '凯伊售价', '毛绒价格', '凯伊价格'):
+                tools[0].invoke({'search_query': term})
+            raise agent_service.AgentLimitError from ToolCallLimitExceededError(
+                thread_count=5, run_count=5, thread_limit=None, run_limit=4)
+
+        direct_model = MagicMock()
+        direct_model.invoke.return_value = AIMessage(content='凯伊毛绒售价100元。')
+        with patch.object(agent_service, 'run', side_effect=exhaust), \
+             patch.object(agent_service, 'model', return_value=direct_model) as factory:
+            response = app.api('POST', '/knowledge/api/agent/answer',
+                               {'kb_id': self.kb, 'query': '凯伊毛绒多少钱'}, {})
+        self.assertEqual(response['mode'], 'model')
+        self.assertEqual(len(response['search_terms']), 4)
+        factory.assert_called_once()
+        self.assertFalse(factory.call_args.kwargs['tool_calling'])
+        final_messages = direct_model.invoke.call_args.args[0]
+        self.assertIn('售价100元', final_messages[-1]['content'])
+        self.assertIn('不得请求继续搜索', final_messages[0]['content'])
+        with app.db() as c:
+            details = json.loads(c.execute('SELECT details FROM answer_traces WHERE id=?',
+                                   (response['trace_id'],)).fetchone()[0])
+        self.assertTrue(details['agent']['tool_limit_reached'])
+
     def test_maintenance_read_before_write_and_idempotency(self):
         with app.db() as c:
             maintenance.settings(c, {'openids': ['authorized-user']})
@@ -99,6 +128,8 @@ class AgentServiceTests(unittest.TestCase):
         details = {'model_calls': []}
         agent_service.record_model_calls(details, {'messages': [ai]})
         self.assertNotIn('private reasoning', json.dumps(details))
+        final_chat = agent_service.model({'model': 'deepseek-flash', 'api_key': 'fake'}, tool_calling=False)
+        self.assertNotIn('parallel_tool_calls', final_chat._get_request_payload('final answer'))
 
     def test_langchain_enforces_total_tool_limit(self):
         calls = []

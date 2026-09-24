@@ -41,11 +41,11 @@ class ThinkingChatDeepSeek(ChatDeepSeek):
         return payload
 
 
-def model(cfg):
+def model(cfg, *, tool_calling=True):
     return ThinkingChatDeepSeek(model=cfg['model'], api_key=cfg['api_key'],
                         timeout=20, max_retries=0, max_tokens=8192,
                         reasoning_effort='low', extra_body={'thinking': {'type': 'enabled'}},
-                        model_kwargs={'parallel_tool_calls': False})
+                        model_kwargs={'parallel_tool_calls': False} if tool_calling else {})
 
 
 def run(cfg, tools, messages, system_prompt, tool_limit):
@@ -71,6 +71,20 @@ def record_model_calls(details, output):
         usage = getattr(message, 'usage_metadata', None) or {}
         details['model_calls'].append({'stage': 'agent', 'tool_calls': len(getattr(message, 'tool_calls', [])),
                                        'usage': usage})
+
+
+def answer_after_tool_limit(cfg, messages, system, query, reference, evidence):
+    """Give the model one final, tool-free turn with only gathered evidence."""
+    rows = [{'title': row['title'], 'content': row['content'],
+             'question': row.get('question', ''), 'updated_at': row.get('updated_at', ''),
+             'source_type': row.get('source_type', 'document')} for row in evidence]
+    prompt = (system + '\n检索工具调用次数已用尽。现在必须直接给出最终回复，不得请求继续搜索。'
+              '店铺事实只能依据下面提供的检索资料；资料不足或冲突时，明确说无法确定并在末尾写 [[HANDOFF]]。')
+    final = model(cfg, tool_calling=False).invoke([
+        {'role': 'system', 'content': prompt}, *messages,
+        {'role': 'user', 'content': json.dumps({'question': query, 'reply_reference': reference,
+         'retrieved_evidence': rows}, ensure_ascii=False)}])
+    return {'messages': [final]}
 
 
 def answer(app, data, details):
@@ -142,7 +156,13 @@ def answer(app, data, details):
     messages = [*history, {'role': 'user', 'content': json.dumps({'question': query, 'reply_reference': reference,
                  'alias_context': entities.context(hints), 'current_date': details['current_date']}, ensure_ascii=False)}]
     try:
-        output = run(cfg, [search_knowledge], messages, system, ANSWER_TOOL_LIMIT)
+        try:
+            output = run(cfg, [search_knowledge], messages, system, ANSWER_TOOL_LIMIT)
+        except AgentLimitError as exc:
+            if not (isinstance(exc.__cause__, ToolCallLimitExceededError) or str(exc) == 'answer_tool_limit'):
+                raise
+            details['agent']['tool_limit_reached'] = True
+            output = answer_after_tool_limit(cfg, messages, system, query, reference, evidence)
         record_model_calls(details, output)
         raw = str(output['messages'][-1].content or '').strip()
         text, sticker_name = answers.parse_sticker(raw.replace('[[HANDOFF]]', ''), cfg['stickers'])
