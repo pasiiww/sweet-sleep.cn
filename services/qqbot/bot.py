@@ -139,7 +139,8 @@ def conversation_key(message, kind, kb_id):
 
 class Retriever:
     def __init__(self, url, token, kb_id):
-        self.url = url.removesuffix('/retrieve') + '/answer' if url.endswith('/retrieve') else url
+        self.api_root = url.rsplit('/', 1)[0] if url.endswith(('/retrieve', '/answer')) else url.rsplit('/agent/', 1)[0]
+        self.url = self.api_root + '/agent/answer'
         self.token, self.kb_id = token, kb_id
 
     async def search(self, query, group_id='', history=None, trace_meta=None):
@@ -153,7 +154,7 @@ class Retriever:
 
     async def summarize(self, transcript):
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=55)) as session:
-            async with session.post(self.url.rsplit('/',1)[0] + '/group-summary',
+            async with session.post(self.api_root + '/group-summary',
                 headers={'Authorization': 'Bearer ' + self.token},
                 json={'kb_id': self.kb_id, 'transcript': transcript}) as response:
                 if response.status != 200:
@@ -164,7 +165,7 @@ class Retriever:
         token=os.environ.get('KB_LEARN_TOKEN','')
         if not token:return {'answer':'维护通道尚未配置，请到知识库后台处理。','active':False}
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=80)) as session:
-            async with session.post(self.url.rsplit('/',1)[0]+'/private-maintenance',
+            async with session.post(self.api_root + '/agent/private-maintenance',
                 headers={'Authorization':'Bearer '+token},json={'kb_id':self.kb_id,'query':query,'user_id':user_id,'message_id':message_id}) as response:
                 if response.status!=200:raise RuntimeError('Maintenance HTTP '+str(response.status))
                 return await response.json()
@@ -174,7 +175,7 @@ class Retriever:
             return
         try:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
-                async with session.post(self.url.rsplit('/', 1)[0] + '/trace-delivery',
+                async with session.post(self.api_root + '/trace-delivery',
                     headers={'Authorization': 'Bearer ' + self.token},
                     json={'trace_id': trace['trace_id'], 'receipt': trace['trace_receipt'], 'status': status,
                           'content': content[:3000], 'error': error[:80], 'sticker': trace.get('sticker_delivery')}) as response:
@@ -196,7 +197,7 @@ class KnowledgeBot(botpy.Client):
         self.conversations = {}
         self.learner = None
         if os.environ.get("KB_LEARN_TOKEN"):
-            self.learner = Learner(seen.conn, retriever.url.rsplit("/",1)[0]+"/learning/events", os.environ["KB_LEARN_TOKEN"], retriever.kb_id)
+            self.learner = Learner(seen.conn, retriever.api_root+"/learning/events", os.environ["KB_LEARN_TOKEN"], retriever.kb_id)
 
     async def on_ready(self):
         if self.learner:

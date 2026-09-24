@@ -28,6 +28,7 @@ import stickers
 import notifications
 import products
 import maintenance
+import agent_service
 import sys
 
 DATA = Path(os.environ.get('KB_DATA_DIR', '/var/lib/sweet-knowledge'))
@@ -473,7 +474,7 @@ def reserve_daily_query(user_id):
     return {'allowed':allowed,'used':used,'limit':20,'remaining':20-used,'day':day,'timezone':'Asia/Shanghai'}
 
 
-def respond(data):
+def respond(data, pipeline=None):
     query = string(data, 'query', 2000, True)
     kb_id = string(data, 'kb_id', 80, True)
     origin = string(data, 'origin', 20) or 'api'
@@ -496,7 +497,7 @@ def respond(data):
         if quota and not quota['allowed']:
             response={'mode':'quota','reason':'daily_quota_exhausted','answer':'今天的20次咨询额度已经用完啦～明天零点恢复，再来找我聊呀 ♡','handoff':False,'mention_openids':[],'results':[]}
         else:
-            response = respond_pipeline(data, details)
+            response = (pipeline or respond_pipeline)(data, details)
         if quota:response['quota']=quota
     except Exception as exc:
         details['error_type'] = type(exc).__name__
@@ -630,6 +631,10 @@ def respond_pipeline(data, details):
 
 def api(method, path, data, params):
     segments = path.removeprefix('/knowledge/api/').strip('/').split('/')
+    if segments == ['agent', 'answer'] and method == 'POST':
+        return respond(data, lambda request, details: agent_service.answer(sys.modules[__name__], request, details))
+    if segments == ['agent', 'private-maintenance'] and method == 'POST':
+        return maintenance.respond(sys.modules[__name__], data, use_agent=True)
     if segments == ['group-summary'] and method == 'POST':
         return summaries.respond(sys.modules[__name__], data)
     if segments == ['private-maintenance'] and method == 'POST':
@@ -992,9 +997,9 @@ class Handler(BaseHTTPRequestHandler):
             learner = bool(LEARN_TOKEN) and hmac.compare_digest(supplied.encode(), LEARN_TOKEN.encode())
             if not admin and not reader and not learner:
                 fail(401, '请输入有效的访问密钥')
-            if learner and not admin and not (parsed.path in ('/knowledge/api/private-maintenance','/knowledge/api/learning/events','/knowledge/api/owner-notifications/claim','/knowledge/api/owner-notifications/ack') and self.command == 'POST'):
+            if learner and not admin and not (parsed.path in ('/knowledge/api/private-maintenance','/knowledge/api/agent/private-maintenance','/knowledge/api/learning/events','/knowledge/api/owner-notifications/claim','/knowledge/api/owner-notifications/ack') and self.command == 'POST'):
                 fail(403, '学习密钥仅可提交聊天事件')
-            if not admin and not learner and not (parsed.path in ('/knowledge/api/retrieve', '/knowledge/api/answer', '/knowledge/api/trace-delivery', '/knowledge/api/group-summary') and self.command == 'POST'):
+            if not admin and not learner and not (parsed.path in ('/knowledge/api/retrieve', '/knowledge/api/answer', '/knowledge/api/agent/answer', '/knowledge/api/trace-delivery', '/knowledge/api/group-summary') and self.command == 'POST'):
                 fail(403, '召回密钥仅可调用检索接口')
             if parsed.path in ('/knowledge/api/stickers/upload','/knowledge/api/products/upload') and self.command=='POST':
                 if self.headers.get('Transfer-Encoding'):fail(400,'不支持分块请求体')

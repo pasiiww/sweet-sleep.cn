@@ -1,6 +1,6 @@
 # 知屿 · 知识库管理与召回
 
-独立页面 `/knowledge/`，Python 3.11+ 标准库后端。生产数据和凭据位于网站根目录之外；不得把整个仓库复制到公开 web root。
+独立页面 `/knowledge/`，Python 3.11+ 后端；QQ agent 使用 LangChain 和 DeepSeek 集成。生产数据和凭据位于网站根目录之外；不得把整个仓库复制到公开 web root。
 
 ## 能力与边界
 
@@ -21,7 +21,9 @@
 export KB_ADMIN_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
 export KB_READ_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
 export KB_DATA_DIR=/tmp/sweet-knowledge-local
-python3 services/knowledge/server.py
+python3 -m venv /tmp/sweet-knowledge-venv
+/tmp/sweet-knowledge-venv/bin/pip install -r services/knowledge/requirements-agent.txt
+/tmp/sweet-knowledge-venv/bin/python services/knowledge/server.py
 ```
 
 访问 http://127.0.0.1:8765/knowledge/ ，用 `KB_ADMIN_TOKEN` 登录。浏览器密钥仅保存在内存，刷新后需登录。
@@ -72,7 +74,7 @@ location ^~ /knowledge/ {
 }
 ```
 
-服务运维：`systemctl status sweet-knowledge`、`journalctl -u sweet-knowledge`。更新时只复制程序和静态资源，再重启服务；不要覆盖数据库和环境文件。Nginx 变更必须先备份并 `nginx -t` 后 reload。
+服务运维：`systemctl status sweet-knowledge`、`journalctl -u sweet-knowledge`。先在 `/opt/sweet-knowledge/venv` 安装 `requirements-agent.txt`，再复制程序和静态资源并重启服务；不要覆盖数据库和环境文件。Nginx 变更必须先备份并 `nginx -t` 后 reload。
 
 ## 接口
 
@@ -111,6 +113,8 @@ curl https://sweet-sleep.cn/knowledge/api/retrieve \
 - `GET/PUT /knowledge/api/answer-settings`：仅管理密钥可读写；PUT 字段 `enabled`、`model`、`api_key`、`clear_key`、`system_prompt`、`handoff_groups`（群 OpenID 到最多3个成员 OpenID 的映射）。
 - `POST /knowledge/api/answer-settings/test`：管理者用已保存配置发送一条测试请求，会产生服务商调用费用。
 - `POST /knowledge/api/answer`：管理密钥或召回密钥可调用，参数 `kb_id`、`query`、可选 `group_id`。配置了模型后，此接口可产生调用费用。机器人不能修改提示词或模型配置。
+- `POST /knowledge/api/agent/answer`：QQ 机器人使用的 LangChain 回答入口；沿用每日额度、会话历史与 trace。agent 最多调用4次当前知识库检索工具，最多调用6次模型。
+- `POST /knowledge/api/agent/private-maintenance`：QQ 私聊管理员使用的 LangChain 维护入口；沿用 OpenID 白名单、先读取后修改、写入幂等和 trace。agent 最多调用6次工具、8次模型。
 
 响应字段 `answer`（可展示文本）、`mode`（model/document/handoff）、`reason`（机器可读状态）、`handoff`、`mention_openids`（仅群聊转人工且配置匹配时返回）、`results`。密钥和上游完整错误不返回；后台可查看最近一次模型或回退状态。
 

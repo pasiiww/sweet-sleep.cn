@@ -85,7 +85,7 @@ def execute(app,c,kb,mode,name,args,read):
         return {'id':result['id'],'title':result['series']+' '+result['character'],'after':result},True
     app.fail(400,'该指令不允许此工具')
 
-def respond(app,data):
+def respond(app,data,use_agent=False):
     user=app.string(data,'user_id',128,True);kb=app.string(data,'kb_id',80,True)
     query=app.string(data,'query',2000,True);mid=app.string(data,'message_id',200,True)
     sid=hashlib.sha256((kb+':'+user).encode()).hexdigest();rid=hashlib.sha256((sid+':'+mid).encode()).hexdigest()
@@ -117,31 +117,39 @@ def respond(app,data):
     result={'mode':'maintenance','reason':'clarification','active':True,'trace_id':trace_id,'trace_receipt':receipt}
     try:
         if not cfg['api_key'] or not cfg['enabled']:raise answers.ModelError('model_unavailable')
-        for turn in range(4):
-            msg=answers.tool_turn(cfg,list(messages),tools_for(mode));calls=msg.get('tool_calls') or []
-            if not calls:
-                result['answer']='尚未写入。\n'+str(msg.get('content') or '请补充要修改的记录及具体内容。')[:1400];break
-            if len(calls)!=1:app.fail(400,'每次只允许调用一个维护工具，请重试')
-            call=calls[0];name=call['function']['name'];args=json.loads(call['function']['arguments'])
-            if not isinstance(args,dict):app.fail(400,'工具参数必须为对象')
-            messages.append(msg) # Provider requires reasoning_content during a tool cycle.
-            with app.WRITE_LOCK,app.db() as c:
-                if user not in settings(c)['openids']:app.fail(403,'维护权限已撤销')
-                out,wrote=execute(app,c,kb,mode,name,args,read)
-                details['maintenance']['operations'].append({'tool':name,'arguments':args,'result':out})
-                if wrote:
-                    result.update(answer='已'+('新增商品' if mode=='product' else '修改')+'：'+out['title']+'\n记录编号：'+str(out['id'])+'\n已保存，可在后台查看。继续输入可维护当前库，或 /退出。',reason='saved')
-                    # Save the result in the same transaction as the write for idempotency.
-                    c.execute('UPDATE maintenance_requests SET result=? WHERE id=?',(json.dumps(result,ensure_ascii=False),rid))
-            if wrote:break
-            messages.append({'role':'tool','tool_call_id':call['id'],'content':json.dumps(out,ensure_ascii=False)})
-        else:result['answer']='尚未写入。查询步骤较多，请补充准确的记录名称或编号后重试。'
+        if use_agent:
+            import agent_service
+            result['answer']=agent_service.maintain(app,cfg,kb,mode,messages,details,user,rid,result)
+        else:
+            for turn in range(4):
+                msg=answers.tool_turn(cfg,list(messages),tools_for(mode));calls=msg.get('tool_calls') or []
+                if not calls:
+                    result['answer']='尚未写入。\n'+str(msg.get('content') or '请补充要修改的记录及具体内容。')[:1400];break
+                if len(calls)!=1:app.fail(400,'每次只允许调用一个维护工具，请重试')
+                call=calls[0];name=call['function']['name'];args=json.loads(call['function']['arguments'])
+                if not isinstance(args,dict):app.fail(400,'工具参数必须为对象')
+                messages.append(msg) # Provider requires reasoning_content during a tool cycle.
+                with app.WRITE_LOCK,app.db() as c:
+                    if user not in settings(c)['openids']:app.fail(403,'维护权限已撤销')
+                    out,wrote=execute(app,c,kb,mode,name,args,read)
+                    details['maintenance']['operations'].append({'tool':name,'arguments':args,'result':out})
+                    if wrote:
+                        result.update(answer='已'+('新增商品' if mode=='product' else '修改')+'：'+out['title']+'\n记录编号：'+str(out['id'])+'\n已保存，可在后台查看。继续输入可维护当前库，或 /退出。',reason='saved')
+                        # Save the result in the same transaction as the write for idempotency.
+                        c.execute('UPDATE maintenance_requests SET result=? WHERE id=?',(json.dumps(result,ensure_ascii=False),rid))
+                if wrote:break
+                messages.append({'role':'tool','tool_call_id':call['id'],'content':json.dumps(out,ensure_ascii=False)})
+            else:result['answer']='尚未写入。查询步骤较多，请补充准确的记录名称或编号后重试。'
     except (answers.ModelError,app.Problem,ValueError,KeyError,TypeError) as exc:
         result.update(answer='尚未写入，请补充信息或在后台处理。'+('记录已被其他操作修改，请重新查询。' if getattr(exc,'status',None)==409 else ''),reason='error')
         details['maintenance']['error']=type(exc).__name__
         if isinstance(exc,app.Problem):
             details['maintenance']['error_message']=exc.message
             result['answer']='尚未写入：'+exc.message+'。请补充信息后重试。'
+    except Exception as exc:
+        if not use_agent:raise
+        details['maintenance']['error']=type(exc).__name__
+        result.update(answer='尚未写入，模型服务暂时不可用，请稍后再试。',reason='error')
     clean_history=(history+[{'role':'user','content':query},{'role':'assistant','content':result['answer']}])[-12:]
     secrets=[app.ADMIN_TOKEN,app.READ_TOKEN,app.LEARN_TOKEN,cfg['api_key']]
     with app.WRITE_LOCK,app.db() as c:

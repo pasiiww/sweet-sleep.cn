@@ -1,0 +1,2 @@
+langchain==1.4.2
+langchain-deepseek==1.1.1

@@ -144,7 +144,7 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(request.headers['Authorization'], 'Bearer read-test')
             return web.json_response({'results': [{'content': 'test'}]})
         app = web.Application()
-        app.router.add_post('/answer', handler)
+        app.router.add_post('/agent/answer', handler)
         runner = web.AppRunner(app)
         await runner.setup()
         site = web.TCPSite(runner, '127.0.0.1', 0)
