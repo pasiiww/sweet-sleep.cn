@@ -699,7 +699,7 @@ def api(method, path, data, params):
             c.execute("UPDATE owner_notifications SET status='pending',receipt='',error='' WHERE id=? AND status IN ('failed','uncertain')",(segments[1],))
             return {'ok':True}
         if len(segments)==4 and segments[:2]==['learning','reviews'] and method=='POST':
-            try:return learning.review(c,segments[2],segments[3])
+            try:return learning.review(sys.modules[__name__],c,segments[2],segments[3])
             except ValueError as exc:fail(409,str(exc))
         if segments==['stickers'] and method=='GET':
             return {'items':[dict(r) for r in c.execute('SELECT * FROM stickers ORDER BY id')]}

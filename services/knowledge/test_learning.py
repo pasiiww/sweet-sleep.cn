@@ -62,13 +62,21 @@ class LearningTests(unittest.TestCase):
         newer=self.batch('b',self.at+20);self.run_job(newer,[self.fact('b1',answer='凯伊售价200元。')])
         older=self.batch('c',self.at+10);r=self.run_job(older,[self.fact('c1',answer='凯伊售价150元。')])
         self.assertEqual(r['details']['changes'][0]['action'],'skipped_newer')
-        old=self.api('GET','qa/'+str(qid));self.assertEqual(old['answer'],'凯伊售价100元。')
-        self.assertEqual(self.api('GET','qa/'+str(old['superseded_by']))['answer'],'凯伊售价200元。')
-        with app.db() as c:self.assertEqual(c.execute('SELECT count(*) FROM qa_entries').fetchone()[0],2)
+        current=self.api('GET','qa/'+str(qid));self.assertEqual(current['answer'],'凯伊售价200元。')
+        self.assertIsNone(current['superseded_by'])
+        self.assertEqual(json.loads(current['source_context'])['history'][-1]['answer'],'凯伊售价100元。')
+        with app.db() as c:self.assertEqual(c.execute('SELECT count(*) FROM qa_entries').fetchone()[0],1)
     def test_separate_scope_does_not_overwrite(self):
-        self.run_job(self.batch('a'),[self.fact('a1',scope='活动一')])
+        self.run_job(self.batch('a'),[self.fact('a1',scope='活动一',question='活动一凯伊多少钱？')])
         self.run_job(self.batch('b',self.at+10),[self.fact('b1',scope='活动二',question='活动二凯伊多少钱？')])
         with app.db() as c:self.assertEqual(c.execute('SELECT count(*) FROM qa_entries').fetchone()[0],2)
+    def test_wrong_existing_id_does_not_overwrite_other_attribute(self):
+        first=self.run_job(self.batch('a'),[self.fact('a1')])
+        qid=first['details']['changes'][0]['qa_id']
+        job=self.event('deposit','凯伊定金20元',at=self.at+10,is_reply=True)['job_id']
+        change=self.run_job(job,[self.fact('deposit',attribute='定金',question='凯伊定金是多少？',answer='凯伊定金20元。',quote='凯伊定金20元',existing_qa_id=qid)])['details']['changes'][0]
+        self.assertEqual(change['action'],'skipped_scope_mismatch')
+        self.assertEqual(self.api('GET','qa/'+str(qid))['answer'],'凯伊售价100元。')
     def test_untrusted_or_old_context_is_not_evidence(self):
         self.event('guest','凯伊售价100元',member='visitor1');job=self.batch('a')
         r=self.run_job(job,[self.fact('guest')]);self.assertEqual(r['error'],'invalid_learning_output')
@@ -216,15 +224,17 @@ class LearningTests(unittest.TestCase):
         self.assertEqual(row['details']['changes'],[])
         with app.db() as c:self.assertEqual(c.execute('SELECT count(*) FROM qa_entries').fetchone()[0],1)
 
-    def test_append_update_retains_manual_record_provenance_and_latest_retrieval(self):
+    def test_in_place_update_retains_prior_answer_and_latest_retrieval(self):
         original=self.api('POST',f'bases/{self.kb}/qa',{'question':'凯伊多少钱？','answer':'凯伊售价80元。'})
         with app.db() as c:c.execute('UPDATE qa_entries SET updated_at=? WHERE id=?',(learning.utc(self.at-10),original['id']))
         job=self.event('reply','凯伊售价100元',is_reply=True,raw_content='<@guest001> 凯伊售价100元')['job_id']
         row=self.run_job(job,[self.fact('reply',existing_qa_id=original['id'])]);created=row['details']['changes'][0]['after']
-        self.assertNotEqual(original['id'],created['id']);self.assertEqual(created['origin'],'model')
-        self.assertIn('<@guest001>',json.loads(created['source_context'])['content'])
-        old=self.api('GET','qa/'+str(original['id']));self.assertEqual(old['origin'],'manual');self.assertEqual(old['answer'],'凯伊售价80元。')
-        self.assertEqual(old['superseded_by'],created['id'])
+        self.assertEqual(row['details']['changes'][0]['action'],'updated')
+        self.assertEqual(original['id'],created['id']);self.assertEqual(created['origin'],'model')
+        provenance=json.loads(created['source_context'])
+        self.assertIn('<@guest001>',provenance['content'])
+        self.assertEqual(provenance['history'][-1]['answer'],'凯伊售价80元。')
+        self.assertIsNone(created['superseded_by'])
         results=self.api('POST','retrieve',{'kb_id':self.kb,'query':'凯伊多少钱'})['results']
         self.assertEqual([r['qa_id'] for r in results],[created['id']])
         self.api('PUT','qa/'+str(created['id']),{'question':created['question'],'answer':'人工校正'})
@@ -247,12 +257,33 @@ class LearningTests(unittest.TestCase):
 
     def test_pending_update_does_not_replace_until_approval_and_stale_block(self):
         active=self.run_job(self.event('active','凯伊售价100元',is_reply=True)['job_id'],[self.fact('active')])['details']['changes'][0]['after']
-        pending=self.run_job(self.event('pending','凯伊售价200元',at=self.at+5,is_reply=True)['job_id'],[self.fact('pending',answer='凯伊售价200元',quote='凯伊售价200元',confidence=70)])['details']['changes'][0]['after']
+        proposal=self.run_job(self.event('pending','凯伊售价200元',at=self.at+5,is_reply=True)['job_id'],[self.fact('pending',answer='凯伊售价200元',quote='凯伊售价200元',confidence=70)])['details']['changes'][0]
+        self.assertEqual(proposal['action'],'needs_review_existing')
+        self.assertEqual(proposal['qa_id'],active['id'])
         self.assertIsNone(self.api('GET','qa/'+str(active['id']))['superseded_by'])
         self.api('PUT','qa/'+str(active['id']),{'question':active['question'],'answer':'人工确认的新价格'})
-        with self.assertRaises(app.Problem):self.api('POST',f"learning/reviews/{pending['id']}/approve")
-        self.api('POST',f"learning/reviews/{pending['id']}/reject")
-        self.assertEqual(self.api('GET','qa/'+str(pending['id']))['publication'],'rejected')
+        with app.db() as c:self.assertEqual(c.execute('SELECT count(*) FROM qa_entries').fetchone()[0],1)
+
+    def test_legacy_pending_review_updates_existing_in_place(self):
+        original=self.api('POST',f'bases/{self.kb}/qa',{'question':'凯伊价格是多少？','answer':'80元'})
+        with app.db() as c:
+            c.execute('UPDATE qa_entries SET updated_at=? WHERE id=?',(learning.utc(self.at-10),original['id']))
+            pending=app.save_qa(c,self.kb,{'question':'凯伊价格是多少？','answer':'100元'})
+            provenance={'fact_key':learning.fact_key('凯伊','价格'),'replaces_qa_id':original['id'],
+                        'expected_revision':original['revision'],'source_id':'legacy','job_id':'','history':[]}
+            c.execute("UPDATE qa_entries SET publication='pending',updated_at=?,source_context=? WHERE id=?",
+                      (learning.utc(self.at),json.dumps(provenance),pending['id']))
+        result=self.api('POST',f"learning/reviews/{pending['id']}/approve")
+        self.assertEqual(result['qa_id'],original['id'])
+        self.assertEqual(self.api('GET',f"qa/{original['id']}")['answer'],'100元')
+        with app.db() as c:self.assertEqual(c.execute('SELECT count(*) FROM qa_entries').fetchone()[0],1)
+
+    def test_ambiguous_question_skipped_and_date_scope_stable(self):
+        self.assertEqual(learning.fact_key('凯伊','余量','截至2026年9月24日'),learning.fact_key('凯伊','二团余量',''))
+        row=self.run_job(self.event('vague','凯伊售价100元',is_reply=True)['job_id'],
+                         [self.fact('vague',question='在哪里买？')])
+        self.assertEqual(row['details']['changes'][0]['action'],'skipped_ambiguous_question')
+        with app.db() as c:self.assertEqual(c.execute('SELECT count(*) FROM qa_entries').fetchone()[0],0)
 
     def test_missing_confidence_defaults_to_review(self):
         fact=self.fact('unknown');fact.pop('confidence')
