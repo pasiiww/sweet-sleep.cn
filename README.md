@@ -16,6 +16,8 @@ Static website for `sweet-sleep.cn`.
 
 Upload only the static site files to the web root. The knowledge service is deployed separately to `/opt/sweet-knowledge`; never publish its database, environment files, or backend source under the web root.
 
+Knowledge-service source is maintained in `services/knowledge/` and must be deployed as a complete, matching backend version. Do not copy a stale `server.py` or `agent_service.py` over the production service: the API routes used by `/knowledge/` live in the backend. See [the service deployment and recovery notes](services/knowledge/README.md#后端源码与部署防回退) before changing it. `scripts/sync-site.sh` is for static site sync, not backend deployment.
+
 ## Sync
 
 Run the helper from the repository root to commit local changes, upload the

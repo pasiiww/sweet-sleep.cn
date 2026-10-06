@@ -41,8 +41,8 @@ def cleanup(c):
     c.execute('DELETE FROM answer_traces WHERE created<=?', (time.time() - RETENTION,))
 
 
-def create(c, kb_id, question, meta):
-    trace_id, receipt = secrets.token_hex(16), secrets.token_urlsafe(24)
+def create(c, kb_id, question, meta, trace_id=None):
+    trace_id, receipt = trace_id or secrets.token_hex(16), secrets.token_urlsafe(24)
     c.execute('INSERT INTO answer_traces(id,created,kb_id,question,origin,user_id,group_id,session_id,delivery,receipt_hash) VALUES(?,?,?,?,?,?,?,?,?,?)',
               (trace_id, time.time(), kb_id, question, meta['origin'], meta['user_id'], meta['group_id'], meta['session_id'],
                'pending' if meta['origin'].startswith('qq_') else 'not_applicable', hashlib.sha256(receipt.encode()).hexdigest()))

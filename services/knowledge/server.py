@@ -30,7 +30,11 @@ import notifications
 import products
 import maintenance
 import agent_service
+import execution_budget
+import creative
 import memories
+import moderation
+import weather
 import sys
 
 DATA = Path(os.environ.get('KB_DATA_DIR', '/var/lib/sweet-knowledge'))
@@ -38,10 +42,14 @@ STATIC = Path(os.environ.get('KB_STATIC_DIR', Path(__file__).resolve().parents[2
 ADMIN_TOKEN = os.environ.get('KB_ADMIN_TOKEN', '')
 READ_TOKEN = os.environ.get('KB_READ_TOKEN', '')
 LEARN_TOKEN = os.environ.get('KB_LEARN_TOKEN', '')
+MODERATION_TOKEN = os.environ.get('KB_MODERATION_TOKEN', '')
 WRITE_LOCK = threading.RLock()
 VECTOR_LOCK = threading.Lock()
 ANSWER_SLOTS = threading.BoundedSemaphore(4)
+DAILY_QUERY_LIMIT = 40
 MAX_CHUNKS = 10000
+DRINK_WEATHER_CACHE = {'key': None, 'expires': 0.0, 'forecasts': None, 'available': False}
+DRINK_WEATHER_CACHE_LOCK = threading.Lock()
 
 
 class Problem(Exception):
@@ -55,12 +63,13 @@ def fail(status, message):
 
 @contextlib.contextmanager
 def db():
-    conn = sqlite3.connect(DATA / 'knowledge.db', timeout=30)
+    conn = sqlite3.connect(DATA / 'knowledge.db', timeout=execution_budget.timeout(30))
     conn.row_factory = sqlite3.Row
     conn.execute('PRAGMA foreign_keys=ON')
     try:
         with conn:
             yield conn
+            execution_budget.check()
     finally:
         conn.close()
 
@@ -94,6 +103,8 @@ def initialize():
         CREATE TABLE IF NOT EXISTS entity_catalog (kb_id TEXT PRIMARY KEY REFERENCES bases(id) ON DELETE CASCADE, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS daily_queries (user_id TEXT NOT NULL, day TEXT NOT NULL, used INTEGER NOT NULL, PRIMARY KEY(user_id,day));
         CREATE TABLE IF NOT EXISTS app_settings (name TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS drink_weather_daily (
+          forecast_date TEXT PRIMARY KEY, max_temp REAL NOT NULL, fetched_at TEXT NOT NULL);
         ''')
         c.execute('INSERT OR IGNORE INTO settings VALUES(1, ?)', (json.dumps({
             'base_url': '', 'model': '', 'api_key': '', 'revision': secrets.token_hex(8)}),))
@@ -106,6 +117,7 @@ def initialize():
         products.initialize(c)
         maintenance.initialize(c)
         memories.initialize(c)
+        moderation.initialize(c)
 
 
 def now():
@@ -124,6 +136,101 @@ def integer(data, key, default, low, high):
     if type(value) is not int or not low <= value <= high:
         fail(400, f'{key} 必须是 {low}–{high} 之间的整数')
     return value
+
+
+def validate_sensitive_words(value):
+    try:
+        words = moderation.validate_words(value)
+        moderation.expand_sensitive_words(words)
+        return words
+    except ValueError as exc:
+        fail(400, str(exc))
+
+
+def validate_drink_menu(value):
+    if not isinstance(value, list) or len(value) > 300:
+        fail(400, 'drink_menu 必须为最多300项的列表')
+    items, seen = [], set()
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            fail(400, f'第 {index + 1} 项必须包含品牌和饮品')
+        brand = item.get('brand')
+        product = item.get('product')
+        temperature = item.get('temperature', 'both')
+        if (not isinstance(brand, str) or not isinstance(product, str)
+                or not brand.strip() or not product.strip()
+                or len(brand.strip()) > 40 or len(product.strip()) > 80
+                or any(ord(char) < 32 for char in brand + product)
+                or temperature not in ('cold', 'hot', 'both')):
+            fail(400, f'第 {index + 1} 项的品牌或饮品名称无效')
+        brand, product = brand.strip(), product.strip()
+        key = (brand.casefold(), product.casefold())
+        if key in seen:
+            fail(400, f'第 {index + 1} 项与已有品牌饮品重复')
+        seen.add(key)
+        items.append({'brand': brand, 'product': product, 'temperature': temperature})
+    return items
+
+
+def drink_weather_settings(c):
+    row = c.execute("SELECT value FROM app_settings WHERE name='drink_weather'").fetchone()
+    return ({'api_host': '', 'api_key': ''} | json.loads(row[0])) if row else {'api_host': '', 'api_key': ''}
+
+
+def drink_weather_snapshot(force_refresh=False):
+    with db() as c:
+        cfg = drink_weather_settings(c)
+    api_host, api_key = cfg.get('api_host', ''), cfg.get('api_key', '')
+    if not api_host or not api_key:
+        return {'available': False, 'reason': 'not_configured'}
+    cache_key = (api_host, hashlib.sha256(api_key.encode()).hexdigest())
+    now_monotonic = time.monotonic()
+    if (not force_refresh and DRINK_WEATHER_CACHE['key'] == cache_key
+            and now_monotonic < DRINK_WEATHER_CACHE['expires']):
+        forecasts = DRINK_WEATHER_CACHE['forecasts']
+        if not DRINK_WEATHER_CACHE['available']:
+            return {'available': False, 'reason': 'provider_error'}
+    else:
+        with DRINK_WEATHER_CACHE_LOCK:
+            now_monotonic = time.monotonic()
+            if (not force_refresh and DRINK_WEATHER_CACHE['key'] == cache_key
+                    and now_monotonic < DRINK_WEATHER_CACHE['expires']):
+                forecasts = DRINK_WEATHER_CACHE['forecasts']
+                if not DRINK_WEATHER_CACHE['available']:
+                    return {'available': False, 'reason': 'provider_error'}
+            else:
+                try:
+                    forecasts = weather.fetch_hangzhou_forecast(api_host, api_key)
+                    available = True
+                    ttl = 15 * 60
+                except Exception as exc:
+                    print(f'DRINK_WEATHER_FAILED error={type(exc).__name__}', flush=True)
+                    forecasts, available, ttl = None, False, 60
+                DRINK_WEATHER_CACHE.update(key=cache_key, expires=time.monotonic() + ttl,
+                                           forecasts=forecasts, available=available)
+                if not available:
+                    return {'available': False, 'reason': 'provider_error'}
+    today = datetime.now(weather.HANGZHOU_TZ).date()
+    today_key = today.isoformat()
+    today_forecast = next((item for item in forecasts if item['date'] == today_key), None)
+    if not today_forecast:
+        return {'available': False, 'reason': 'forecast_unavailable'}
+    yesterday_key = (today - timedelta(days=1)).isoformat()
+    with execution_budget.locked(WRITE_LOCK), db() as c:
+        c.execute('''INSERT INTO drink_weather_daily(forecast_date,max_temp,fetched_at)
+                     VALUES(?,?,?) ON CONFLICT(forecast_date) DO UPDATE SET
+                     max_temp=excluded.max_temp,fetched_at=excluded.fetched_at''',
+                  (today_key, today_forecast['max_temp'], now()))
+        c.execute('DELETE FROM drink_weather_daily WHERE forecast_date < ?',
+                  ((today - timedelta(days=8)).isoformat(),))
+        row = c.execute('SELECT max_temp FROM drink_weather_daily WHERE forecast_date=?',
+                        (yesterday_key,)).fetchone()
+    yesterday_max = float(row[0]) if row else None
+    return {'available': True, 'city': '杭州', 'date': today_key,
+            'today_max': today_forecast['max_temp'], 'yesterday_max': yesterday_max,
+            'temperature_preference': weather.temperature_preference(
+                today_forecast['max_temp'], yesterday_max),
+            'source': '和风天气'}
 
 
 def tokens(text):
@@ -255,7 +362,7 @@ def build_vectors(kb_id):
         if not rows:
             return {'processed': 0, 'remaining': 0}
         vectors = embed([r['content'] for r in rows], cfg)
-        with WRITE_LOCK, db() as c:
+        with execution_budget.locked(WRITE_LOCK), db() as c:
             if fingerprint(config(c)) != fp:
                 fail(409, '模型配置已更改，请重新生成向量')
             for row, vector in zip(rows, vectors):
@@ -416,13 +523,13 @@ def answer_config(c):
 
 
 def answer_status(cfg, mode, reason):
-    with WRITE_LOCK, db() as c:
+    with execution_budget.locked(WRITE_LOCK), db() as c:
         if answer_config(c)['revision'] == cfg['revision']:
             c.execute('INSERT OR REPLACE INTO app_settings VALUES(?,?)',
                       ('answer_status', json.dumps({'mode': mode, 'reason': reason, 'at': now()})))
 
 
-def search_terms(kb_id, terms, original_query='', catalog=None):
+def search_terms(kb_id, terms, original_query='', catalog=None, *, max_results=8, context_chars=6000, exclude_ids=None):
     # Fuse rankings, deduplicate chunk IDs and identical text, then apply a shared budget.
     candidates, searches = {}, []
     searches_to_run=([original_query] if original_query else [])+list(terms)
@@ -448,11 +555,13 @@ def search_terms(kb_id, terms, original_query='', catalog=None):
     if not ranking_query:
         ranking_query=' '.join(str(term) for group in terms if isinstance(group,list) for term in group)
     generated=list(dict.fromkeys(t for group in terms if isinstance(group,list) for t in group))
-    candidates={key:item for key,item in candidates.items() if not rag_rank.conflicts(ranking_query,item['row'],catalog)}
+    excluded=set(exclude_ids or ())
+    candidates={key:item for key,item in candidates.items()
+                if key not in excluded and not rag_rank.conflicts(ranking_query,item['row'],catalog)}
     for item in candidates.values():
         row=item['row'];text=(row.get('question','') if row.get('source_type')=='qa' else row.get('title','')+' '+row['content']).casefold()
         item['matched_terms']=[term for term in generated if any(v.casefold() in text for v in catalog.expand(term))]
-    selected, seen, remaining = [], set(), 6000
+    selected, seen, remaining = [], set(), context_chars
     for item in candidates.values():
         item['relevance']=rag_rank.score(ranking_query,item['row'],catalog,item['rank'])
     for item in sorted(candidates.values(), key=lambda x:(x['relevance'],len(x['matched_terms']),x['rank']), reverse=True):
@@ -469,7 +578,7 @@ def search_terms(kb_id, terms, original_query='', catalog=None):
                    truncated=row.get('truncated', False) or len(text) < len(row['content']))
         remaining -= len(text)
         selected.append(row)
-        if len(selected) >= 8:
+        if len(selected) >= max_results:
             break
     return {'results': selected, 'searches': searches}
 
@@ -477,12 +586,12 @@ def search_terms(kb_id, terms, original_query='', catalog=None):
 def reserve_daily_query(user_id):
     # Identity only: channels, groups, knowledge bases and cleared sessions share this counter.
     day=datetime.fromtimestamp(time.time(),timezone(timedelta(hours=8))).date().isoformat()
-    with WRITE_LOCK,db() as c:
+    with execution_budget.locked(WRITE_LOCK),db() as c:
         c.execute('DELETE FROM daily_queries WHERE day<?',(day,))
         c.execute('INSERT OR IGNORE INTO daily_queries VALUES(?,?,0)',(user_id,day))
-        allowed=c.execute('UPDATE daily_queries SET used=used+1 WHERE user_id=? AND day=? AND used<20',(user_id,day)).rowcount==1
+        allowed=c.execute('UPDATE daily_queries SET used=used+1 WHERE user_id=? AND day=? AND used<?',(user_id,day,DAILY_QUERY_LIMIT)).rowcount==1
         used=c.execute('SELECT used FROM daily_queries WHERE user_id=? AND day=?',(user_id,day)).fetchone()[0]
-    return {'allowed':allowed,'used':used,'limit':20,'remaining':20-used,'day':day,'timezone':'Asia/Shanghai'}
+    return {'allowed':allowed,'used':used,'limit':DAILY_QUERY_LIMIT,'remaining':DAILY_QUERY_LIMIT-used,'day':day,'timezone':'Asia/Shanghai'}
 
 
 def respond(data, pipeline=None):
@@ -497,7 +606,7 @@ def respond(data, pipeline=None):
     string(data, 'reply_reference', 1800)
     try:entities.history(data.get('history', []))
     except ValueError as exc:fail(400,str(exc))
-    with WRITE_LOCK, db() as c:
+    with execution_budget.locked(WRITE_LOCK), db() as c:
         base(c, kb_id)
         secrets_to_hide = [ADMIN_TOKEN, READ_TOKEN, LEARN_TOKEN, answer_config(c)['api_key'], config(c)['api_key']]
         trace_id, receipt = traces.create(c, kb_id, traces.redact(query, secrets_to_hide), meta)
@@ -506,19 +615,19 @@ def respond(data, pipeline=None):
         quota=reserve_daily_query(meta['user_id']) if meta['user_id'] else None
         if quota:details['quota']=quota
         if quota and not quota['allowed']:
-            response={'mode':'quota','reason':'daily_quota_exhausted','answer':'今天的20次咨询额度已经用完啦～明天零点恢复，再来找我聊呀 ♡','handoff':False,'mention_openids':[],'results':[]}
+            response={'mode':'quota','reason':'daily_quota_exhausted','answer':f'今天的{DAILY_QUERY_LIMIT}次咨询/创作额度已经用完啦～明天零点恢复，再来找我聊呀 ♡','handoff':False,'mention_openids':[],'results':[]}
         else:
             response = (pipeline or respond_pipeline)(data, details)
         if quota:response['quota']=quota
     except Exception as exc:
         details['error_type'] = type(exc).__name__
-        with WRITE_LOCK, db() as c:
+        with execution_budget.locked(WRITE_LOCK), db() as c:
             traces.finish(c, trace_id, {'mode': 'error', 'reason': 'internal_error'}, traces.redact(details, secrets_to_hide), round((time.monotonic() - started) * 1000))
         raise
     details['search_terms'] = response.get('search_terms', [])
     details['matched_aliases'] = response.get('matched_aliases', [])
     details['alias_context'] = response.get('alias_context', '')
-    with WRITE_LOCK, db() as c:
+    with execution_budget.locked(WRITE_LOCK), db() as c:
         traces.finish(c, trace_id, traces.redact(response, secrets_to_hide), traces.redact(details, secrets_to_hide), round((time.monotonic() - started) * 1000))
     return response | {'trace_id': trace_id, 'trace_receipt': receipt if origin.startswith('qq_') else ''}
 
@@ -527,7 +636,7 @@ def trace_cleanup():
     while True:
         time.sleep(3600)
         try:
-            with WRITE_LOCK, db() as c:
+            with execution_budget.locked(WRITE_LOCK), db() as c:
                 traces.cleanup(c)
                 learning.cleanup(c)
         except Exception as exc:
@@ -640,10 +749,224 @@ def respond_pipeline(data, details):
         ANSWER_SLOTS.release()
 
 
+def record_moderation_trace(c, data):
+    """Add an admin-visible, seven-day trace for a QQ moderation trigger."""
+    meta = data.get('trace_meta')
+    if not isinstance(meta, dict):
+        return ''
+    kb_id = meta.get('kb_id')
+    group_id = meta.get('group_id')
+    user_id = meta.get('user_id', '')
+    message_id = meta.get('message_id')
+    content = meta.get('content', '')
+    if (not isinstance(kb_id, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,80}', kb_id)
+            or not isinstance(group_id, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', group_id)
+            or not isinstance(user_id, str) or (user_id and not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', user_id))
+            or not isinstance(message_id, str) or not re.fullmatch(r'[A-Za-z0-9_.!:-]{1,200}', message_id)
+            or not isinstance(content, str)):
+        return ''
+    if not c.execute('SELECT 1 FROM bases WHERE id=?', (kb_id,)).fetchone():
+        return ''
+
+    event_hash = data['event_hash']
+    trace_id = hashlib.sha256(('moderation\0' + kb_id + '\0' + event_hash).encode()).hexdigest()[:32]
+    if c.execute('SELECT 1 FROM answer_traces WHERE id=?', (trace_id,)).fetchone():
+        return trace_id
+
+    terms = data.get('terms', [])
+    candidates = data.get('candidates', [])
+    terms_text = '、'.join(terms)
+    question = content[:3000] or f'敏感词命中：{terms_text}'
+    secrets_to_hide = [ADMIN_TOKEN, READ_TOKEN, LEARN_TOKEN,
+                       answer_config(c).get('api_key', ''), config(c).get('api_key', '')]
+    question = traces.redact(question, secrets_to_hide)
+    trace_meta = {'origin': 'qq_group', 'user_id': user_id,
+                  'group_id': group_id, 'session_id': ''}
+    traces.create(c, kb_id, question, trace_meta, trace_id=trace_id)
+    c.execute('UPDATE answer_traces SET delivery=? WHERE id=?', ('not_applicable', trace_id))
+    details = {'moderation': {'event_hash': event_hash, 'message_id': message_id,
+                              'terms': terms, 'candidates': candidates,
+                              'action': 'recall_triggered'},
+               'retrievals': [], 'model_calls': []}
+    details = traces.redact(details, secrets_to_hide)
+    answer = f'命中敏感词：{terms_text}。已触发撤回流程；实际撤回结果请查看机器人服务日志。'
+    traces.finish(c, trace_id, {'mode': 'moderation', 'reason': 'sensitive_word_triggered',
+                                'answer': traces.redact(answer, secrets_to_hide)}, details, 0)
+    return trace_id
+
+
 def api(method, path, data, params):
     segments = path.removeprefix('/knowledge/api/').strip('/').split('/')
+    if segments == ['drink-menu']:
+        if method == 'GET':
+            with db() as c:
+                cfg = answer_config(c)
+                return {'items': cfg.get('drink_menu', answers.DEFAULT_DRINK_MENU),
+                        'defaults': answers.DEFAULT_DRINK_MENU}
+        if method == 'PUT':
+            items = validate_drink_menu(data.get('items'))
+            with execution_budget.locked(WRITE_LOCK), db() as c:
+                cfg = answer_config(c)
+                cfg['drink_menu'] = items
+                cfg['revision'] = secrets.token_hex(8)
+                c.execute('UPDATE app_settings SET value=? WHERE name=?',
+                          (json.dumps(cfg, ensure_ascii=False), 'answer'))
+            return {'items': items}
+        fail(405, '不支持此操作')
+    if segments == ['drink-weather-settings']:
+        if method == 'GET':
+            with db() as c:
+                cfg = drink_weather_settings(c)
+            return {'api_host': cfg.get('api_host', ''), 'has_key': bool(cfg.get('api_key'))}
+        if method == 'PUT':
+            host = string(data, 'api_host', 253).strip().rstrip('.')
+            if host:
+                try:
+                    host = weather.validate_api_host(host)
+                except ValueError as exc:
+                    fail(400, str(exc))
+            key = string(data, 'api_key', 500).strip()
+            if any(ord(char) < 33 or ord(char) > 126 for char in key):
+                fail(400, 'API Key 必须是不含空格的可打印 ASCII 字符')
+            with execution_budget.locked(WRITE_LOCK), db() as c:
+                previous = drink_weather_settings(c)
+                cfg = {'api_host': host,
+                       'api_key': key or ('' if data.get('clear_key') else previous.get('api_key', ''))}
+                c.execute('INSERT OR REPLACE INTO app_settings(name,value) VALUES(?,?)',
+                          ('drink_weather', json.dumps(cfg)))
+            with DRINK_WEATHER_CACHE_LOCK:
+                DRINK_WEATHER_CACHE.update(key=None, expires=0.0, forecasts=None, available=False)
+            return {'api_host': cfg['api_host'], 'has_key': bool(cfg['api_key'])}
+        fail(405, '不支持此操作')
+    if segments == ['drink-weather'] and method == 'GET':
+        return drink_weather_snapshot(force_refresh=params.get('refresh', [''])[0] == '1')
+    if segments == ['moderation-settings']:
+        if method == 'PUT':
+            words = validate_sensitive_words(data.get('sensitive_words'))
+            warning_enabled = data.get('harassment_warning_enabled')
+            if warning_enabled is not None and type(warning_enabled) is not bool:
+                fail(400, 'harassment_warning_enabled 必须为布尔值')
+            mute_enabled = data.get('harassment_mute_enabled')
+            if mute_enabled is not None and type(mute_enabled) is not bool:
+                fail(400, 'harassment_mute_enabled 必须为布尔值')
+            with execution_budget.locked(WRITE_LOCK), db() as c:
+                cfg = answer_config(c)
+                cfg['sensitive_words'] = words
+                if warning_enabled is not None:
+                    cfg['harassment_warning_enabled'] = warning_enabled
+                if mute_enabled is not None:
+                    cfg['harassment_mute_enabled'] = mute_enabled
+                mute_threshold = data.get('harassment_mute_threshold', cfg.get('harassment_mute_threshold', 3))
+                mute_minutes = data.get('harassment_mute_duration_minutes',
+                                        cfg.get('harassment_mute_duration_minutes', 10))
+                if type(mute_threshold) is not int or not 1 <= mute_threshold <= 20:
+                    fail(400, 'harassment_mute_threshold 必须为1至20之间的整数')
+                if type(mute_minutes) is not int or not 1 <= mute_minutes <= 1440:
+                    fail(400, 'harassment_mute_duration_minutes 必须为1至1440之间的整数')
+                cfg['harassment_mute_threshold'] = mute_threshold
+                cfg['harassment_mute_duration_minutes'] = mute_minutes
+                cfg['revision'] = secrets.token_hex(8)
+                c.execute('UPDATE app_settings SET value=? WHERE name=?',
+                          (json.dumps(cfg, ensure_ascii=False), 'answer'))
+            return {'sensitive_words': words,
+                    'sensitive_word_expansions': moderation.expand_sensitive_words(words),
+                    'harassment_warning_enabled': cfg.get('harassment_warning_enabled', True),
+                    'harassment_mute_enabled': cfg.get('harassment_mute_enabled', False),
+                    'harassment_mute_threshold': cfg.get('harassment_mute_threshold', 3),
+                    'harassment_mute_duration_minutes': cfg.get('harassment_mute_duration_minutes', 10)}
+        if method == 'GET':
+            with db() as c:
+                cfg = answer_config(c)
+                words = cfg.get('sensitive_words', answers.DEFAULT_SENSITIVE_WORDS)
+                return {'sensitive_words': words,
+                        'sensitive_word_expansions': moderation.expand_sensitive_words(words),
+                        'harassment_warning_enabled': cfg.get('harassment_warning_enabled', True),
+                        'harassment_mute_enabled': cfg.get('harassment_mute_enabled', False),
+                        'harassment_mute_threshold': cfg.get('harassment_mute_threshold', 3),
+                        'harassment_mute_duration_minutes': cfg.get('harassment_mute_duration_minutes', 10)}
+        fail(405, '不支持此操作')
+    if segments == ['moderation-candidates']:
+        if method == 'GET':
+            with db() as c:
+                return moderation.pending_candidates(c)
+        if method == 'POST':
+            term = string(data, 'term', 80, True)
+            decision = string(data, 'decision', 16, True)
+            with execution_budget.locked(WRITE_LOCK), db() as c:
+                if decision == 'approve':
+                    cfg = answer_config(c)
+                    words = cfg.get('sensitive_words', answers.DEFAULT_SENSITIVE_WORDS)
+                    configured_variants = {variant.casefold()
+                                           for group in moderation.expand_sensitive_words(words)
+                                           for variant in group}
+                    if term.casefold() not in configured_variants:
+                        if len(words) >= 100:
+                            fail(409, '敏感词列表已满，请先整理列表后再审核')
+                        cfg['sensitive_words'] = validate_sensitive_words([*words, term])
+                        cfg['revision'] = secrets.token_hex(8)
+                        c.execute('UPDATE app_settings SET value=? WHERE name=?',
+                                  (json.dumps(cfg, ensure_ascii=False), 'answer'))
+                try:
+                    return moderation.review_candidate(c, term, decision, now())
+                except ValueError as exc:
+                    fail(400, str(exc))
+                except LookupError as exc:
+                    fail(404, str(exc))
+        fail(405, '不支持此操作')
+    if segments == ['moderation-recalls']:
+        if method == 'GET':
+            with db() as c:
+                return moderation.stats(c)
+        if method == 'POST':
+            with execution_budget.locked(WRITE_LOCK), db() as c:
+                try:
+                    result = moderation.record(c, data, now())
+                except ValueError as exc:
+                    fail(400, str(exc))
+                trace_id = record_moderation_trace(c, data)
+                if trace_id:
+                    result['trace_id'] = trace_id
+                return result
+        fail(405, '不支持此操作')
+    if segments == ['group-memories']:
+        if method == 'GET':
+            kb_id = (params.get('kb_id', [''])[0] or '').strip()
+            group_id = (params.get('group_id', [''])[0] or '').strip()
+            if len(kb_id) > 80 or len(group_id) > 128:
+                fail(400, '知识库或群标识过长')
+            with db() as c:
+                if group_id:
+                    if not kb_id:
+                        fail(400, '查看群记忆时必须指定知识库')
+                    base(c, kb_id)
+                    return memories.admin_list(c, kb_id, group_id)
+                return {'groups': memories.admin_groups(c, kb_id)}
+        if method in ('PUT', 'DELETE'):
+            kb_id = string(data, 'kb_id', 80, True)
+            group_id = string(data, 'group_id', 128, True)
+            with execution_budget.locked(WRITE_LOCK), db() as c:
+                base(c, kb_id)
+                if method == 'PUT':
+                    enabled_value = data.get('enabled')
+                    if type(enabled_value) is not bool:
+                        fail(400, 'enabled 必须为布尔值')
+                    result = memories.admin_apply(c, kb_id, group_id,
+                                                  'enable' if enabled_value else 'disable')
+                else:
+                    item_id = data.get('item_id', '')
+                    if item_id:
+                        action = 'delete'
+                    else:
+                        action = 'clear'
+                    result = memories.admin_apply(c, kb_id, group_id, action, item_id=item_id)
+                if not result.get('ok'):
+                    fail(400, result.get('message', '记忆管理失败'))
+                return result
+        fail(405, '不支持此操作')
     if segments == ['agent', 'answer'] and method == 'POST':
         return respond(data, lambda request, details: agent_service.answer(sys.modules[__name__], request, details))
+    if segments == ['agent', 'creative'] and method == 'POST':
+        return creative.respond(sys.modules[__name__], data)
     if segments == ['agent', 'memory'] and method == 'POST':
         return memories.request(sys.modules[__name__], data)
     if segments == ['agent', 'private-maintenance'] and method == 'POST':
@@ -652,6 +975,8 @@ def api(method, path, data, params):
         return summaries.respond(sys.modules[__name__], data)
     if segments == ['private-maintenance'] and method == 'POST':
         return maintenance.respond(sys.modules[__name__],data)
+    if segments == ['private-announcement'] and method == 'POST':
+        return maintenance.sync_announcement(sys.modules[__name__],data)
     if segments == ['retrieve'] and method == 'POST':
         return retrieve(data)
     if segments == ['answer'] and method == 'POST':
@@ -692,7 +1017,7 @@ def api(method, path, data, params):
                 naming_image='data:'+mime+';base64,'+base64.b64encode(file.read_bytes()).decode()
             data=dict(data,name=stickers.generate_name(cfg,naming_image));auto_sticker_name=True
         except ValueError as exc:fail(400,str(exc))
-    with WRITE_LOCK, db() as c:
+    with execution_budget.locked(WRITE_LOCK), db() as c:
         if segments==['private-maintenance-settings']:
             if method not in ('GET','PUT'):fail(405,'不支持此操作')
             try:return maintenance.settings(c,data if method=='PUT' else None)
@@ -802,6 +1127,10 @@ def api(method, path, data, params):
                     groups = answers.validate_groups(data.get('handoff_groups', {}))
                 except ValueError as exc:
                     fail(400, str(exc))
+                words = validate_sensitive_words(data.get('sensitive_words', cfg.get('sensitive_words', answers.DEFAULT_SENSITIVE_WORDS)))
+                harassment_warning_enabled = data.get('harassment_warning_enabled', cfg.get('harassment_warning_enabled', True))
+                if type(harassment_warning_enabled) is not bool:
+                    fail(400, 'harassment_warning_enabled 必须为布尔值')
                 key = string(data, 'api_key', 2000)
                 if any(ord(ch) < 33 or ord(ch) > 126 for ch in key):
                     fail(400, 'API Key 必须为不含空格的可打印 ASCII 字符')
@@ -813,6 +1142,12 @@ def api(method, path, data, params):
                        'system_prompt': string(data, 'system_prompt', 12000, True),
                        'keyword_prompt': string(data, 'keyword_prompt', 12000, True) if 'keyword_prompt' in data else cfg['keyword_prompt'],
                        'group_welcome': string(data, 'group_welcome', 1000, True) if 'group_welcome' in data else cfg['group_welcome'],
+                       'sensitive_words': words,
+                       'harassment_warning_enabled': harassment_warning_enabled,
+                       'harassment_mute_enabled': cfg.get('harassment_mute_enabled', False),
+                       'harassment_mute_threshold': cfg.get('harassment_mute_threshold', 3),
+                       'harassment_mute_duration_minutes': cfg.get('harassment_mute_duration_minutes', 10),
+                       'drink_menu': cfg.get('drink_menu', answers.DEFAULT_DRINK_MENU),
                        'api_key': key or ('' if data.get('clear_key') else cfg['api_key']),
                        'handoff_groups': groups, 'revision': secrets.token_hex(8)}
                 c.execute('UPDATE app_settings SET value=? WHERE name=?', (json.dumps(cfg), 'answer'))
@@ -1012,19 +1347,24 @@ class Handler(BaseHTTPRequestHandler):
             admin = bool(ADMIN_TOKEN) and hmac.compare_digest(supplied.encode(), ADMIN_TOKEN.encode())
             reader = bool(READ_TOKEN) and hmac.compare_digest(supplied.encode(), READ_TOKEN.encode())
             learner = bool(LEARN_TOKEN) and hmac.compare_digest(supplied.encode(), LEARN_TOKEN.encode())
-            if not admin and not reader and not learner:
+            moderator = bool(MODERATION_TOKEN) and hmac.compare_digest(supplied.encode(), MODERATION_TOKEN.encode())
+            if not admin and not reader and not learner and not moderator:
                 fail(401, '请输入有效的访问密钥')
-            if learner and not admin and not (parsed.path in ('/knowledge/api/private-maintenance','/knowledge/api/agent/private-maintenance','/knowledge/api/learning/events','/knowledge/api/owner-notifications/claim','/knowledge/api/owner-notifications/ack') and self.command == 'POST'):
-                fail(403, '学习密钥仅可提交聊天事件')
-            read_paths = (parsed.path in ('/knowledge/api/retrieve', '/knowledge/api/answer', '/knowledge/api/agent/answer', '/knowledge/api/agent/memory', '/knowledge/api/trace-delivery', '/knowledge/api/group-summary') and self.command == 'POST') or (parsed.path == '/knowledge/api/group-welcome' and self.command == 'GET')
-            if not admin and not learner and not read_paths:
+            if moderator and not admin and not (
+                    (parsed.path == '/knowledge/api/moderation-settings' and self.command == 'GET') or
+                    (parsed.path == '/knowledge/api/moderation-recalls' and self.command == 'POST')):
+                fail(403, '敏感词专用密钥仅可读取敏感词或提交撤回事件')
+            if learner and not admin and not (parsed.path in ('/knowledge/api/private-maintenance','/knowledge/api/private-announcement','/knowledge/api/agent/private-maintenance','/knowledge/api/learning/events','/knowledge/api/owner-notifications/claim','/knowledge/api/owner-notifications/ack') and self.command == 'POST'):
+                fail(403, '学习密钥仅可提交聊天事件或受 OpenID 白名单约束的私聊维护')
+            read_paths = (parsed.path in ('/knowledge/api/retrieve', '/knowledge/api/answer', '/knowledge/api/agent/answer', '/knowledge/api/agent/creative', '/knowledge/api/agent/memory', '/knowledge/api/trace-delivery', '/knowledge/api/group-summary') and self.command == 'POST') or (parsed.path in ('/knowledge/api/group-welcome', '/knowledge/api/drink-menu', '/knowledge/api/drink-weather') and self.command == 'GET')
+            if not admin and not learner and not moderator and not read_paths:
                 fail(403, '召回密钥仅可调用检索接口')
             if parsed.path in ('/knowledge/api/stickers/upload','/knowledge/api/products/upload') and self.command=='POST':
                 if self.headers.get('Transfer-Encoding'):fail(400,'不支持分块请求体')
                 length=int(self.headers.get('Content-Length',0))
                 if not 0<length<=stickers.MAX_UPLOAD:fail(413,'图片不能超过 5 MB')
                 name=parse_qs(parsed.query).get('name',[''])[0]
-                with WRITE_LOCK:
+                with execution_budget.locked(WRITE_LOCK):
                     try:target=stickers.save_upload(DATA/'stickers',self.rfile.read(length))
                     except ValueError as exc:fail(400,str(exc))
                 if parsed.path=='/knowledge/api/products/upload':
@@ -1041,7 +1381,8 @@ class Handler(BaseHTTPRequestHandler):
                 if self.headers.get('Transfer-Encoding'):
                     fail(400, '不支持分块请求体')
                 length = int(self.headers.get('Content-Length', 0))
-                if not 0 < length <= 1_000_000:
+                max_body = 6_000_000 if parsed.path in ('/knowledge/api/agent/answer', '/knowledge/api/agent/creative') else 1_000_000
+                if not 0 < length <= max_body:
                     fail(413, '请求体过大或为空')
                 if self.headers.get_content_type() != 'application/json':
                     fail(415, '请使用 application/json')
@@ -1065,6 +1406,8 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == '__main__':
     if len(ADMIN_TOKEN) < 24 or len(READ_TOKEN) < 24 or ADMIN_TOKEN == READ_TOKEN:
         raise SystemExit('Set distinct KB_ADMIN_TOKEN and KB_READ_TOKEN (at least 24 characters each)')
+    if MODERATION_TOKEN and (len(MODERATION_TOKEN) < 24 or MODERATION_TOKEN in (ADMIN_TOKEN, READ_TOKEN, LEARN_TOKEN)):
+        raise SystemExit('KB_MODERATION_TOKEN must be distinct and at least 24 characters')
     os.umask(0o077)
     initialize()
     threading.Thread(target=trace_cleanup, daemon=True).start()

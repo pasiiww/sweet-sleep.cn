@@ -311,8 +311,8 @@ def process(app, job):
             if r.get('source_type')=='qa': candidates[r['qa_id']]=True
             else:documents[r['chunk_id']]={k:r.get(k) for k in ('document_id','chunk_id','title','content','updated_at')}
     with app.db() as c:
-        # Keep retrieved matches first, then show the model the other current QA.
-        # With a small KB this prevents a missed keyword match from becoming a duplicate.
+        # Select retrieved matches first, then other current QA within the budget.
+        # Serialize the selected set by ID below, so reranking cannot break its cache prefix.
         current=list(c.execute("SELECT * FROM qa_entries WHERE kb_id=? AND publication='active' AND superseded_by IS NULL ORDER BY updated_at DESC,id DESC",(job['kb_id'],)))
         by_id={r['id']:dict(r) for r in current}
         ordered=list(dict.fromkeys([*candidates,*(r['id'] for r in current)]))
@@ -328,8 +328,10 @@ def process(app, job):
     model_cfg=model_cfg|{'_trace':model_trace,'_stage':'learning'}
     details['model_calls']=model_trace['model_calls']
     text=answers.model_call(model_cfg,[{'role':'system','content':model_prompt(cfg['prompt'])},
-        {'role':'user','content':json.dumps({'current_date':answers.current_date(),**compact,
-          'trigger':details['trigger'],'aliases':catalog.variants,'existing_documents':list(documents.values())[:30],'existing_qa':[{**{k:r[k] for k in ('id','question','updated_at','origin')},'answer':r['answer'][:1000]} for r in existing]},ensure_ascii=False)}],json_mode=True,max_tokens=2400) if compact['batch_source_ids'] else json.dumps({'facts':[],'relevant':False,'reason':'本批消息清洗后没有有效文本'})
+        {'role':'user','content':json.dumps({'aliases':catalog.variants,
+          'existing_qa':[{**{k:r[k] for k in ('id','question','updated_at','origin')},'answer':r['answer'][:1000]} for r in sorted(existing,key=lambda row:row['id'])],
+          'current_date':answers.current_date(), 'existing_documents':list(documents.values())[:30],
+          **compact, 'trigger':details['trigger']},ensure_ascii=False)}],json_mode=True,max_tokens=2400) if compact['batch_source_ids'] else json.dumps({'facts':[],'relevant':False,'reason':'本批消息清洗后没有有效文本'})
     details['model_calls']=model_trace['model_calls']
     try:
         parsed=json.loads(text)

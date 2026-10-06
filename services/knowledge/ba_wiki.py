@@ -9,6 +9,7 @@ import json
 import os
 import re
 import sqlite3
+import execution_budget
 import ssl
 import threading
 import time
@@ -59,8 +60,7 @@ def _cache_get(key):
     now = time.time()
     path = _cache_path()
     if path is not None:
-        with sqlite3.connect(path, timeout=10) as conn:
-            conn.execute('PRAGMA busy_timeout=10000')
+        with sqlite3.connect(path, timeout=execution_budget.timeout(10)) as conn:
             conn.execute('''CREATE TABLE IF NOT EXISTS wiki_cache (
                 cache_key TEXT PRIMARY KEY, expires REAL NOT NULL, payload TEXT NOT NULL,
                 size INTEGER NOT NULL, accessed REAL NOT NULL)''')
@@ -88,8 +88,7 @@ def _cache_set(key, value, ttl):
     ttl = min(max(0, ttl), _CACHE_TTL)
     path = _cache_path()
     if path is not None:
-        with sqlite3.connect(path, timeout=10) as conn:
-            conn.execute('PRAGMA busy_timeout=10000')
+        with sqlite3.connect(path, timeout=execution_budget.timeout(10)) as conn:
             conn.execute('''CREATE TABLE IF NOT EXISTS wiki_cache (
                 cache_key TEXT PRIMARY KEY, expires REAL NOT NULL, payload TEXT NOT NULL,
                 size INTEGER NOT NULL, accessed REAL NOT NULL)''')
@@ -138,7 +137,7 @@ def _json_get(host, path, params, *, headers=None, ttl=_CACHE_TTL):
         request_headers.update(headers)
     request = Request(url, headers=request_headers)
     try:
-        response = urlopen(request, timeout=REQUEST_TIMEOUT, context=_SSL_CONTEXT)
+        response = urlopen(request, timeout=execution_budget.timeout(REQUEST_TIMEOUT), context=_SSL_CONTEXT)
     except HTTPError as exc:
         raise ValueError(f'{host} 返回 HTTP {exc.code}') from exc
     except (URLError, TimeoutError, OSError) as exc:
@@ -147,7 +146,7 @@ def _json_get(host, path, params, *, headers=None, ttl=_CACHE_TTL):
         final = urlsplit(response.geturl())
         if final.scheme != 'https' or final.hostname != host:
             raise ValueError('Wiki 请求跳转到了未允许的站点')
-        raw = response.read(MAX_RESPONSE_BYTES + 1)
+        raw = execution_budget.read_response(response, MAX_RESPONSE_BYTES, REQUEST_TIMEOUT)
     if len(raw) > MAX_RESPONSE_BYTES:
         raise ValueError(f'{host} 返回内容超过大小限制')
     try:
@@ -168,7 +167,7 @@ def _text_get(host, path, *, headers=None, ttl=_CACHE_TTL):
         request_headers.update(headers)
     try:
         response = urlopen(Request(f'https://{host}{path}', headers=request_headers),
-                           timeout=REQUEST_TIMEOUT, context=_SSL_CONTEXT)
+                           timeout=execution_budget.timeout(REQUEST_TIMEOUT), context=_SSL_CONTEXT)
     except HTTPError as exc:
         raise ValueError(f'{host} 返回 HTTP {exc.code}') from exc
     except (URLError, TimeoutError, OSError) as exc:
@@ -177,7 +176,7 @@ def _text_get(host, path, *, headers=None, ttl=_CACHE_TTL):
         final = urlsplit(response.geturl())
         if final.scheme != 'https' or final.hostname != host:
             raise ValueError('Wiki 请求跳转到了未允许的站点')
-        raw = response.read(MAX_RESPONSE_BYTES + 1)
+        raw = execution_budget.read_response(response, MAX_RESPONSE_BYTES, REQUEST_TIMEOUT)
     if len(raw) > MAX_RESPONSE_BYTES:
         raise ValueError(f'{host} 返回内容超过大小限制')
     text = raw.decode('utf-8', 'replace')
@@ -400,6 +399,7 @@ def _wikiru_search(query, entries):
 
 def search(query, source='auto', limit=3):
     """Search GameKee, or the Japanese Blue Archive Wikiru wiki when requested/fallback."""
+    execution_budget.check()
     if not isinstance(query, str) or not query.strip():
         raise ValueError('query 不能为空')
     query = query.strip()[:120]

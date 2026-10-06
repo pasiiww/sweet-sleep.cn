@@ -5,9 +5,12 @@ Runs on the knowledge server and reads credentials from its protected env file.
 No external Python package is required.
 """
 from datetime import datetime, timedelta, timezone
+from urllib import error as urlerror, request as urlrequest
+import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import sqlite3
 import sys
@@ -16,7 +19,7 @@ from urllib.parse import quote
 
 
 ENV_FILE = Path(os.environ.get('SWEET_MCP_ENV_FILE', '/etc/sweet-knowledge.env'))
-ALLOWED_ENV = {'KB_ADMIN_TOKEN', 'KB_READ_TOKEN', 'KB_LEARN_TOKEN', 'KB_DATA_DIR', 'KB_STATIC_DIR'}
+ALLOWED_ENV = {'KB_ADMIN_TOKEN', 'KB_READ_TOKEN', 'KB_LEARN_TOKEN', 'KB_MODERATION_TOKEN', 'KB_DATA_DIR', 'KB_STATIC_DIR'}
 
 
 def load_environment():
@@ -40,6 +43,7 @@ load_environment()
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import server as knowledge  # noqa: E402
 import ba_wiki  # noqa: E402
+import tool_service  # noqa: E402
 
 
 PROTOCOL_VERSION = '2025-03-26'
@@ -58,7 +62,7 @@ TOOLS = [
      'inputSchema': {'type': 'object', 'properties': {'kb_id': {'type': 'string'}}, 'required': ['kb_id'], 'additionalProperties': False},
      'annotations': {'destructiveHint': True}},
     {'name': 'search_knowledge', 'description': '在指定知识库按关键词检索文档和已生效问答，返回可引用原文片段。',
-     'inputSchema': {'type': 'object', 'properties': {'kb_id': {'type': 'string'}, 'query': {'type': 'string'}, 'top_k': {'type': 'integer', 'minimum': 1, 'maximum': 20}}, 'required': ['kb_id', 'query'], 'additionalProperties': False},
+     'inputSchema': {'type': 'object', 'properties': {'kb_id': {'type': 'string'}, 'query': {'type': 'string'}, 'original_query': {'type': 'string', 'maxLength': 2000}, 'top_k': {'type': 'integer', 'minimum': 1, 'maximum': 20}}, 'required': ['kb_id', 'query'], 'additionalProperties': False},
      'annotations': {'readOnlyHint': True}},
     {'name': 'search_ba_wiki', 'description': '只读检索蔚蓝档案角色、剧情和玩法资料。auto 优先 GameKee，未命中时回退日文 Blue Archive Wikiru；也可指定 wiki 来源。',
      'inputSchema': {'type': 'object', 'properties': {'query': {'type': 'string', 'minLength': 1, 'maxLength': 120},
@@ -97,6 +101,17 @@ TOOLS = [
     {'name': 'get_recent_chat_messages', 'description': '按条数读取群内最近聊天。消息最多保留7天；单次最多400条，按时间正序返回，附发送者昵称（最多12字）。可以只看置顶成员，或指定成员ID。',
      'inputSchema': {'type': 'object', 'properties': {'group_id': {'type': 'string'}, 'hours': {'type': 'integer', 'minimum': 1, 'maximum': 168}, 'limit': {'type': 'integer', 'minimum': 1, 'maximum': 400}, 'offset': {'type': 'integer', 'minimum': 0, 'maximum': 5000}, 'contains': {'type': 'string'}, 'pinned_only': {'type': 'boolean'}, 'member_ids': {'type': 'array', 'items': {'type': 'string'}, 'maxItems': 50}}, 'required': ['group_id'], 'additionalProperties': False},
      'annotations': {'readOnlyHint': True}},
+    {'name': 'recall_group_message', 'description': '撤回指定群的一条消息。QQ 通常只允许撤回较近的消息，机器人需要具备群管理员权限。',
+     'inputSchema': {'type': 'object', 'properties': {'group_id': {'type': 'string'}, 'message_id': {'type': 'string'}}, 'required': ['group_id', 'message_id'], 'additionalProperties': False},
+     'annotations': {'destructiveHint': True}},
+    {'name': 'send_group_warning', 'description': '向指定群消息发送固定的友善交流提醒。提醒引用该消息，批量操作时必须放在撤回之前；后台“性骚扰提醒”开关关闭时不会发送。',
+     'inputSchema': {'type': 'object', 'properties': {'group_id': {'type': 'string'}, 'message_id': {'type': 'string'}}, 'required': ['group_id', 'message_id'], 'additionalProperties': False}},
+    {'name': 'record_harassment_count', 'description': '按群消息 ID 幂等记录一次敏感词或性骚扰命中，不保存消息正文；同一消息可同时提交多个词条和待审核候选词。',
+     'inputSchema': {'type': 'object', 'properties': {'group_id': {'type': 'string'}, 'message_id': {'type': 'string'}, 'terms': {'type': 'array', 'items': {'type': 'string', 'maxLength': 80}, 'minItems': 1, 'maxItems': 20}, 'candidates': {'type': 'array', 'items': {'type': 'string', 'maxLength': 80}, 'maxItems': 20}}, 'required': ['group_id', 'message_id', 'terms'], 'additionalProperties': False},
+     'annotations': {'destructiveHint': True}},
+    {'name': 'execute_admin_actions', 'description': '在一次 MCP 调用中按顺序执行1至8项管理员操作，可组合知识库写入、记录命中、撤回和受后台开关控制的提醒。若同时提醒和撤回同一消息，提醒必须排在撤回之前。每项单独返回成功或失败；某项失败不会撤销此前操作，也不会阻止后续项。',
+     'inputSchema': {'type': 'object', 'properties': {'actions': {'type': 'array', 'minItems': 1, 'maxItems': 8, 'items': {'type': 'object', 'properties': {'name': {'type': 'string', 'enum': ['create_knowledge_base', 'update_knowledge_base', 'delete_knowledge_base', 'create_document', 'update_document', 'delete_document', 'create_qa', 'update_qa', 'delete_qa', 'record_harassment_count', 'recall_group_message', 'send_group_warning']}, 'arguments': {'type': 'object'}}, 'required': ['name', 'arguments'], 'additionalProperties': False}}}, 'required': ['actions'], 'additionalProperties': False},
+     'annotations': {'destructiveHint': True}},
     {'name': 'pin_chat_member', 'description': '在指定群置顶一位成员，之后可用 get_recent_chat_messages 的 pinned_only 查看其发言。member_id 可从聊天记录结果取得。',
      'inputSchema': {'type': 'object', 'properties': {'group_id': {'type': 'string'}, 'member_id': {'type': 'string'}, 'label': {'type': 'string'}, 'note': {'type': 'string'}}, 'required': ['group_id', 'member_id'], 'additionalProperties': False}},
     {'name': 'unpin_chat_member', 'description': '取消置顶指定群成员。',
@@ -117,6 +132,11 @@ def api(method, path, data=None, params=None):
     return knowledge.api(method, '/knowledge/api/' + path.lstrip('/'), data or {}, params or {})
 
 
+def qq_moderation_request(action, payload):
+    require_admin()
+    return tool_service.qq_moderation_request(knowledge, action, payload)
+
+
 def bounded_int(args, key, default, low, high):
     value = args.get(key, default)
     if type(value) is not int or not low <= value <= high:
@@ -124,16 +144,47 @@ def bounded_int(args, key, default, low, high):
     return value
 
 
+ADMIN_BATCH_TOOLS = {
+    'create_knowledge_base', 'update_knowledge_base', 'delete_knowledge_base',
+    'create_document', 'update_document', 'delete_document',
+    'create_qa', 'update_qa', 'delete_qa',
+    'record_harassment_count', 'recall_group_message', 'send_group_warning',
+}
+
+
 def tool(name, args):
     if not isinstance(args, dict):
         raise ValueError('arguments 必须是对象')
+    if name == 'execute_admin_actions':
+        require_admin()
+        if set(args) != {'actions'}:
+            raise ValueError('execute_admin_actions 只接受 actions 参数')
+        actions = args.get('actions')
+        if not isinstance(actions, list) or not 1 <= len(actions) <= 8:
+            raise ValueError('actions 必须包含1到8项管理员操作')
+        results = []
+        for index, action in enumerate(actions):
+            if (not isinstance(action, dict) or set(action) != {'name', 'arguments'}
+                    or action.get('name') not in ADMIN_BATCH_TOOLS
+                    or not isinstance(action.get('arguments'), dict)):
+                results.append({'index': index, 'ok': False, 'error': '操作名称或参数格式不支持'})
+                continue
+            try:
+                result = tool(action['name'], action['arguments'])
+                results.append({'index': index, 'name': action['name'], 'ok': True, 'result': result})
+            except Exception as exc:
+                results.append({'index': index, 'name': action['name'], 'ok': False,
+                                'error': str(exc)[:300] or type(exc).__name__})
+        return {'completed': sum(1 for row in results if row['ok']), 'total': len(results), 'results': results}
+    if name in ('record_harassment_count', 'recall_group_message', 'send_group_warning'):
+        return tool_service.moderation_action(knowledge, name, args, api_call=api, qq_call=qq_moderation_request)
     if name == 'search_ba_wiki':
         query = args.get('query')
         source = args.get('source', 'auto')
         limit = bounded_int(args, 'limit', 3, 1, 4)
         if not isinstance(query, str) or not query.strip() or len(query) > 120:
             raise ValueError('query 必须为1到120字符')
-        return ba_wiki.search(query, source=source, limit=limit)
+        return tool_service.search_ba_wiki(query, source=source, limit=limit)
     if name == 'list_knowledge_bases':
         return api('GET', 'bases')
     if name == 'get_knowledge_base':
@@ -150,7 +201,9 @@ def tool(name, args):
         return api('DELETE', 'bases/' + quote(args['kb_id'], safe=''))
     if name == 'search_knowledge':
         top_k = bounded_int(args, 'top_k', 5, 1, 20)
-        return api('POST', 'retrieve', {'kb_id': args['kb_id'], 'query': args['query'][:2000], 'mode': 'keyword', 'top_k': top_k})
+        require_admin()
+        return tool_service.search_knowledge(knowledge, args['kb_id'], args['query'],
+                                             original_query=args.get('original_query', ''), top_k=top_k)
     if name == 'search_documents':
         query = str(args.get('query', ''))[:200]
         return api('GET', 'bases/' + quote(args['kb_id'], safe='') + '/documents', params={'q': [query]})
@@ -183,7 +236,6 @@ def tool(name, args):
         qa_id = bounded_int(args, 'qa_id', 0, 1, 2**63-1)
         return api('DELETE', 'qa/' + str(qa_id))
     if name == 'pin_chat_member':
-        import re
         group, member = args.get('group_id'), args.get('member_id')
         if not isinstance(group, str) or not group or len(group) > 128:
             raise ValueError('group_id 必须是有效群标识')
@@ -239,47 +291,7 @@ def tool(name, args):
         return {'items': [{'group_id': row[0], 'messages': row[1],
                            'latest_at': datetime.fromtimestamp(row[2],timezone.utc).isoformat()} for row in rows]}
     if name == 'get_recent_chat_messages':
-        group = args.get('group_id')
-        if not isinstance(group, str) or not group or len(group) > 128:
-            raise ValueError('group_id 必须是有效群标识')
-        hours = bounded_int(args, 'hours', 24, 1, 168)
-        limit = bounded_int(args, 'limit', 100, 1, 400)
-        offset = bounded_int(args, 'offset', 0, 0, 5000)
-        contains = args.get('contains', '')
-        if not isinstance(contains, str) or len(contains) > 100:
-            raise ValueError('contains 最多100字符')
-        pinned_only = args.get('pinned_only', False)
-        if type(pinned_only) is not bool:
-            raise ValueError('pinned_only 必须是布尔值')
-        member_ids = args.get('member_ids', [])
-        if not isinstance(member_ids, list) or len(member_ids) > 50 or any(not isinstance(m, str) or len(m) > 128 for m in member_ids):
-            raise ValueError('member_ids 最多包含50个有效成员ID')
-        if pinned_only and member_ids:
-            raise ValueError('pinned_only 与 member_ids 只能选择一个')
-        db = knowledge.DATA / 'knowledge.db'
-        current = datetime.now(timezone.utc).timestamp()
-        with sqlite3.connect(f'file:{db}?mode=ro', uri=True, timeout=5) as conn:
-            if pinned_only:
-                exists = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='mcp_pinned_members'").fetchone()
-                member_ids = [r[0] for r in conn.execute('SELECT member_id FROM mcp_pinned_members WHERE group_id=?', (group,)).fetchall()] if exists else []
-                if not member_ids:
-                    return {'group_id': group, 'count': 0, 'total': 0, 'hours': hours, 'pinned_only': True, 'items': []}
-            where = 'group_id=? AND at>? AND at>=?'
-            params = [group, current-hours*3600, current-7*86400]
-            if contains:
-                where += ' AND instr(lower(content),lower(?))>0'
-                params.append(contains)
-            if member_ids:
-                where += ' AND member_id IN (' + ','.join('?' for _ in member_ids) + ')'
-                params.extend(member_ids)
-            total = conn.execute('SELECT count(*) FROM learning_events WHERE ' + where, params).fetchone()[0]
-            rows = conn.execute('SELECT message_id,member_id,member_name,content,at FROM learning_events WHERE ' + where + ' ORDER BY at DESC,id DESC LIMIT ? OFFSET ?',
-                [*params, limit, offset]).fetchall()
-        rows.reverse()
-        return {'group_id': group, 'count': len(rows), 'total': total, 'hours': hours, 'offset': offset, 'pinned_only': pinned_only,
-                'items': [{'message_id': row[0], 'member_id': row[1], 'member_name': row[2],
-                           'at': datetime.fromtimestamp(row[4], timezone.utc).isoformat(), 'content': row[3]}
-                          for row in rows]}
+        return tool_service.get_recent_chat_messages(knowledge, args)
     raise LookupError('未知 MCP 工具：' + name)
 
 
@@ -296,7 +308,7 @@ def handle(message):
         version = requested if requested in ('2025-06-18', '2025-03-26', '2024-11-05') else PROTOCOL_VERSION
         return response(msg_id, {'protocolVersion': version, 'capabilities': {'tools': {'listChanged': False}},
                                  'serverInfo': {'name': 'sweet-sleep-knowledge', 'version': '1.0.0'},
-                                 'instructions': '提供 QQ 群最近聊天读取、蔚蓝档案公开 Wiki 只读检索，以及绑定知识库、文档、QA 的增删改查和群成员置顶工具。写操作会更新正式知识库。'})
+                                 'instructions': '提供 QQ 群最近聊天读取、群消息撤回与受后台开关控制的提醒、性骚扰命中统计和候选敏感词审核，以及蔚蓝档案公开 Wiki 只读检索、绑定知识库/文档/QA 增删改查和群成员置顶工具。execute_admin_actions 可在一次调用中按序组合最多8项写入或群管理操作；结果会逐项报告，系统不提供禁言工具；管理员权限仅通过 SSH MCP 通道提供。'})
     if method == 'ping':
         return response(msg_id, {})
     if method == 'tools/list':

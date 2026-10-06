@@ -53,6 +53,7 @@ KB_READ_TOKEN=<独立随机只读密钥，至少24字符>
 KB_DATA_DIR=/var/lib/sweet-knowledge
 KB_STATIC_DIR=/opt/sweet-knowledge/static
 KB_PORT=8765
+KB_MODERATION_TOKEN=<可选；敏感词专用密钥，至少24字符且与其他密钥不同>
 ```
 
 Nginx 的 http 作用域：
@@ -78,6 +79,34 @@ location ^~ /knowledge/ {
 
 服务运维：`systemctl status sweet-knowledge`、`journalctl -u sweet-knowledge`。先在 `/opt/sweet-knowledge/venv` 安装 `requirements-agent.txt`，再复制程序和静态资源并重启服务；不要覆盖数据库和环境文件。Nginx 变更必须先备份并 `nginx -t` 后 reload。
 
+### 后端源码与部署防回退
+
+Git 中的知识服务后端源码位于 `services/knowledge/`；线上运行目录是 `/opt/sweet-knowledge/`，静态管理页面位于其 `static/` 目录。主站静态文件上传与知识服务部署是两条独立流程，`scripts/sync-site.sh` 不会部署知识服务后端。
+
+必须把同一 Git 版本中的服务模块作为一组部署。不要从旧工作区单独覆盖 `server.py` 或 `agent_service.py`：`server.py` 负责 API 路由和鉴权，敏感词逻辑在 `moderation.py`，QQ 管理通道在 `tool_service.py`；只换旧版路由文件会让管理页面仍能打开，但接口返回“接口不存在”。
+
+更新线上代码前先备份当前运行的 Python 源文件；数据库和环境文件另行管理，不能混入公开 web root：
+
+```sh
+stamp="$(date +%Y%m%d-%H%M%S)"
+backup="/var/backups/sweet-knowledge/$stamp"
+install -d -m 0700 "$backup"
+cp -a /opt/sweet-knowledge/*.py "$backup/"
+```
+
+部署同一提交的完整后端模块后，检查语法并重启知识服务。随后用管理密钥通过 HTTPS 验证敏感词页面依赖的三个只读接口均返回 200；此检查不写入配置或审核数据：
+
+```sh
+/opt/sweet-knowledge/venv/bin/python -m py_compile /opt/sweet-knowledge/*.py
+systemctl restart sweet-knowledge.service
+for path in moderation-settings moderation-recalls moderation-candidates; do
+  curl -sS -o /dev/null -w "%{http_code} $path\\n" \
+    -H "Authorization: Bearer $KB_ADMIN_TOKEN" \
+    "https://sweet-sleep.cn/knowledge/api/$path"
+done
+systemctl is-active sweet-knowledge.service
+```
+
 ## 接口
 
 全部接口需 `Authorization: Bearer <token>`，POST/PUT 为 JSON。
@@ -92,6 +121,11 @@ location ^~ /knowledge/ {
 | POST /settings/test | 用已保存模型执行一次测试请求 |
 | POST /bases/:id/embed | 为待处理分段生成一批向量 |
 | POST /retrieve | 给大模型的召回入口，支持只读密钥 |
+| GET/PUT /moderation-settings | 敏感词、骚扰提醒与禁言设置 |
+| GET/POST /moderation-candidates | 查看、审核疑似敏感词 |
+| GET/POST /moderation-recalls | 查看撤回统计、提交撤回事件 |
+
+敏感词管理接口权限：管理密钥可访问全部三个接口。`KB_MODERATION_TOKEN` 仅能 `GET /moderation-settings` 和 `POST /moderation-recalls`，不能审核候选词或读取撤回统计；`KB_READ_TOKEN` 无权访问这些管理接口。审核候选词使用 `POST /moderation-candidates`，JSON 字段为 `term` 和 `decision`（`approve` 或 `reject`）。
 
 知识库写入：`name`、`description`、`chunk_size`（默认600）、`overlap`（默认80且小于长度一半）、`top_k`（默认5）。文档写入：`title`、`content`、`source`。PUT 为完整替换可编辑字段。
 
@@ -116,9 +150,9 @@ curl https://sweet-sleep.cn/knowledge/api/retrieve \
 - `GET /knowledge/api/group-welcome`：召回密钥只读获取群入群欢迎词，供 QQ 机器人发送；响应只包含欢迎词。
 - `POST /knowledge/api/answer-settings/test`：管理者用已保存配置发送一条测试请求，会产生服务商调用费用。
 - `POST /knowledge/api/answer`：管理密钥或召回密钥可调用，参数 `kb_id`、`query`、可选 `group_id`。配置了模型后，此接口可产生调用费用。机器人不能修改提示词或模型配置。
-- `POST /knowledge/api/agent/answer`：QQ 机器人使用的 LangChain 回答入口；沿用每日额度、会话历史与 trace。全部工具合计最多调用6次，最多调用8次模型；第7次工具调用会被系统拦截，由模型根据已取得的资料直接完成回复。群聊默认携带本群最近10条聊天，需要更多时 agent 才调用与 stdio MCP 共用的 `get_recent_chat_messages` 查询当前群最近7天记录；聊天记录会附带最多12字的发送者昵称。群聊长期记忆按群共享，私聊记忆按用户独立。BA 问题优先查 GameKee，资料不足时可再查 Blue Archive Wikiru。
+- `POST /knowledge/api/agent/answer`：QQ 机器人使用的 LangChain 回答入口；沿用每日额度、会话历史与 trace。检索、群消息和记忆工具合计最多调用8次；达到上限后由服务端根据已取得的资料完成最终回复。群聊默认携带本群最近10条聊天，需要更多时 agent 才调用与 stdio MCP 共用的 `get_recent_chat_messages` 查询当前群最近7天记录；聊天记录会附带最多12字的发送者昵称。群聊长期记忆按群共享，私聊记忆按用户独立。BA 问题优先查 GameKee，资料不足时可再查 Blue Archive Wikiru。
 - `POST /knowledge/api/agent/memory`：QQ 机器人查看、清空、关闭或重新开启当前群/用户的长期记忆。机器人只提交身份和操作，不可读取其他群或用户记忆。
-- `POST /knowledge/api/agent/private-maintenance`：QQ 私聊管理员使用的 LangChain 维护入口；沿用 OpenID 白名单、先读取后修改、写入幂等和 trace。agent 最多调用6次工具、8次模型。
+- `POST /knowledge/api/agent/private-maintenance`：QQ 私聊管理员使用的 LangChain 维护入口；沿用 OpenID 白名单、先读取后修改、写入幂等和 trace。agent 最多调用8次工具，执行预算由服务端统一限制。
 
 响应字段 `answer`（可展示文本）、`mode`（model/document/handoff）、`reason`（机器可读状态）、`handoff`、`mention_openids`（仅群聊转人工且配置匹配时返回）、`results`。密钥和上游完整错误不返回；后台可查看最近一次模型或回退状态。
 
