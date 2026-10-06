@@ -301,7 +301,7 @@ class Retriever:
         token = os.environ.get('KB_LEARN_TOKEN', '')
         if not token:
             return {'answer': '公告同步通道尚未配置，请联系管理员。', 'ok': False}
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=35)) as session:
             async with session.post(self.api_root + '/private-announcement',
                 headers={'Authorization': 'Bearer ' + token},
                 json={'kb_id': self.kb_id, 'content': content, 'user_id': user_id,
