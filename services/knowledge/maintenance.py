@@ -28,13 +28,34 @@ def initialize(c):
     c.execute('CREATE TABLE IF NOT EXISTS maintenance_sessions (id TEXT PRIMARY KEY, updated REAL NOT NULL, mode TEXT NOT NULL, history TEXT NOT NULL)')
     c.execute('CREATE TABLE IF NOT EXISTS announcement_sync_requests (id TEXT PRIMARY KEY, created REAL NOT NULL, result TEXT NOT NULL)')
 
+def announcement_title(content):
+    lines = [line.strip() for line in content.splitlines() if line.strip()]
+    generic = {'公告', '群公告', '通知', '公告如下', '通知如下', '标题'}
+    candidates = lines or [content.strip()]
+    candidate = ''
+    for line in candidates[:3]:
+        line = re.sub(r'^\s*(?:#{1,6}\s*|标题\s*[：:]\s*)', '', line)
+        line = re.sub(r'^\s*[【\[]?(?:群)?(?:公告|通知)[】\]]?\s*[：:]?\s*', '', line)
+        if line and line not in generic:
+            candidate = line
+            break
+    if not candidate:
+        candidate = (lines[0] if lines else content).strip()
+    candidate = re.split(r'[。！？!?；;，,]', candidate, maxsplit=1)[0].strip()
+    if len(candidate) > 90:
+        candidate = candidate[:89].rstrip() + '…'
+    return ('群公告｜' + candidate)[:200] if candidate else '群公告'
+
 def sync_announcement(app,data):
     user=app.string(data,'user_id',128,True)
     kb_id=app.string(data,'kb_id',80,True)
     message_id=app.string(data,'message_id',200,True)
     content=app.string(data,'content',5000,True)
     request_id=hashlib.sha256((kb_id+'\0'+user+'\0'+message_id).encode()).hexdigest()
-    doc_id='qq-announcement-'+hashlib.sha256(kb_id.encode()).hexdigest()[:32]
+    # Message-scoped IDs make distinct announcements append as separate documents while
+    # retries of the same QQ message remain idempotent.
+    doc_id='qq-announcement-'+hashlib.sha256(request_id.encode()).hexdigest()[:32]
+    title=announcement_title(content)
     with app.WRITE_LOCK,app.db() as c:
         if user not in settings(c)['openids']:
             return {'ok':False,'answer':'此私聊账号尚未获得公告更新权限，请在后台「私聊维护权限」中配置 OpenID。'}
@@ -44,8 +65,8 @@ def sync_announcement(app,data):
         if prior:return json.loads(prior['result'])
         existing=c.execute('SELECT kb_id FROM documents WHERE id=?',(doc_id,)).fetchone()
         if existing and existing['kb_id']!=kb_id:app.fail(409,'公告文档编号冲突，请联系管理员')
-        app.save_document(c,kb,{'title':'群公告','content':content,'source':'QQ群公告（管理员私聊同步）'},doc_id)
-        result={'ok':True,'answer':'群公告已更新并写入客服知识库。'}
+        app.save_document(c,kb,{'title':title,'content':content,'source':'QQ群公告（管理员私聊同步）'},doc_id)
+        result={'ok':True,'answer':'群公告已新增为独立条目：'+title,'id':doc_id,'title':title}
         c.execute('INSERT INTO announcement_sync_requests VALUES(?,?,?)',
                   (request_id,time.time(),json.dumps(result,ensure_ascii=False)))
         return result

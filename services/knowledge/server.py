@@ -409,7 +409,7 @@ def retrieve(data):
             except ValueError as exc:
                 fail(400, str(exc))
         cfg, keyword, semantic = config(c), [], []
-        expanded = [variant for name in catalog.referenced(query) for variant in catalog.expand(name)]
+        expanded = catalog.search_variants(query)
         ft = list(dict.fromkeys(tokens(query) + [token for variant in expanded for token in tokens(variant)]))[:512]
         if mode != 'vector' and groups:
             scores = {}

@@ -3,6 +3,23 @@ import json
 import re
 
 
+# Conservative, bidirectional search aliases for common shop questions. These
+# expand retrieval terms only; source documents and model answers stay unchanged.
+SEARCH_SYNONYM_GROUPS = (
+    ('价格', '售价', '价钱', '多少钱', '多少元', '定价'),
+    ('定金', '订金', '预付款'),
+    ('尾款', '补款', '余款'),
+    ('发货', '寄出', '发出', '邮寄'),
+    ('预约', '预订', '预售'),
+    ('购买', '下单', '订购'),
+    ('库存', '余量', '剩余', '现货'),
+    ('截止时间', '截止', '结束时间'),
+    ('运费', '邮费', '配送费'),
+    ('公告', '通知', '通告'),
+)
+SEARCH_SYNONYMS = {term.casefold(): group for group in SEARCH_SYNONYM_GROUPS for term in group}
+
+
 def validate(items):
     if not isinstance(items, list) or len(items) > 200:
         raise ValueError('最多配置200个实体')
@@ -61,7 +78,14 @@ class Catalog:
 
     def expand(self, term):
         name = self.names.get(term.casefold())
-        return self.variants[name] if name else [term]
+        variants = self.variants[name] if name else [term]
+        return list(dict.fromkeys([*variants, *SEARCH_SYNONYMS.get(term.casefold(), ())]))
+
+    def search_variants(self, text):
+        variants = [variant for name in self.referenced(text) for variant in self.expand(name)]
+        folded = text.casefold()
+        variants.extend(alias for term, group in SEARCH_SYNONYMS.items() if term in folded for alias in group)
+        return list(dict.fromkeys(variants))
 
 
 def context(hints):

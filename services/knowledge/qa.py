@@ -41,7 +41,7 @@ def search(c, kb_id, query, groups, catalog, tokenize, limit):
                 continue
             match = ' AND '.join(expressions)
         else:
-            expanded = [variant for name in catalog.referenced(query) for variant in catalog.expand(name)]
+            expanded = catalog.search_variants(query)
             tokens = list(dict.fromkeys(tokenize(query) + [token for variant in expanded for token in tokenize(variant)]))[:512]
             if not tokens:
                 continue

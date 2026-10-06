@@ -297,6 +297,22 @@ class Retriever:
                 if response.status!=200:raise RuntimeError('Maintenance HTTP '+str(response.status))
                 return await response.json()
 
+    async def sync_announcement(self, content, user_id, message_id):
+        token = os.environ.get('KB_LEARN_TOKEN', '')
+        if not token:
+            return {'answer': '公告同步通道尚未配置，请联系管理员。', 'ok': False}
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+            async with session.post(self.api_root + '/private-announcement',
+                headers={'Authorization': 'Bearer ' + token},
+                json={'kb_id': self.kb_id, 'content': content, 'user_id': user_id,
+                      'message_id': message_id}) as response:
+                if response.status != 200:
+                    raise RuntimeError('Announcement sync HTTP ' + str(response.status))
+                result = await response.json()
+        if not isinstance(result, dict):
+            raise RuntimeError('Invalid announcement sync response')
+        return result
+
     async def report_delivery(self, trace, status, content, error=''):
         if not trace.get('trace_id') or not trace.get('trace_receipt'):
             return
@@ -482,7 +498,22 @@ class KnowledgeBot(botpy.Client):
                 reply = await self.images.lookup(message) if kind == 'group' else '请在群内引用图片消息并发送 /old。'
             elif not query or query.lower() in ('帮助', '/帮助', '/help', 'help', '/start'):
                 reply = HELP
-                if kind=='c2c':reply+='\n\n私聊维护：\n/modify 知识库 修改要求\n/modify qa 修改要求\n/add 商品库 商品信息\n/退出 结束维护（仅授权账号可写入）'
+                if kind=='c2c':reply+='\n\n私聊维护：\n/公告 公告内容（新增群公告知识条目）\n/modify 知识库 修改要求\n/modify qa 修改要求\n/add 商品库 商品信息\n/退出 结束维护（仅授权账号可写入）'
+            elif kind=='c2c' and re.match(r'^/公告(?:\s|$)',query):
+                content = re.sub(r'^/公告(?:\s+|$)', '', query, count=1, flags=re.S).strip()
+                if not content:
+                    reply = '请在 /公告 后附上完整公告内容，例如：/公告 预约和发货说明……'
+                elif len(content) > 5000:
+                    reply = '公告内容请控制在 5000 字以内。'
+                else:
+                    user_id = getattr(message.author, 'user_openid', '')
+                    if not user_id:
+                        reply = '没有读取到你的私聊 OpenID，公告没有写入。'
+                    else:
+                        trace = await self.retriever.sync_announcement(content, user_id, message.id)
+                        reply = plain(trace.get('answer', '公告同步失败，请稍后重试。'))[:1700]
+            elif re.match(r'^/公告(?:\s|$)',query):
+                reply = '公告同步请私聊机器人发送 /公告 公告内容；只有已授权 OpenID 可以写入知识库。'
             elif kind=='c2c' and (re.match(r'^/(?:modify|add)(?:\s|$)',query,re.I) or query in ('/退出','/cancel') or self.seen.maintenance_active(session)):
                 if len(query)>2000:reply='指令请控制在2000字以内。'
                 else:
@@ -565,7 +596,9 @@ class KnowledgeBot(botpy.Client):
             LOG.error('REQUEST_FAILED kind=%s error=%s', kind, type(exc).__name__)
             # Same msg_seq prevents duplicate delivery if the first reply actually arrived.
             try:
-                fallback_reply = '检索服务暂时不可用，请稍后重新发送问题。'
+                fallback_reply = ('公告同步暂时不可用，请稍后重新发送 /公告 指令。'
+                                  if kind == 'c2c' and re.match(r'^/公告(?:\s|$)', query)
+                                  else '检索服务暂时不可用，请稍后重新发送问题。')
                 fallback_result = await message.reply(content=fallback_reply, msg_type=0, msg_seq=1)
                 if fallback_result: delivery, sent = 'delivered', fallback_reply
             except Exception as send_error:
