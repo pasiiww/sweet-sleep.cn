@@ -3,7 +3,6 @@ import asyncio
 from datetime import datetime
 import json
 import logging
-import re
 import time
 
 import aiohttp
@@ -24,15 +23,23 @@ class Learner:
         if compat.is_bot(message):return
         group = getattr(message,'group_openid','')
         member = getattr(getattr(message,'author',None),'member_openid','')
-        mid, content = getattr(message,'id',''), getattr(message,'content','')
-        content = re.sub(r'<@!?[A-Za-z0-9_-]+>|<qqbot-at-user\s+id="[A-Za-z0-9_-]+"\s*/>', '', content or '').strip()
-        if content.startswith('/') or len(content)>2000: return
+        mid, raw_content = getattr(message,'id',''), getattr(message,'content','')
+        route_content = compat.strip_mention_tags(raw_content or '').strip()
+        if route_content.startswith('/'):
+            return
+        def first_name(member_id):
+            row = self.conn.execute('SELECT first_name FROM group_member_names WHERE group_id=? AND member_id=?',
+                                    (group, member_id)).fetchone()
+            return row[0] if row else ''
+        rendered_content = compat.render_mention_tags(raw_content, message, first_name)
+        content = compat.strip_mention_tags(rendered_content).strip()
+        if len(content)>2000: return
         if not group or not member or not mid or not isinstance(content,str) or not content.strip(): return
         at = getattr(message,'timestamp',None)
         try: at = datetime.fromisoformat(str(at).replace('Z','+00:00')).timestamp() if at else time.time()
         except (ValueError,TypeError): return
         payload={'kb_id':self.kb_id,'group_id':group,'member_id':member,'message_id':mid,
-                 'content':content[:2000],'raw_content':getattr(message,'content','')[:4000],
+                 'content':content[:2000],'raw_content':rendered_content[:4000],
                  'at':at, **getattr(message,'sweet_learning',{}),
                  'member_name':compat.sender_name(message)}
         with self.conn:

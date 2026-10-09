@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import aiohttp
 from bot import KnowledgeBot, SeenMessages
 from compat import FullGroupMessage
-from image_history import ImageHistory, PublicResolver, hash_image, image_url
+from image_history import ImageHistory, PublicResolver, hash_image, image_url, read_image_data_url
 
 
 class ImageTests(unittest.IsolatedAsyncioTestCase):
@@ -28,9 +28,9 @@ class ImageTests(unittest.IsolatedAsyncioTestCase):
         self.seen.conn.close()
         self.temp.cleanup()
 
-    def message(self, mid='picture', group='group', member='member', at='2026-09-17T02:00:00Z', images=1, content='', ref='', idx='', ref_idx=''):
+    def message(self, mid='picture', group='group', member='member', at='2026-09-17T02:00:00Z', images=1, content='', ref='', idx='', ref_idx='', name='昵称'):
         return FullGroupMessage(self.api, 'event', {
-            'id': mid, 'group_openid': group, 'author': {'member_openid': member, 'username': '昵称'},
+            'id': mid, 'group_openid': group, 'author': {'member_openid': member, 'username': name},
             'timestamp': at, 'content': content, 'message_reference': {'message_id': ref},
             'message_scene': {'ext': ['msg_idx=' + idx, 'ref_msg_idx=' + ref_idx]},
             'attachments': [{'content_type': 'image/jpeg', 'url': f'https://gchat.qpic.cn/{i}'} for i in range(images)],
@@ -44,7 +44,9 @@ class ImageTests(unittest.IsolatedAsyncioTestCase):
         try:
             answer = await ImageHistory(reopened.conn).lookup(self.message(images=0, ref='new'))
             self.assertIn('2 次', answer)
-            self.assertIn('id="first"', answer)
+            self.assertIn('最早发送：昵称', answer)
+            self.assertNotIn('first', answer)
+            self.assertNotIn('qqbot-at-user', answer)
             self.assertIn('2026-09-17 09:00:00', answer)
             self.assertEqual(reopened.conn.execute('SELECT count(*) FROM image_occurrences').fetchone()[0], 3)
         finally:
@@ -52,6 +54,15 @@ class ImageTests(unittest.IsolatedAsyncioTestCase):
         self.api.post_group_message.assert_not_awaited()
         self.assertEqual(list(Path(self.temp.name).iterdir()), [self.path])
         self.assertNotIn(b'https://', self.path.read_bytes())
+
+    async def test_old_uses_neutral_label_when_sender_has_no_nickname(self):
+        message = self.message(member='sensitive-openid-value', name='sensitive-openid-value')
+        await self.bot.on_group_message_create(message)
+        answer = await self.bot.images.lookup(self.message(
+            images=0, ref='picture', member='requester'))
+        self.assertIn('最早发送：昵称未记录的群友', answer)
+        self.assertNotIn('sensitive-openid-value', answer)
+        self.assertNotIn('qqbot-at-user', answer)
 
     async def test_dual_events_concurrent_and_replay_dedup(self):
         message = self.message(content='/help')
@@ -66,7 +77,10 @@ class ImageTests(unittest.IsolatedAsyncioTestCase):
         query = self.message(mid='command', content='/old', images=0, ref_idx='index123')
         await self.bot.on_group_message_create(query)
         await self.bot.on_group_at_message_create(query)
-        self.assertIn('1 次', self.api.post_group_message.call_args.kwargs['content'])
+        content = self.api.post_group_message.call_args.kwargs['content']
+        self.assertIn('1 次', content)
+        self.assertNotIn('user1', content)
+        self.assertNotIn('qqbot-at-user', content)
         self.assertEqual(self.api.post_group_message.await_count, 1)
         self.retriever.search.assert_not_awaited()
         self.assertEqual(self.seen.conn.execute('SELECT count(*) FROM dialogue').fetchone()[0], 0)
@@ -136,6 +150,33 @@ class ImageTests(unittest.IsolatedAsyncioTestCase):
         await self.bot.on_group_message_create(message)
         await self.bot.on_group_at_message_create(message)
         self.hash.assert_not_awaited()
+
+    async def test_vision_image_is_read_into_memory_without_persistence(self):
+        payload = b'\x89PNG\r\n\x1a\nsmall-image'
+
+        class Content:
+            async def iter_chunked(self, size):
+                yield payload
+
+        class Response:
+            status = 200
+            content_length = len(payload)
+            content = Content()
+            async def __aenter__(self): return self
+            async def __aexit__(self, *args): return None
+
+        class Session:
+            def __init__(self, **kwargs): pass
+            async def __aenter__(self): return self
+            async def __aexit__(self, *args): return None
+            def get(self, *args, **kwargs): return Response()
+
+        with patch('image_history.aiohttp.TCPConnector', return_value=object()), \
+             patch('image_history.aiohttp.ClientSession', Session):
+            data_url = await read_image_data_url('https://gchat.qpic.cn/vision')
+        self.assertTrue(data_url.startswith('data:image/png;base64,'))
+        self.assertEqual(self.seen.conn.execute('SELECT count(*) FROM image_occurrences').fetchone()[0], 0)
+        self.assertEqual(list(Path(self.temp.name).iterdir()), [self.path])
 
     async def test_quoted_images_are_not_new_occurrences(self):
         data = {'id': 'quote', 'group_openid': 'group', 'content': '/old', 'message_type': 103,

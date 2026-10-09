@@ -263,6 +263,36 @@
         "阿洛普拉翻面猫的尾款截止到什么时候？"
       ],
       "source": "historical_qq_question"
+    },
+    {
+      "id": "kei_full_payment_rewritten",
+      "query": "凯伊翻面猫全款还要补钱吗",
+      "kind": "answer",
+      "gold_qa": [
+        "凯伊翻面猫全款是多少、还需要补款吗？"
+      ],
+      "source": "agent_rewrite_regression",
+      "search_query": "凯伊价格"
+    },
+    {
+      "id": "kanoe_sales_unknown_rewritten",
+      "query": "鹿江娃娃现在卖了多少个",
+      "kind": "handoff",
+      "avoid_qa": [
+        "鹿江手偶在日本的少量余量在哪里销售？"
+      ],
+      "source": "agent_rewrite_regression",
+      "search_query": "鹿江销量"
+    },
+    {
+      "id": "plana_open_unknown_rewritten",
+      "query": "普拉娜翻面猫什么时候开团",
+      "kind": "handoff",
+      "avoid_qa": [
+        "阿洛普拉翻面猫的尾款截止到什么时候？"
+      ],
+      "source": "agent_rewrite_regression",
+      "search_query": "普拉娜开团"
     }
   ]
 }

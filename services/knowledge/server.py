@@ -529,7 +529,9 @@ def answer_status(cfg, mode, reason):
                       ('answer_status', json.dumps({'mode': mode, 'reason': reason, 'at': now()})))
 
 
+
 def search_terms(kb_id, terms, original_query='', catalog=None, *, max_results=8, context_chars=6000, exclude_ids=None):
+
     # Fuse rankings, deduplicate chunk IDs and identical text, then apply a shared budget.
     candidates, searches = {}, []
     searches_to_run=([original_query] if original_query else [])+list(terms)
@@ -947,11 +949,23 @@ def api(method, path, data, params):
             with execution_budget.locked(WRITE_LOCK), db() as c:
                 base(c, kb_id)
                 if method == 'PUT':
-                    enabled_value = data.get('enabled')
-                    if type(enabled_value) is not bool:
-                        fail(400, 'enabled 必须为布尔值')
-                    result = memories.admin_apply(c, kb_id, group_id,
-                                                  'enable' if enabled_value else 'disable')
+
+                    if 'enabled' in data:
+                        enabled_value = data.get('enabled')
+                        if type(enabled_value) is not bool:
+                            fail(400, 'enabled 必须为布尔值')
+                        result = memories.admin_apply(c, kb_id, group_id,
+                                                      'enable' if enabled_value else 'disable')
+                    else:
+                        mode = string(data, 'impression_mode', 16, True)
+                        item_id = string(data, 'item_id', 24, True)
+                        content = string(data, 'content', memories.MAX_ITEM_CHARS, True)
+                        if mode not in ('append', 'replace'):
+                            fail(400, '印象操作无效')
+                        result = memories.admin_apply(c, kb_id, group_id,
+                            'append_impression' if mode == 'append' else 'replace_impression',
+                            item_id=item_id, content=content)
+
                 else:
                     item_id = data.get('item_id', '')
                     if item_id:

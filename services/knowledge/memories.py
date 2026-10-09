@@ -5,6 +5,7 @@ import re
 import time
 import unicodedata
 
+IMPRESSION_KEY = '__member_impression__'
 MAX_ITEMS = 24
 MAX_ITEM_CHARS = 240
 MAX_TOTAL_CHARS = 4000
@@ -95,12 +96,100 @@ def list_items(c, memory_scope):
     return [row[0] for row in rows]
 
 
-def context(c, memory_scope):
+def context(c, memory_scope, member_openid=None, include_public=True):
     if not memory_scope or not enabled(c, memory_scope):
         return []
-    rows = c.execute('SELECT content,owner_openid FROM conversation_memories WHERE scope=? ORDER BY updated DESC,created DESC',
+
+    rows = c.execute('SELECT content,owner_openid,normalized FROM conversation_memories WHERE scope=? ORDER BY updated DESC,created DESC',
                      (memory_scope,)).fetchall()
+    if not include_public:
+        rows = [row for row in rows if row[1]]
+    rows = [row for row in rows if row[2] != IMPRESSION_KEY or row[1] == member_openid]
     return _render_items(c, memory_scope, reversed(rows))
+
+
+def member_context(c, memory_scope, member_openid, include_impression=True):
+    """Read only this speaker's entries from a conversation scope."""
+    if not memory_scope or not member_openid or not enabled(c, memory_scope):
+        return []
+    rows = c.execute('''SELECT content,owner_openid,normalized FROM conversation_memories
+                        WHERE scope=? AND owner_openid=? ORDER BY updated DESC,created DESC''',
+                     (memory_scope, member_openid)).fetchall()
+    if not include_impression:
+        rows = [row for row in rows if row[2] != IMPRESSION_KEY]
+    return _render_items(c, memory_scope, reversed(rows))
+
+
+def group_member_context_for_member(c, kb_id, member_openid):
+    """Read this member's own facts/impression from groups where they were seen."""
+    if not kb_id or not member_openid:
+        return {'items': [], 'identity': None}
+    rows = c.execute('''SELECT s.scope,s.group_id,n.first_name FROM conversation_memory_scopes s
+                        JOIN conversation_member_names n ON n.scope=s.scope
+                        WHERE s.kb_id=? AND s.origin='qq_group' AND n.member_openid=?
+                        ORDER BY n.first_seen,s.updated DESC,s.group_id''', (kb_id, member_openid)).fetchall()
+    result, seen, identity = [], set(), None
+    for memory_scope, _group_id, _nickname in rows:
+        if not enabled(c, memory_scope):
+            continue
+        if identity is None:
+            identity = member_identity(c, memory_scope, member_openid)
+        group_rows = c.execute('''SELECT content,owner_openid,normalized FROM conversation_memories
+                                 WHERE scope=? AND owner_openid=?
+                                 ORDER BY updated DESC,created DESC''',
+                               (memory_scope, member_openid)).fetchall()
+        for item in _render_items(c, memory_scope, reversed(group_rows)):
+            rendered = f'【你在群里的个人记忆】{item}'
+            if rendered not in seen:
+                seen.add(rendered)
+                result.append(rendered)
+    return {'items': result, 'identity': identity}
+
+
+def search_public_memories(c, scopes, query, limit=12):
+    """Search enabled public memories in a caller-authorized set of scopes."""
+    if not scopes or not isinstance(query, str):
+        return []
+    query_key = normalize(query)
+    if not query_key:
+        return []
+    query_chars = set(query_key)
+    query_bigrams = {query_key[i:i + 2] for i in range(len(query_key) - 1)}
+    ranked = []
+    seen = set()
+    for memory_scope in dict.fromkeys(scopes):
+        if not enabled(c, memory_scope):
+            continue
+        rows = c.execute('''SELECT content,updated FROM conversation_memories
+                            WHERE scope=? AND owner_openid='' ORDER BY updated DESC''',
+                         (memory_scope,)).fetchall()
+        for content, updated in rows:
+            content_key = normalize(content)
+            if query_key in content_key:
+                score = 100 + len(query_key)
+            else:
+                overlap = len(query_chars & set(content_key))
+                bigram_overlap = len(query_bigrams & {content_key[i:i + 2] for i in range(len(content_key) - 1)})
+                score = overlap + bigram_overlap * 2
+                if overlap < 2 and not bigram_overlap:
+                    continue
+            if score and content not in seen:
+                seen.add(content)
+                ranked.append((score, updated, content))
+    ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return [f'【群聊公共记忆】{content}' for _, _, content in ranked[:max(1, min(limit, 20))]]
+
+
+def search_group_memories_for_member(c, kb_id, member_openid, query, limit=12):
+    """Search public memories in enabled groups this member has participated in."""
+    if not kb_id or not member_openid:
+        return []
+    rows = c.execute('''SELECT s.scope FROM conversation_memory_scopes s
+                        JOIN conversation_member_names n ON n.scope=s.scope
+                        WHERE s.kb_id=? AND s.origin='qq_group' AND n.member_openid=?
+                        ORDER BY s.updated DESC,s.group_id''', (kb_id, member_openid)).fetchall()
+    return search_public_memories(c, [row[0] for row in rows], query, limit)
+
 
 
 def _render_items(c, memory_scope, rows):
@@ -243,7 +332,9 @@ def apply(c, memory_scope, action, content='', member_openid=''):
     if action == 'forget':
         rows = c.execute('SELECT normalized,content FROM conversation_memories WHERE scope=? AND owner_openid=?',
                          (memory_scope, member_openid)).fetchall()
-        matches = [row[0] for row in rows if row[0] == normalized or normalized in row[0] or row[0] in normalized]
+
+        matches = [row[0] for row in rows if row[0] == normalized or normalized in normalize(row[1]) or normalize(row[1]) in normalized]
+
         if len(matches) == 1:
             c.execute('DELETE FROM conversation_memories WHERE scope=? AND normalized=? AND owner_openid=?',
                       (memory_scope, matches[0], member_openid))
@@ -259,8 +350,8 @@ def apply(c, memory_scope, action, content='', member_openid=''):
         c.execute('UPDATE conversation_memories SET content=?,updated=? WHERE scope=? AND normalized=? AND owner_openid=?',
                   (content, current, memory_scope, normalized, member_openid))
         return {'ok': True, 'saved': True, 'updated': True, 'items': list_items(c, memory_scope)}
-    rows = c.execute('SELECT normalized,length(content) FROM conversation_memories WHERE scope=?',
-                     (memory_scope,)).fetchall()
+    rows = c.execute('SELECT normalized,length(content) FROM conversation_memories WHERE scope=? AND normalized<>?',
+                     (memory_scope, IMPRESSION_KEY)).fetchall()
     total = sum(row[1] for row in rows)
     if len(rows) >= MAX_ITEMS or total + len(content) > MAX_TOTAL_CHARS:
         return {'ok': False, 'message': '记忆空间已满，请先删除不再需要的记忆'}
@@ -285,6 +376,7 @@ def request(app, data):
         member_name = clean_member_name(data.get('member_name', ''))
         remember_member(c, memory_scope, user_id, member_name)
         result = apply(c, memory_scope, action, content, member_openid=user_id)
+
     return result
 
 
@@ -365,4 +457,150 @@ def admin_apply(c, kb_id, group_id, action, item_id=''):
         return {'ok': False, 'message': '不支持的管理操作'}
     result = admin_list(c, kb_id, group_id)
     result['deleted'] = count
+
     return result
+
+
+def append_impression(c, memory_scope, member_openid, sentence):
+    if not isinstance(sentence, str):
+        return False
+    sentence = re.sub(r'\s+', ' ', re.sub(r'[\x00-\x1f\x7f<>]', ' ', sentence)).strip()
+    sentence = sentence.rstrip('。！？!?')
+    if not sentence or re.search(r'[。！？!?]', sentence):
+        return False
+    existing = impression(c, memory_scope, member_openid).removeprefix('群友印象：').strip()
+    combined = (existing + ('。' if existing and not existing.endswith(('。', '！', '？', '.', '!', '?')) else '')
+                + sentence + '。')
+    return update_impression(c, memory_scope, member_openid, combined)
+
+
+def _admin_item_id(memory_scope, owner_openid, normalized):
+    return hashlib.sha256((memory_scope + '\0' + owner_openid + '\0' + normalized).encode()).hexdigest()[:24]
+
+
+def _admin_item(c, memory_scope, row):
+    normalized, content, owner, created, updated = row
+    identity = member_identity(c, memory_scope, owner) if owner else None
+    return {'id': _admin_item_id(memory_scope, owner, normalized),
+            'content': content,
+            'subject': 'member' if owner else 'group',
+            'member_key': identity['member_key'] if identity else '',
+            'first_nickname': identity['first_nickname'] if identity else '',
+            'created': created, 'updated': updated}
+
+
+def admin_groups(c, kb_id=''):
+    where = "s.origin='qq_group'"
+    args = []
+    if kb_id:
+        where += ' AND s.kb_id=?'
+        args.append(kb_id)
+    rows = c.execute('''SELECT s.kb_id,s.group_id,s.scope,s.updated,
+                               b.name AS kb_name,
+                               (SELECT enabled FROM conversation_memory_settings WHERE scope=s.scope) AS setting_enabled,
+                               (SELECT count(*) FROM conversation_memories m WHERE m.scope=s.scope) AS memory_count,
+                               (SELECT max(updated) FROM conversation_memories m WHERE m.scope=s.scope) AS memory_updated
+                        FROM conversation_memory_scopes s JOIN bases b ON b.id=s.kb_id
+                        WHERE ''' + where + ' ORDER BY COALESCE(memory_updated,s.updated) DESC,s.group_id', args).fetchall()
+    return [{'kb_id': row['kb_id'], 'kb_name': row['kb_name'], 'group_id': row['group_id'],
+             'memory_count': row['memory_count'],
+             'enabled': bool(row['setting_enabled']) if row['setting_enabled'] is not None else True,
+             'updated': row['memory_updated'] or row['updated']} for row in rows]
+
+
+def admin_list(c, kb_id, group_id):
+    memory_scope = scope(kb_id, 'qq_group', '', group_id)
+    if not memory_scope:
+        return {'ok': False, 'message': '缺少有效的群聊范围'}
+    row = c.execute('SELECT 1 FROM conversation_memory_scopes WHERE scope=? AND kb_id=? AND group_id=? AND origin=?',
+                    (memory_scope, kb_id, group_id, 'qq_group')).fetchone()
+    if not row:
+        return {'ok': True, 'enabled': True, 'items': []}
+    rows = c.execute('''SELECT normalized,content,owner_openid,created,updated
+                        FROM conversation_memories WHERE scope=? ORDER BY updated DESC,created DESC''',
+                     (memory_scope,)).fetchall()
+    return {'ok': True, 'enabled': enabled(c, memory_scope),
+            'items': [_admin_item(c, memory_scope, row) for row in rows]}
+
+
+def admin_apply(c, kb_id, group_id, action, item_id='', content=''):
+    memory_scope = scope(kb_id, 'qq_group', '', group_id)
+    if not memory_scope:
+        return {'ok': False, 'message': '缺少有效的群聊范围'}
+    if action == 'clear':
+        count = c.execute('DELETE FROM conversation_memories WHERE scope=?', (memory_scope,)).rowcount
+    elif action in ('enable', 'disable'):
+        value = int(action == 'enable')
+        c.execute('INSERT INTO conversation_memory_settings(scope,enabled,updated) VALUES(?,?,?) '
+                  'ON CONFLICT(scope) DO UPDATE SET enabled=excluded.enabled,updated=excluded.updated',
+                  (memory_scope, value, time.time()))
+        count = 0
+    elif action in ('append_impression', 'replace_impression'):
+        if not isinstance(item_id, str) or not re.fullmatch(r'[a-f0-9]{24}', item_id):
+            return {'ok': False, 'message': '印象条目标识无效'}
+        rows = c.execute('SELECT normalized,owner_openid FROM conversation_memories WHERE scope=?',
+                         (memory_scope,)).fetchall()
+        match = next(((normalized, owner) for normalized, owner in rows
+                      if _admin_item_id(memory_scope, owner, normalized) == item_id), None)
+        if not match or match[0] != IMPRESSION_KEY or not match[1]:
+            return {'ok': False, 'message': '群友印象不存在'}
+        normalized, owner = match
+        existing = c.execute('SELECT content FROM conversation_memories WHERE scope=? AND normalized=? AND owner_openid=?',
+                             (memory_scope, normalized, owner)).fetchone()[0]
+        if action == 'append_impression':
+            sentence = re.sub(r'\s+', ' ', str(content or '')).strip()
+            if not sentence or len(sentence) > 235 or re.search(r'[。！？!?；;]$', sentence):
+                return {'ok': False, 'message': '请填写一句不带句末标点的印象'}
+            result = append_impression(c, memory_scope, owner, sentence)
+        else:
+            result = update_impression(c, memory_scope, owner, content)
+        if not result:
+            return {'ok': False, 'message': '印象内容无效或超过235字'}
+        count = 1
+    elif action == 'delete':
+        if not isinstance(item_id, str) or not re.fullmatch(r'[a-f0-9]{24}', item_id):
+            return {'ok': False, 'message': '记忆条目标识无效'}
+        rows = c.execute('SELECT normalized,owner_openid FROM conversation_memories WHERE scope=?',
+                         (memory_scope,)).fetchall()
+        matches = [(normalized, owner) for normalized, owner in rows
+                   if _admin_item_id(memory_scope, owner, normalized) == item_id]
+        if not matches:
+            return {'ok': False, 'message': '记忆条目不存在'}
+        normalized, owner = matches[0]
+        count = c.execute('DELETE FROM conversation_memories WHERE scope=? AND normalized=? AND owner_openid=?',
+                           (memory_scope, normalized, owner)).rowcount
+    else:
+        return {'ok': False, 'message': '不支持的管理操作'}
+    result = admin_list(c, kb_id, group_id)
+    result['deleted'] = count
+    return result
+
+
+def impression(c, memory_scope, member_openid):
+    if not memory_scope or not member_openid or not enabled(c, memory_scope):
+        return ''
+    row = c.execute('SELECT content FROM conversation_memories WHERE scope=? AND owner_openid=? AND normalized=?',
+                    (memory_scope, member_openid, IMPRESSION_KEY)).fetchone()
+    return row[0] if row else ''
+
+
+def update_impression(c, memory_scope, member_openid, content):
+    """One bounded, replaceable impression per member; existing memory controls apply."""
+    if not memory_scope or not member_openid or not enabled(c, memory_scope):
+        return False
+    if not isinstance(content, str):
+        return False
+    content = re.sub(r'\s+', ' ', re.sub(r'[\x00-\x1f\x7f<>]', ' ', content)).strip()
+    if not content:
+        return False
+    content = '群友印象：' + content.removeprefix('群友印象：')
+    if len(content) > MAX_ITEM_CHARS:
+        return False
+    if re.search(r'(openid|api\s*key|密码|密钥|手机号|身份证|住址|心理疾病|政治倾向|性取向)', content, re.I):
+        return False
+    current = time.time()
+    c.execute('INSERT INTO conversation_memories(scope,normalized,content,created,updated,owner_openid) '
+              'VALUES(?,?,?,?,?,?) ON CONFLICT(scope,owner_openid,normalized) '
+              'DO UPDATE SET content=excluded.content,updated=excluded.updated',
+              (memory_scope, IMPRESSION_KEY, content, current, current, member_openid))
+    return True

@@ -28,7 +28,7 @@ class SummaryTests(unittest.IsolatedAsyncioTestCase):
         query=self.message('q','/总结')
         await self.bot.on_group_message_create(query)
         self.assertIn('明天晚上八点',self.retriever.summarize.call_args.args[0])
-        self.assertIn('超过十二字的群昵称样例长：',self.retriever.summarize.call_args.args[0])
+        self.assertIn('超过十二字的群昵称样例长 [speaker1]：',self.retriever.summarize.call_args.args[0])
         self.assertNotIn('秘密',self.retriever.summarize.call_args.args[0])
         await self.bot.on_group_at_message_create(query)
         self.assertEqual(self.retriever.summarize.await_count,1)
@@ -69,7 +69,8 @@ class SummaryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_inflight_new_messages_survive_checkpoint(self):
         self.bot.summaries.observe(self.message('one','活动开始',-1))
-        async def generate(_):
+        async def generate(_, group='', members=None):
+            self.assertEqual(group, 'g')
             self.bot.summaries.observe(self.message('later','活动新增事项',1))
             return {'ok':True,'answer':'活动开始'}
         self.retriever.summarize.side_effect=generate
@@ -113,3 +114,28 @@ class SummaryTests(unittest.IsolatedAsyncioTestCase):
         self.retriever.summarize.return_value={'ok':False,'answer':'失败'}
         await self.bot.on_group_message_create(self.message('q2','/总结',1))
         self.assertEqual(self.seen.conn.execute('SELECT summary FROM summary_checkpoint WHERE group_id=?',('g',)).fetchone()[0],actual)
+
+
+    def test_summary_member_mapping_disambiguates_same_names(self):
+        one = self.message('one', '喜欢日奈', -2, name='同名')
+        two = self.message('two', '喜欢星野', -1, name='同名')
+        two.author.member_openid = 'other-user'
+        self.bot.summaries.observe(one)
+        self.bot.summaries.observe(two)
+        text, _, _, members = self.bot.summaries.snapshot('g', self.now, include_members=True)
+        self.assertEqual(len(members), 2)
+        self.assertEqual({m['openid'] for m in members}, {'u', 'other-user'})
+        for member in members:
+            self.assertIn('[' + member['key'] + ']', text)
+            self.assertNotIn(member['openid'] + '：', text)
+
+
+    def test_member_mapping_excludes_messages_outside_character_window(self):
+        old = self.message('old', '较旧发言', -2, name='旧群友')
+        old.author.member_openid = 'old-user'
+        self.bot.summaries.observe(old)
+        self.bot.summaries.observe(self.message('long', '甲' * LIMIT, -1, name='新群友'))
+        text, _, count, members = self.bot.summaries.snapshot('g', self.now, include_members=True)
+        self.assertEqual(count, 1)
+        self.assertEqual([m['openid'] for m in members], ['u'])
+        self.assertLessEqual(len(text), LIMIT)

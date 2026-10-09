@@ -73,6 +73,26 @@ class KnowledgeTests(unittest.TestCase):
         with self.assertRaises(app.Problem):
             self.search(top_k=100)
 
+    def test_harassment_warning_setting_is_configurable_and_preserved(self):
+        cfg = self.call('GET', 'answer-settings')
+        self.assertTrue(cfg['harassment_warning_enabled'])
+        self.assertFalse(cfg['harassment_mute_enabled'])
+        self.assertEqual(cfg['harassment_mute_threshold'], 3)
+        self.assertEqual(cfg['harassment_mute_duration_minutes'], 10)
+        payload = {'enabled': cfg['enabled'], 'model': cfg['model'],
+                   'system_prompt': cfg['system_prompt'], 'keyword_prompt': cfg['keyword_prompt'],
+                   'group_welcome': cfg['group_welcome'], 'admin_qq': cfg['admin_qq'],
+                   'admin_name': cfg['admin_name'], 'handoff_groups': cfg['handoff_groups'],
+                   'sensitive_words': cfg['sensitive_words'], 'harassment_warning_enabled': False}
+        self.call('PUT', 'answer-settings', payload)
+        self.assertFalse(self.call('GET', 'answer-settings')['harassment_warning_enabled'])
+        self.assertFalse(self.call('GET', 'moderation-settings')['harassment_warning_enabled'])
+        self.assertFalse(self.call('GET', 'moderation-settings')['harassment_mute_enabled'])
+        payload['harassment_warning_enabled'] = 'false'
+        with self.assertRaises(app.Problem) as ctx:
+            self.call('PUT', 'answer-settings', payload)
+        self.assertEqual(ctx.exception.status, 400)
+
     def set_model(self, **extra):
         with patch.object(app, 'validate_url'):
             return self.call('PUT', 'settings', {'base_url': 'https://example.com/v1', 'model': 'test', 'api_key': 'secret', **extra})
@@ -120,14 +140,15 @@ class KnowledgeTests(unittest.TestCase):
 
     def test_http_auth_and_static_allowlist(self):
         self.doc()
-        app.ADMIN_TOKEN, app.READ_TOKEN, app.LEARN_TOKEN = 'a' * 32, 'r' * 32, 'l' * 32
+        app.ADMIN_TOKEN, app.READ_TOKEN, app.LEARN_TOKEN, app.MODERATION_TOKEN = 'a' * 32, 'r' * 32, 'l' * 32, 'm' * 32
         http = app.ThreadingHTTPServer(('127.0.0.1', 0), app.Handler)
         thread = threading.Thread(target=http.serve_forever, daemon=True)
         thread.start()
-        def req(path, token='', body=None):
+        def req(path, token='', body=None, method=None):
             payload = json.dumps(body).encode() if body is not None else None
             r = request.Request(f'http://127.0.0.1:{http.server_port}/knowledge/' + path, data=payload,
-                                headers={'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'})
+                                headers={'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+                                method=method)
             try:
                 with request.urlopen(r) as response: return response.status, response.read()
             except error.HTTPError as exc:
@@ -149,13 +170,37 @@ class KnowledgeTests(unittest.TestCase):
             welcome_status, welcome_body = req('api/group-welcome', app.READ_TOKEN)
             self.assertEqual(welcome_status, 200)
             self.assertIn('棉花娃娃征集请看群公告', json.loads(welcome_body)['welcome'])
+            self.assertEqual(req('api/drink-menu', app.READ_TOKEN)[0], 200)
+            self.assertEqual(req('api/drink-menu', app.READ_TOKEN, {'items': []})[0], 403)
+            self.assertEqual(req('api/drink-menu', app.ADMIN_TOKEN, {'items': []}, method='PUT')[0], 200)
+            self.assertEqual(req('api/drink-weather', app.READ_TOKEN)[0], 200)
+            self.assertEqual(req('api/drink-weather-settings', app.READ_TOKEN)[0], 403)
+            self.assertEqual(req('api/drink-weather-settings', app.ADMIN_TOKEN)[0], 200)
             self.assertEqual(req('api/group-welcome', app.LEARN_TOKEN)[0], 403)
+            self.assertEqual(req('api/drink-menu', app.LEARN_TOKEN)[0], 403)
             self.assertEqual(req('api/group-welcome')[0], 401)
+            self.assertEqual(req('api/moderation-settings', app.MODERATION_TOKEN)[0], 200)
+            self.assertEqual(req('api/moderation-recalls', app.MODERATION_TOKEN, {'event_hash':'d' * 64,'terms':['cbz']})[0], 200)
+            self.assertEqual(req('api/moderation-recalls', app.MODERATION_TOKEN)[0], 403)
+            self.call('POST', 'moderation-recalls', {
+                'event_hash': 'e' * 64, 'terms': ['未审核词'], 'candidates': ['未审核词']})
+            self.assertEqual(req('api/moderation-candidates', app.MODERATION_TOKEN)[0], 403)
+            self.assertEqual(req('api/moderation-candidates', app.READ_TOKEN)[0], 403)
+            self.assertEqual(req('api/moderation-candidates', app.ADMIN_TOKEN)[0], 200)
+            self.assertEqual(req('api/moderation-candidates', app.MODERATION_TOKEN,
+                                 {'term': '未审核词', 'decision': 'approve'})[0], 403)
+            self.assertEqual(req('api/moderation-candidates', app.ADMIN_TOKEN,
+                                 {'term': '未审核词', 'decision': 'approve'})[0], 200)
+            self.assertEqual(req('api/answer-settings', app.MODERATION_TOKEN)[0], 403)
+            self.assertEqual(req('api/moderation-settings', app.READ_TOKEN)[0], 403)
+            self.assertEqual(req('api/moderation-recalls', app.ADMIN_TOKEN)[0], 200)
             self.assertEqual(req('api/traces', app.READ_TOKEN)[0], 403)
             self.assertEqual(req(f'api/bases/{self.kb}/qa', app.READ_TOKEN)[0], 403)
             self.assertEqual(req('api/qa/1', app.READ_TOKEN)[0], 403)
             self.assertEqual(req('api/traces/example', app.READ_TOKEN)[0], 403)
             self.assertEqual(req('api/traces', app.ADMIN_TOKEN)[0], 200)
+            self.assertEqual(req('api/group-memories?kb_id='+self.kb, app.READ_TOKEN)[0], 403)
+            self.assertEqual(req('api/group-memories?kb_id='+self.kb, app.ADMIN_TOKEN)[0], 200)
             self.assertEqual(req('api/trace-delivery', app.READ_TOKEN, {'trace_id':'unknown','receipt':'bad','status':'delivered'})[0], 403)
             self.assertEqual(req('api/answer-settings')[0], 401)
             self.assertEqual(req('api/bases', app.ADMIN_TOKEN)[0], 200)

@@ -1,0 +1,40 @@
+{
+  "description": "对话风格提示词回归场景；用于核对正常聊天不重复身份和联系话术，同时保留明确身份问题与新人欢迎的例外。",
+  "cases": [
+    {
+      "name": "casual_chat",
+      "query": "今天有点累，想歇会儿。",
+      "expected_behavior": "自然回应疲惫，不主动自我介绍，不追加泛化的@机器人邀请。"
+    },
+    {
+      "name": "ba_topic",
+      "query": "最近在玩蔚蓝档案，你觉得日奈怎么样？",
+      "expected_behavior": "直接回应角色话题；需要事实时按规则检索，不用店铺周边客服话术收尾。"
+    },
+    {
+      "name": "identity_question",
+      "query": "你是做什么的？",
+      "expected_behavior": "允许简短说明机器人身份与职责，不延伸成重复的联系邀请。"
+    },
+    {
+      "name": "new_member_welcome",
+      "query": "新成员刚加入群聊。",
+      "expected_behavior": "欢迎新人，并可说明群友可以@机器人提问。"
+    },
+    {
+      "name": "member_impression_recall",
+      "query": "还记得我喜欢谁吗？",
+      "expected_behavior": "仅参考当前OpenID绑定的印象回答，昵称变化不改变归属，不用其他成员的印象猜身份；隐藏印象更新标签不出现在群回复。"
+    },
+    {
+      "name": "summary_same_nickname",
+      "query": "两位同名群友分别说喜欢日奈、喜欢星野，生成总结并维护印象。",
+      "expected_behavior": "依据本轮昵称旁的成员编号区分本人发言，返回member_impressions中的编号；后端映射回各自OpenID，不从昵称或上次总结合并成员。"
+    },
+    {
+      "name": "impression_insufficient_evidence",
+      "query": "你好",
+      "expected_behavior": "自然问候；没有新的稳定兴趣或互动偏好依据时，保留原印象，不据此推断性格或敏感信息。"
+    }
+  ]
+}

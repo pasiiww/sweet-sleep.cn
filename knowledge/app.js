@@ -3,7 +3,9 @@ const $ = id => document.getElementById(id);
 const state = { token: '', bases: [], selected: '', editBase: null, editDoc: null, context: '', settings: {}, embedding: false };
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 document.querySelector('.sidebar nav').insertAdjacentHTML('beforeend','<button data-view="products" class="nav-item"><span>▦</span> 社团制品</button>');
-document.querySelector('.main-content .footer').insertAdjacentHTML('beforebegin',`<section id="view-products" class="view" hidden><section class="panel"><div class="panel-heading"><div><h2>社团制品</h2><p>按系列与角色整理制品，各类型价格仅供参考，具体以平台为准。</p></div><button id="product-add" class="primary">＋ 新增制品</button></div><div class="toolbar"><label>所属知识库<select id="product-base"></select></label><label class="search-label"><input id="product-search" placeholder="搜索系列、角色、制品类型" aria-label="搜索制品"></label><button id="product-refresh">查询 / 刷新</button></div><div class="table-wrap"><table><thead><tr><th>图片</th><th>系列 / 角色</th><th>类型 / 参考价</th><th>平台链接</th><th>机器人检索</th><th>操作</th></tr></thead><tbody id="product-rows"></tbody></table></div><p id="product-empty" class="empty">暂无制品，点击右上角添加。</p></section></section>`);
+document.querySelector('.sidebar nav').insertAdjacentHTML('beforeend','<button data-view="drinks" class="nav-item"><span>☕</span> 饮品推荐</button>');
+document.querySelector('.main-content .footer').insertAdjacentHTML('beforebegin',`<section id="view-drinks" class="view" hidden><section class="panel"><div class="panel-heading"><div><div class="section-kicker">RANDOM DRINK PICK</div><h2>今天喝什么 · 推荐清单</h2><p>群友发送“/今天喝什么”时，机器人会结合杭州天气，从这里推荐两款候选。可编辑品牌和饮品，也可添加、删除或恢复初始清单。</p></div><div class="actions"><button id="drink-add">＋ 添加饮品</button><button id="drink-restore">恢复初始清单</button><button id="drink-refresh">刷新</button></div></div><div class="info-box">初始内容按品牌公开的主推产品与长销经典整理，方便群内天气推荐，不代表全国销量排名；产品与供应会随地区和季节变化，请按需要维护。</div><div class="table-wrap"><table class="drink-table"><thead><tr><th>品牌</th><th>推荐饮品</th><th>适合温度</th><th>操作</th></tr></thead><tbody id="drink-rows"></tbody></table></div><div id="drink-empty" class="empty" hidden><h3>清单还是空的</h3><p>添加几项后，群友就能用“/今天喝什么”挑两款啦。</p></div><div class="panel-footer"><span id="drink-count" role="status"></span><button id="drink-save" class="primary">保存清单</button></div></section></section><section id="view-products" class="view" hidden><section class="panel"><div class="panel-heading"><div><h2>社团制品</h2><p>按系列与角色整理制品，各类型价格仅供参考，具体以平台为准。</p></div><button id="product-add" class="primary">＋ 新增制品</button></div><div class="toolbar"><label>所属知识库<select id="product-base"></select></label><label class="search-label"><input id="product-search" placeholder="搜索系列、角色、制品类型" aria-label="搜索制品"></label><button id="product-refresh">查询 / 刷新</button></div><div class="table-wrap"><table><thead><tr><th>图片</th><th>系列 / 角色</th><th>类型 / 参考价</th><th>平台链接</th><th>机器人检索</th><th>操作</th></tr></thead><tbody id="product-rows"></tbody></table></div><p id="product-empty" class="empty">暂无制品，点击右上角添加。</p></section></section>`);
+document.querySelector('#view-drinks').insertAdjacentHTML('afterbegin',`<form id="drink-weather-form" class="panel form-panel drink-weather-form"><div class="section-kicker">HANGZHOU WEATHER</div><h2>杭州天气推荐</h2><p class="muted">配置和风天气 API Host 与 Key。服务端读取杭州每日最高温：高于27℃偏向冷饮，低于18℃偏向热饮；中间区间和前一天已保存的最高温预报比较，升降至少3℃时跟随变化，否则随机挑选。天气接口不含昨日实况；首次没有前一天记录、未配置或接口失败时会随机推荐。</p><div class="drink-weather-fields"><label>API Host<input id="drink-weather-host" maxlength="253" placeholder="例如：xxxx.xy.qweatherapi.com"><small>在和风天气开发者控制台的设置页查看。</small></label><label>API Key<input id="drink-weather-key" type="password" autocomplete="new-password" placeholder="留空则保留已保存的 Key"><small id="drink-weather-key-status">Key 只存放于服务端，不会返回浏览器。</small></label></div><label class="checkbox"><input id="drink-weather-clear-key" type="checkbox">清除已保存的 API Key</label><div class="actions"><button class="primary" type="submit">保存天气设置</button><button id="drink-weather-test" type="button">测试杭州天气</button></div><p id="drink-weather-status" class="hint" role="status"></p><p class="hint">天气服务由 <a href="https://www.qweather.com" target="_blank" rel="noopener noreferrer">和风天气</a> 驱动。API Key 保存在知识库服务端；后台会缓存天气15分钟。</p></form>`);
 document.body.insertAdjacentHTML('beforeend',`<dialog id="product-dialog"><form id="product-form"><div class="dialog-heading"><h2 id="product-title">新增制品</h2><button type="button" id="product-close" aria-label="关闭">×</button></div><div class="product-fields"><label>制品系列名<input name="series" maxlength="150" placeholder="可留空"></label><label>角色列表<textarea name="character" rows="3" maxlength="2000" placeholder="每行一个角色，例如：爱丽丝、凯伊、日奈" required></textarea></label></div><label>图片地址<input name="image" maxlength="2000" placeholder="粘贴图片地址，或选择本地图片"></label><label>上传制品图片<input id="product-file" type="file" accept="image/png,image/jpeg,image/gif"></label><p class="hint">PNG / JPG / GIF，最大5 MB。不会加入表情包库。</p><img id="product-preview" class="sticker-preview" alt="制品图片预览" hidden><div class="panel-heading"><h3>类型与通用参考价</h3><button type="button" id="product-type-add">＋ 添加类型</button></div><p class="hint">可选多种类型，也可输入自定义类型。价格单位为元，未知可留空。</p><datalist id="product-types"><option value="徽章"><option value="亚克力立牌"><option value="挂件"><option value="色纸"><option value="明信片"><option value="毛绒娃娃"><option value="手偶"><option value="贴纸"><option value="套组"></datalist><div id="product-types-rows"></div><div class="panel-heading"><h3>平台链接</h3><button type="button" id="product-link-add">＋ 添加平台</button></div><div id="product-links-rows"></div><label>备注<textarea name="notes" rows="3" maxlength="4000"></textarea></label><label class="checkbox"><input name="searchable" type="checkbox">供机器人检索</label><p class="hint">开启后同步到知识库，回答会提示参考价格以平台为准。关闭或删除时移除对应文档。</p><div class="dialog-actions"><button type="button" id="product-cancel">取消</button><button type="submit" class="primary">保存制品</button></div></form></dialog>`);
 let toastTimer;
 $('product-types-rows').insertAdjacentHTML('afterend',`<div class="panel-heading"><h3>角色 × 类型：单独规格</h3><button type="button" id="product-variant-add">＋ 添加规格</button></div><p class="hint">价格或售卖情况不同时，单独维护对应组合。留空价格表示参考类型价格。未配置组合不默认有货，以平台为准。</p><div id="product-variants-rows"></div>`);
@@ -77,6 +79,168 @@ async function busy(button, action) {
   try { await action(); } catch (error) { toast(error.message); }
   finally { button.disabled = false; button.textContent = previous; }
 }
+let drinkItems = [], drinkDefaults = [];
+function renderDrinkMenu() {
+  drinkItems = drinkItems.map(item=>({temperature:'both',...item}));
+  $('drink-rows').innerHTML = drinkItems.map((item,index)=>`<tr data-drink-row="${index}"><td><input data-drink-brand aria-label="第 ${index+1} 项品牌" maxlength="40" placeholder="例如：古茗" value="${esc(item.brand)}"></td><td><input data-drink-product aria-label="第 ${index+1} 项饮品" maxlength="80" placeholder="例如：生椰抹茶麻薯" value="${esc(item.product)}"></td><td><select data-drink-temperature aria-label="第 ${index+1} 项适合温度"><option value="cold" ${item.temperature==='cold'?'selected':''}>冷饮</option><option value="hot" ${item.temperature==='hot'?'selected':''}>热饮</option><option value="both" ${item.temperature==='both'?'selected':''}>冷热都可</option></select></td><td><button type="button" data-drink-delete="${index}" class="row-button delete">删除</button></td></tr>`).join('');
+  $('drink-empty').hidden = drinkItems.length > 0;
+  $('drink-count').textContent = `共 ${drinkItems.length} 项${drinkItems.length > 300 ? ' · 最多300项' : ''}`;
+}
+function collectDrinkMenu() {
+  return [...$('drink-rows').querySelectorAll('tr')].map(row=>({
+    brand: row.querySelector('[data-drink-brand]').value.trim(),
+    product: row.querySelector('[data-drink-product]').value.trim(),
+    temperature: row.querySelector('[data-drink-temperature]').value
+  }));
+}
+async function loadDrinkMenu() {
+  const data = await api('drink-menu');
+  drinkItems = Array.isArray(data.items) ? data.items.map(item=>({brand:item.brand,product:item.product})) : [];
+  drinkDefaults = Array.isArray(data.defaults) ? data.defaults.map(item=>({brand:item.brand,product:item.product})) : [];
+  renderDrinkMenu();
+}
+async function loadDrinkWeatherSettings() {
+  const cfg=await api('drink-weather-settings');
+  $('drink-weather-host').value=cfg.api_host||'';
+  $('drink-weather-key').value='';
+  $('drink-weather-clear-key').checked=false;
+  $('drink-weather-key-status').textContent=cfg.has_key?'已保存 Key；留空可保留。':'尚未配置 Key。';
+  $('drink-weather-status').textContent='';
+}
+$('drink-weather-form').onsubmit = event => { event.preventDefault(); busy(event.submitter, async () => {
+  const cfg=await api('drink-weather-settings','PUT',{api_host:$('drink-weather-host').value.trim(),api_key:$('drink-weather-key').value.trim(),clear_key:$('drink-weather-clear-key').checked});
+  $('drink-weather-key').value='';$('drink-weather-clear-key').checked=false;
+  $('drink-weather-key-status').textContent=cfg.has_key?'已保存 Key；留空可保留。':'尚未配置 Key。';
+  $('drink-weather-status').textContent=cfg.has_key?'设置已保存，可点击“测试杭州天气”确认。':'已保存 Host；尚未配置 Key，机器人会随机推荐。';
+  toast('天气设置已保存');
+}); };
+$('drink-weather-test').onclick = () => busy($('drink-weather-test'), async () => {
+  $('drink-weather-status').textContent='正在读取杭州天气…';
+  const data=await api('drink-weather?refresh=1');
+  if(!data.available){$('drink-weather-status').textContent=data.reason==='not_configured'?'请先填写 API Host 与 API Key。':'天气接口暂不可用，请检查 Host、Key 和订阅权限。';return;}
+  const change=data.yesterday_max==null?'暂缺昨天的记录':`昨天预报 ${Number(data.yesterday_max).toFixed(1)}℃，变化 ${Number(data.today_max-data.yesterday_max)>0?'+':''}${Number(data.today_max-data.yesterday_max).toFixed(1)}℃`;
+  $('drink-weather-status').textContent=`杭州今天最高 ${Number(data.today_max).toFixed(1)}℃；${change}。建议：${data.temperature_preference==='cold'?'冷饮':data.temperature_preference==='hot'?'热饮':'随机'}。`;
+});
+$('drink-refresh').onclick = () => loadDrinkMenu().catch(error=>toast(error.message));
+$('drink-add').onclick = () => {
+  if (drinkItems.length >= 300) { toast('最多维护300项'); return; }
+  drinkItems.push({brand:'',product:''}); renderDrinkMenu();
+  $('drink-rows').lastElementChild?.querySelector('[data-drink-brand]')?.focus();
+};
+$('drink-rows').onclick = event => {
+  const button=event.target.closest('[data-drink-delete]'); if(!button)return;
+  drinkItems.splice(Number(button.dataset.drinkDelete),1); renderDrinkMenu();
+};
+$('drink-restore').onclick = () => {
+  if(!confirm('用初始推荐清单替换当前内容？还需要点击“保存清单”才会生效。'))return;
+  drinkItems=drinkDefaults.map(item=>({...item})); renderDrinkMenu();
+};
+$('drink-save').onclick = () => busy($('drink-save'), async () => {
+  const items=collectDrinkMenu();
+  if(items.some(item=>!item.brand||!item.product))throw new Error('请补全每一项的品牌和饮品名称');
+  const result=await api('drink-menu','PUT',{items});
+  drinkItems=result.items;renderDrinkMenu();toast('饮品推荐清单已保存');
+});
+let groupMemoryGroups = [], groupMemoryItems = [], groupMemorySelected = null;
+function setGroupMemoryBases() {
+  const current = $('group-memory-base').value;
+  $('group-memory-base').innerHTML = state.bases.map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
+  $('group-memory-base').value = state.bases.some(b => b.id === current) ? current : state.selected;
+}
+function renderGroupMemoryGroups() {
+  const current = $('group-memory-group').value;
+  $('group-memory-group').innerHTML = '<option value="">请选择群聊</option>' + groupMemoryGroups.map(item =>
+    `<option value="${esc(item.group_id)}">${esc(item.group_id)} · ${item.memory_count} 条记忆</option>`).join('');
+  $('group-memory-group').value = groupMemoryGroups.some(item => item.group_id === current) ? current : '';
+}
+function renderGroupMemoryItems() {
+  const group = groupMemoryGroups.find(item => item.group_id === groupMemorySelected);
+  $('group-memory-rows').innerHTML = groupMemoryItems.map(item => {
+    const source = item.subject === 'group' ? '群公共记忆' : `${item.first_nickname || '群成员'} · ${item.member_key}`;
+    const isImpression = item.subject === 'member' && item.content.startsWith('群友印象：');
+    const edit = isImpression ? `<button class="row-button" data-group-impression-edit="${esc(item.id)}">编辑印象</button>` : '';
+    return `<tr data-group-memory-item="${esc(item.id)}"><td>${esc(item.content)}</td><td>${esc(source)}</td><td>${esc(new Date(item.updated * 1000).toLocaleString())}</td><td class="group-memory-actions">${edit}<button class="row-button delete" data-group-memory-delete="${esc(item.id)}">删除</button></td></tr>`;
+  }).join('');
+  $('group-memory-empty').hidden = groupMemoryItems.length > 0 || !groupMemorySelected;
+  $('group-memory-count').textContent = groupMemorySelected ? `本群 ${groupMemoryItems.length} 条记忆` : '请选择群聊';
+  $('group-memory-toggle').disabled = !groupMemorySelected;
+  $('group-memory-toggle').textContent = group?.enabled === false ? '开启记忆' : '暂停记忆';
+  $('group-memory-clear').disabled = !groupMemorySelected || !groupMemoryItems.length;
+  $('group-memory-status').textContent = groupMemorySelected ? (group?.enabled === false ? '本群记忆已暂停，已有内容保留但不会读取或更新。' : '本群记忆已开启，群友的个人记忆与群公共记忆都在下面按群管理。') : '选择一个群聊后查看记忆。';
+}
+async function loadGroupMemoryGroups() {
+  setGroupMemoryBases();
+  const kb = $('group-memory-base').value;
+  if (!kb) { groupMemoryGroups = []; groupMemorySelected = null; renderGroupMemoryGroups(); renderGroupMemoryItems(); return; }
+  const result = await api('group-memories?kb_id=' + encodeURIComponent(kb));
+  groupMemoryGroups = result.groups || [];
+  renderGroupMemoryGroups();
+  if (groupMemorySelected && groupMemoryGroups.some(item => item.group_id === groupMemorySelected)) await loadGroupMemoryItems();
+  else { groupMemorySelected = ''; groupMemoryItems = []; renderGroupMemoryItems(); }
+}
+async function loadGroupMemoryItems() {
+  const kb = $('group-memory-base').value, group = $('group-memory-group').value;
+  groupMemorySelected = group;
+  if (!kb || !group) { groupMemoryItems = []; renderGroupMemoryItems(); return; }
+  const result = await api('group-memories?kb_id=' + encodeURIComponent(kb) + '&group_id=' + encodeURIComponent(group));
+  groupMemoryItems = result.items || [];
+  const summary = groupMemoryGroups.find(item => item.group_id === group);
+  if (summary) summary.enabled = result.enabled;
+  renderGroupMemoryItems();
+}
+$('group-memory-base').onchange = () => { groupMemorySelected = ''; groupMemoryItems = []; loadGroupMemoryGroups().catch(error => toast(error.message)); };
+$('group-memory-group').onchange = () => loadGroupMemoryItems().catch(error => toast(error.message));
+$('group-memory-refresh').onclick = () => loadGroupMemoryGroups().catch(error => toast(error.message));
+let groupImpressionEditing = null;
+$('group-impression-close').onclick = () => $('group-impression-dialog').close();
+$('group-memory-rows').onclick = event => {
+  const edit = event.target.closest('[data-group-impression-edit]');
+  if (edit) {
+    const item = groupMemoryItems.find(row => row.id === edit.dataset.groupImpressionEdit);
+    if (!item) return;
+    groupImpressionEditing = item;
+    $('group-impression-text').value = item.content.replace(/^群友印象：/, '');
+    $('group-impression-sentence').value = '';
+    $('group-impression-dialog').showModal();
+    return;
+  }
+  const button = event.target.closest('[data-group-memory-delete]');
+  if (!button) return;
+  const item = groupMemoryItems.find(row => row.id === button.dataset.groupMemoryDelete);
+  if (!item || !confirm(`删除这条群聊记忆？\n${item.content}`)) return;
+  busy(button, async () => {
+    await api('group-memories', 'DELETE', {kb_id: $('group-memory-base').value, group_id: groupMemorySelected, item_id: item.id});
+    await loadGroupMemoryGroups();
+    toast('记忆已删除');
+  });
+};
+async function saveGroupImpression(mode, button) {
+  const item = groupImpressionEditing;
+  const content = (mode === 'append' ? $('group-impression-sentence') : $('group-impression-text')).value.trim();
+  if (!item || !content) { toast(mode === 'append' ? '请填写要追加的一句话' : '请填写完整印象'); return; }
+  if (mode === 'append' && /[。！？!?；;]$/.test(content)) { toast('追加内容请填写一句话，不要加句末标点'); return; }
+  if (mode === 'replace' && !await confirmDelete('用当前文本全量覆盖这位群友的印象？')) return;
+  await api('group-memories', 'PUT', {kb_id: $('group-memory-base').value, group_id: groupMemorySelected,
+    item_id: item.id, impression_mode: mode, content});
+  $('group-impression-dialog').close(); groupImpressionEditing = null;
+  await loadGroupMemoryGroups(); await loadGroupMemoryItems();
+  toast(mode === 'append' ? '已追加一句印象' : '印象已全量覆盖');
+}
+$('group-impression-append').onclick = event => busy(event.currentTarget, () => saveGroupImpression('append', event.currentTarget));
+$('group-impression-replace').onclick = event => busy(event.currentTarget, () => saveGroupImpression('replace', event.currentTarget));
+$('group-memory-toggle').onclick = () => busy($('group-memory-toggle'), async () => {
+  const group = groupMemoryGroups.find(item => item.group_id === groupMemorySelected);
+  await api('group-memories', 'PUT', {kb_id: $('group-memory-base').value, group_id: groupMemorySelected, enabled: group?.enabled === false});
+  await loadGroupMemoryItems();
+  toast(group?.enabled === false ? '本群记忆已开启' : '本群记忆已暂停');
+});
+$('group-memory-clear').onclick = () => busy($('group-memory-clear'), async () => {
+  if (!await confirmDelete('清空这个群的全部长期记忆？此操作不可恢复。')) return;
+  await api('group-memories', 'DELETE', {kb_id: $('group-memory-base').value, group_id: groupMemorySelected});
+  await loadGroupMemoryGroups();
+  await loadGroupMemoryItems();
+  toast('本群记忆已清空');
+});
 function logout() {
   $('sticker-add').reset();
   previewTurns.clear();
@@ -89,12 +253,12 @@ $('login-form').addEventListener('submit', async event => {
   event.preventDefault(); $('login-error').textContent = '';
   await busy(event.submitter, async () => {
     state.token = $('token').value.trim();
-    try { await refresh(); await loadSettings(); await loadAnswerSettings(); $('login').hidden = true; $('workspace').hidden = false; $('token').value = ''; }
+    try { await refresh(); await loadSettings(); await loadAnswerSettings(); await loadModerationSettings(); $('login').hidden = true; $('workspace').hidden = false; $('token').value = ''; }
     catch (error) { $('login-error').textContent = error.message; state.token = ''; }
   });
 });
 $('logout').onclick = logout;
-const views = { stickers:['表情包库','给客服回复，添一点可爱的表情。'], learning:['持续学习','将管理员确认的信息，沉淀为可持续更新的知识。'], qa: ['QA 知识库', '整理常见问题，让每次回答都有合适的参考。'], traces: ['对话 Trace', '从问题到回复，查看每次检索与模型调用的过程。'], aliases: ['实体别名', '统一名称，让不同称呼都能找到同一份知识。'], documents: ['知识库', '把分散的信息，变成有据可依的回答。'], retrieve: ['召回测试', '在连接大模型之前，先看看知识是否被准确找到。'], integration: ['API 接入', '把你的知识，接入任意大模型工作流。'], settings: ['模型设置', '为你的知识库，连接语义理解能力。'] };
+const views = { stickers:['表情包库','给客服回复，添一点可爱的表情。'], learning:['持续学习','将管理员确认的信息，沉淀为可持续更新的知识。'], qa: ['QA 知识库', '整理常见问题，让每次回答都有合适的参考。'], traces: ['对话 Trace', '从问题到回复，查看每次检索与模型调用的过程。'], 'group-memories':['群聊记忆','按群查看和维护共享长期记忆，群内个人记忆也在这里管理。'], aliases: ['实体别名', '统一名称，让不同称呼都能找到同一份知识。'], documents: ['知识库', '把分散的信息，变成有据可依的回答。'], retrieve: ['召回测试', '在连接大模型之前，先看看知识是否被准确找到。'], integration: ['API 接入', '把你的知识，接入任意大模型工作流。'], settings: ['模型设置', '为你的知识库，连接语义理解能力。'], moderation: ['敏感词', '用清晰的规则拦截群聊中的敏感内容。'], drinks:['饮品推荐','维护群友“/今天喝什么”时会推荐的饮品清单。'] };
 document.querySelectorAll('[data-view]').forEach(button => button.onclick = () => {
   views.products=['社团制品','按系列与角色维护多类型制品、参考价格和平台链接。'];
   const view = button.dataset.view;
@@ -109,6 +273,9 @@ document.querySelectorAll('[data-view]').forEach(button => button.onclick = () =
   }
   if (view === 'learning') {loadLearning().catch(error=>toast(error.message));loadOwnerNotifications().catch(error=>toast(error.message));}
   if (view === 'traces') loadTraces(true).catch(error => toast(error.message));
+  if (view === 'group-memories') loadGroupMemoryGroups().catch(error => toast(error.message));
+  if (view === 'moderation') loadModerationStats().catch(error=>toast(error.message));
+  if (view === 'drinks') {loadDrinkMenu().catch(error=>toast(error.message));loadDrinkWeatherSettings().catch(error=>toast(error.message));}
 });
 async function refresh() {
   const { items } = await api('bases'); state.bases = items;
@@ -122,6 +289,7 @@ async function refresh() {
     $(id).innerHTML = items.map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join('');
     $(id).value = items.some(b => b.id === previous) ? previous : state.selected;
   }
+  setGroupMemoryBases();
   const traceBase = $('trace-base').value;
   $('trace-base').innerHTML = '<option value="">全部知识库</option>' + items.map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join('');
   $('trace-base').value = items.some(b => b.id === traceBase) ? traceBase : '';
@@ -239,7 +407,7 @@ $('settings-form').onsubmit = event => { event.preventDefault(); busy(event.subm
 }); };
 $('test-model').onclick = () => busy($('test-model'), async () => { const result = await api('settings/test', 'POST', {}); $('model-test-result').textContent = `连接成功 · ${result.dimensions} 维向量`; });
 
-const answerReasons = {daily_quota_exhausted:"今日咨询额度已用完",ok:'模型工作正常',output_truncated:'模型输出被截断，已回退原文',missing_key:'尚未填写 API Key，将返回最相关文档',disabled:'模型已关闭，将返回最相关文档',invalid_key:'API Key 无效，将返回最相关文档',insufficient_balance:'余额不足，将返回最相关文档',access_denied:'模型无访问权限，将返回最相关文档',rate_limited:'模型限流，已回退原文',network_error:'模型网络异常或超时，已回退原文',upstream_error:'模型服务异常，已回退原文',invalid_response:'模型响应异常，已回退原文',invalid_keywords:'检索词生成失败，已用原问题检索并回退原文',no_results:'没有检索命中，已转人工',insufficient_evidence:'资料不足以回答，已转人工',busy:'模型请求较多，已回退原文'};
+const answerReasons = {sensitive_word_triggered:'触发敏感词撤回',daily_quota_exhausted:"今日咨询额度已用完",ok:'模型工作正常',output_truncated:'模型输出被截断，已回退原文',missing_key:'尚未填写 API Key，将返回最相关文档',disabled:'模型已关闭，将返回最相关文档',invalid_key:'API Key 无效，将返回最相关文档',insufficient_balance:'余额不足，将返回最相关文档',access_denied:'模型无访问权限，将返回最相关文档',rate_limited:'模型限流，已回退原文',network_error:'模型网络异常或超时，已回退原文',upstream_error:'模型服务异常，已回退原文',invalid_response:'模型响应异常，已回退原文',invalid_keywords:'检索词生成失败，已用原问题检索并回退原文',no_results:'没有检索命中，已转人工',insufficient_evidence:'资料不足以回答，已转人工',busy:'模型请求较多，已回退原文'};
 let answerDefaults = '', keywordDefaults = '';
 async function loadAnswerSettings() {
   const cfg = await api('answer-settings');
@@ -260,6 +428,323 @@ async function loadAnswerSettings() {
   $('answer-key-status').textContent = cfg.has_key ? '已保存密钥，留空保留原密钥。' : '尚未保存 DeepSeek 密钥。';
   $('answer-status').textContent = !cfg.enabled ? answerReasons.disabled : !cfg.has_key ? answerReasons.missing_key : cfg.last_status ? '最近状态：' + (answerReasons[cfg.last_status.reason] || cfg.last_status.reason) + ' · ' + new Date(cfg.last_status.at).toLocaleString('zh-CN') : '已配置，下一次提问将调用模型。';
 }
+let moderationRules = [];
+let ruleSegments = [{type:'text', value:''}];
+let editingRule = -1;
+const ruleReserved = new Set(['\\', '(', ')', '/']);
+function escapeRuleText(value) {
+  return [...value].map(char => ruleReserved.has(char) ? '\\' + char : char).join('');
+}
+function parseRulePattern(pattern) {
+  const segments = [];
+  let literal = '';
+  const flush = () => { if (literal) segments.push({type:'text', value:literal}); literal = ''; };
+  for (let i = 0; i < pattern.length;) {
+    const char = pattern[i];
+    if (char === '\\' && i + 1 < pattern.length && ruleReserved.has(pattern[i + 1])) {
+      literal += pattern[i + 1]; i += 2; continue;
+    }
+    if (char === ')') throw new Error('规则括号不完整');
+    if (char === '/') throw new Error('规则分隔符位置不正确');
+    if (char !== '(') { literal += char; i++; continue; }
+    flush();
+    let options = [], option = '', j = i + 1, closed = false;
+    while (j < pattern.length) {
+      const current = pattern[j];
+      if (current === '\\' && j + 1 < pattern.length && ruleReserved.has(pattern[j + 1])) {
+        option += pattern[j + 1]; j += 2; continue;
+      }
+      if (current === '(') throw new Error('不支持嵌套选项段');
+      if (current === '/') { options.push(option.trim()); option = ''; j++; continue; }
+      if (current === ')') { options.push(option.trim()); closed = true; break; }
+      option += current; j++;
+    }
+    if (!closed || options.length < 2 || options.filter(value=>!value).length > 1 || !options.some(Boolean)) throw new Error('规则选项格式不完整');
+    segments.push({type:'choice', choices:options.filter(Boolean), allowEmpty:options.includes('')});
+    i = j + 1;
+  }
+  flush();
+  return segments.length ? segments : [{type:'text', value:''}];
+}
+function ruleOptions(segment) {
+  const choices = (segment.choices || []).map(value=>value.trim()).filter(Boolean);
+  if (choices.length < (segment.allowEmpty ? 1 : 2)) throw new Error('一个选项段至少需要两个写法；允许为空时至少写一个');
+  return [...choices, ...(segment.allowEmpty ? [''] : [])];
+}
+function serializeRuleSegments(segments) {
+  const pattern = segments.map(segment => segment.type === 'text'
+    ? escapeRuleText((segment.value || '').trim())
+    : `(${ruleOptions(segment).map(escapeRuleText).join('/')})`).join('');
+  if (!pattern) throw new Error('请至少填写一段实际内容');
+  if ([...pattern].length > 80) throw new Error('一条规则最多80个字符');
+  if (!expandRuleSegments(segments).length) throw new Error('规则不能只包含空项');
+  return pattern;
+}
+function expandRuleSegments(segments, limit=256) {
+  let variants = [''];
+  for (const segment of segments) {
+    if (segment.type === 'text') {
+      const value = (segment.value || '').trim();
+      variants = variants.map(prefix=>prefix + value);
+      continue;
+    }
+    const options = ruleOptions(segment);
+    if (variants.length * options.length > limit) throw new Error(`组合过多，单条规则最多${limit}种`);
+    variants = variants.flatMap(prefix=>options.map(option=>prefix + option));
+  }
+  return [...new Set(variants.filter(Boolean))];
+}
+function ruleExpansionCount(pattern) {
+  try { return expandRuleSegments(parseRulePattern(pattern)).length; } catch { return 1; }
+}
+function ruleVariants(pattern) {
+  try { return expandRuleSegments(parseRulePattern(pattern)); } catch { return [pattern]; }
+}
+function createRuleSegment(type) {
+  return type === 'choice'
+    ? {type:'choice', choices:['',''], allowEmpty:false}
+    : {type:'text', value:''};
+}
+function focusRuleSegment(index, type) {
+  requestAnimationFrame(() => {
+    const selector = type === 'choice'
+      ? `[data-rule-choice="${index}"][data-choice-index="0"]`
+      : `[data-rule-text="${index}"]`;
+    $('moderation-rule-builder').querySelector(selector)?.focus();
+  });
+}
+function insertRuleSegment(index, type) {
+  const boundedIndex = Math.max(0, Math.min(index, ruleSegments.length));
+  ruleSegments.splice(boundedIndex, 0, createRuleSegment(type));
+  renderRuleBuilder();
+  focusRuleSegment(boundedIndex, type);
+}
+function moveRuleSegment(from, to) {
+  if (from < 0 || from >= ruleSegments.length || to < 0 || to >= ruleSegments.length || from === to) return;
+  const [segment] = ruleSegments.splice(from, 1);
+  ruleSegments.splice(to, 0, segment);
+  renderRuleBuilder();
+}
+function renderRuleInsertSlot(index) {
+  const label = index === 0 ? '在最前添加' : index === ruleSegments.length ? '在末尾添加' : '在此添加';
+  return `<div class="rule-insert-slot" data-insert-index="${index}"><button type="button" class="insert-toggle" data-toggle-insert aria-expanded="false">＋ ${label}</button><div class="rule-insert-options" role="group" aria-label="选择要插入的段落" hidden><button type="button" data-insert-type="text" data-insert-index="${index}">固定文本</button><button type="button" data-insert-type="choice" data-insert-index="${index}">选项段</button></div></div>`;
+}
+function renderRuleSegment(segment, index) {
+  const kind = segment.type === 'text' ? '固定文本' : '选项段';
+  const toolbar = `<div class="segment-heading"><div class="segment-identity"><button type="button" class="drag-handle" draggable="true" data-drag-handle="${index}" aria-label="拖动第 ${index + 1} 段" title="按住拖动排序">⠿</button><strong>${kind} ${index + 1}</strong></div><div class="segment-controls"><button type="button" data-move-segment="-1" data-segment-index="${index}" aria-label="上移第 ${index + 1} 段" title="上移" ${index === 0 ? 'disabled' : ''}>↑</button><button type="button" data-move-segment="1" data-segment-index="${index}" aria-label="下移第 ${index + 1} 段" title="下移" ${index === ruleSegments.length - 1 ? 'disabled' : ''}>↓</button><button type="button" class="danger" data-remove-segment="${index}">移除</button></div></div>`;
+  if (segment.type === 'text') {
+    return `<div class="rule-segment fixed-segment" data-segment-index="${index}">${toolbar}<label>要匹配的固定文本<input data-rule-text="${index}" maxlength="80" value="${esc(segment.value)}" placeholder="例如：射"></label></div>`;
+  }
+  return `<div class="rule-segment choice-segment" data-segment-index="${index}">${toolbar}<div class="choice-inputs">${segment.choices.map((value,choiceIndex)=>`<label>写法 ${choiceIndex + 1}<input data-rule-choice="${index}" data-choice-index="${choiceIndex}" maxlength="80" value="${esc(value)}" placeholder="输入一种写法"></label>`).join('')}</div><div class="choice-footer"><button type="button" data-add-option="${index}" ${segment.choices.length>=16?'disabled':''}>＋ 添加写法</button><label class="checkbox"><input type="checkbox" data-rule-empty="${index}" ${segment.allowEmpty?'checked':''}>允许这一段为空</label></div></div>`;
+}
+function renderRuleBuilder() {
+  $('moderation-rule-builder').innerHTML = ruleSegments.map((segment,index) =>
+    `${renderRuleInsertSlot(index)}${renderRuleSegment(segment,index)}`).join('') + renderRuleInsertSlot(ruleSegments.length);
+  updateRulePreview();
+}
+function updateRulePreview() {
+  const preview = $('moderation-rule-preview');
+  try {
+    const variants = expandRuleSegments(ruleSegments);
+    if (!variants.length) { preview.textContent = '填写内容后，这里会显示匹配组合。'; return; }
+    const visible = variants.slice(0, 16).map(value=>`<span class="rule-chip">${esc(value)}</span>`).join('');
+    preview.innerHTML = `<strong>${variants.length} 种匹配组合</strong><div class="rule-chip-list">${visible}${variants.length>16?`<span class="hint">另有 ${variants.length-16} 种</span>`:''}</div>`;
+  } catch (error) { preview.textContent = error.message; }
+}
+function resetRuleBuilder() {
+  ruleSegments = [{type:'text', value:''}]; editingRule = -1;
+  $('moderation-builder-title').textContent = '添加规则';
+  $('moderation-rule-submit').textContent = '加入列表';
+  renderRuleBuilder();
+}
+function renderModerationRules() {
+  $('moderation-rule-count').textContent = `${moderationRules.length} / 100`;
+  const expansionCount = moderationRules.reduce((sum,pattern)=>sum + ruleExpansionCount(pattern),0);
+  $('moderation-expansion-count').textContent = `${expansionCount.toLocaleString()} / 2000 组合`;
+  $('moderation-rule-list').innerHTML = moderationRules.length ? moderationRules.map((pattern,index)=>{
+    let summary;
+    try { summary = parseRulePattern(pattern).map(segment=>segment.type==='text'
+      ? (segment.value ? `<span class="rule-literal">${esc(segment.value)}</span>` : '')
+      : `<span class="rule-choice">${segment.choices.map(choice=>`<i>${esc(choice)}</i>`).join('<b>或</b>')}${segment.allowEmpty?'<em>可为空</em>':''}</span>`).join(''); }
+    catch { summary = `<span class="rule-literal">${esc(pattern)}</span>`; }
+    return `<article class="moderation-rule"><div class="moderation-rule-summary">${summary}</div><div class="actions"><button type="button" data-edit-rule="${index}">编辑</button><button type="button" class="danger" data-delete-rule="${index}">删除</button></div></article>`;
+  }).join('') : '<div class="empty"><h3>还没有敏感词规则</h3><p>从左侧添加一个普通词，或组合多个选项。</p></div>';
+}
+async function loadModerationSettings() {
+  const cfg = await api('moderation-settings');
+  moderationRules = Array.isArray(cfg.sensitive_words) ? cfg.sensitive_words : [];
+  $('harassment-warning-enabled').checked = cfg.harassment_warning_enabled !== false;
+  $('harassment-mute-enabled').checked = cfg.harassment_mute_enabled === true;
+  $('harassment-mute-threshold').value = cfg.harassment_mute_threshold ?? 3;
+  $('harassment-mute-duration').value = cfg.harassment_mute_duration_minutes ?? 10;
+  resetRuleBuilder(); renderModerationRules();
+  await loadModerationStats();
+}
+async function loadModerationStats() {
+  const [stats, pending] = await Promise.all([api('moderation-recalls'), api('moderation-candidates')]);
+  $('moderation-stats').textContent = `累计命中 ${Number(stats.total || 0).toLocaleString()} 次（按触发计，不受撤回结果影响） · 当前 ${moderationRules.length} 条规则`;
+  const items = pending.items || [];
+  $('moderation-candidates').innerHTML = `<div class="candidate-heading"><strong>待审核词条</strong><span class="badge">${items.length}</span></div>${items.length ? items.map((item,index)=>`<div class="moderation-candidate"><span><b>${esc(item.term)}</b><small>命中 ${Number(item.hit_count).toLocaleString()} 次 · 最近 ${esc(new Date(item.last_seen).toLocaleString())}</small></span><div class="actions"><button type="button" data-moderation-review="approve" data-index="${index}">加入规则</button><button type="button" data-moderation-review="reject" data-index="${index}">忽略</button></div></div>`).join('') : '<p class="hint">当前没有待审核词条。</p>'}`;
+  $('moderation-candidates').onclick = event => {
+    const button = event.target.closest('[data-moderation-review]');
+    if (!button) return;
+    const item = items[Number(button.dataset.index)];
+    if (!item) return;
+    busy(button, async () => {
+      const decision = button.dataset.moderationReview;
+      const alreadyIncluded = moderationRules.some(rule=>ruleVariants(rule).some(value=>value.toLocaleLowerCase()===item.term.toLocaleLowerCase()));
+      if (decision === 'approve' && !alreadyIncluded && moderationRules.length >= 100) throw new Error('规则已满，请先删除一条或保存已有改动');
+      if (decision === 'approve' && !alreadyIncluded && moderationRules.reduce((sum,rule)=>sum + ruleExpansionCount(rule),0) >= 2000) throw new Error('组合数已满，请先整理规则');
+      await api('moderation-candidates', 'POST', {term:item.term, decision});
+      if (decision === 'approve' && !alreadyIncluded) {
+        moderationRules.push(item.term); renderModerationRules();
+      }
+      await loadModerationStats();
+      toast(decision === 'approve' ? `已加入规则：${item.term}` : `已忽略：${item.term}`);
+    });
+  };
+}
+$('moderation-rule-builder').addEventListener('input', event => {
+  const textInput = event.target.closest('[data-rule-text]');
+  const choiceInput = event.target.closest('[data-rule-choice]');
+  if (textInput) ruleSegments[Number(textInput.dataset.ruleText)].value = textInput.value;
+  if (choiceInput) ruleSegments[Number(choiceInput.dataset.ruleChoice)].choices[Number(choiceInput.dataset.choiceIndex)] = choiceInput.value;
+  if (event.target.matches('[data-rule-empty]')) ruleSegments[Number(event.target.dataset.ruleEmpty)].allowEmpty = event.target.checked;
+  updateRulePreview();
+});
+$('moderation-rule-builder').addEventListener('change', event => {
+  if (event.target.matches('[data-rule-empty]')) {
+    ruleSegments[Number(event.target.dataset.ruleEmpty)].allowEmpty = event.target.checked;
+    updateRulePreview();
+  }
+});
+$('moderation-rule-builder').addEventListener('click', event => {
+  const toggle = event.target.closest('[data-toggle-insert]');
+  const insert = event.target.closest('[data-insert-type]');
+  const move = event.target.closest('[data-move-segment]');
+  const remove = event.target.closest('[data-remove-segment]');
+  const addOption = event.target.closest('[data-add-option]');
+  if (toggle) {
+    const options = toggle.parentElement.querySelector('.rule-insert-options');
+    options.hidden = !options.hidden;
+    toggle.setAttribute('aria-expanded', String(!options.hidden));
+    return;
+  }
+  if (insert) {
+    insertRuleSegment(Number(insert.dataset.insertIndex), insert.dataset.insertType);
+    return;
+  }
+  if (move) {
+    moveRuleSegment(Number(move.dataset.segmentIndex), Number(move.dataset.moveSegment) + Number(move.dataset.segmentIndex));
+    return;
+  }
+  if (remove) ruleSegments.splice(Number(remove.dataset.removeSegment), 1);
+  else if (addOption) ruleSegments[Number(addOption.dataset.addOption)].choices.push('');
+  else return;
+  if (!ruleSegments.length) ruleSegments = [{type:'text', value:''}];
+  renderRuleBuilder();
+});
+let draggedSegmentIndex = null;
+const ruleBuilder = $('moderation-rule-builder');
+ruleBuilder.addEventListener('dragstart', event => {
+  const handle = event.target.closest('[data-drag-handle]');
+  if (!handle || !event.dataTransfer) return;
+  draggedSegmentIndex = Number(handle.dataset.dragHandle);
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/plain', String(draggedSegmentIndex));
+  handle.closest('.rule-segment').classList.add('dragging');
+});
+ruleBuilder.addEventListener('dragover', event => {
+  const slot = event.target.closest('.rule-insert-slot');
+  if (!slot || draggedSegmentIndex === null) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'move';
+  ruleBuilder.querySelectorAll('.rule-insert-slot.drag-over').forEach(item=>item.classList.remove('drag-over'));
+  slot.classList.add('drag-over');
+});
+ruleBuilder.addEventListener('dragleave', event => {
+  const slot = event.target.closest('.rule-insert-slot');
+  if (slot && !slot.contains(event.relatedTarget)) slot.classList.remove('drag-over');
+});
+ruleBuilder.addEventListener('drop', event => {
+  const slot = event.target.closest('.rule-insert-slot');
+  if (!slot || !event.dataTransfer) return;
+  event.preventDefault();
+  const from = draggedSegmentIndex ?? Number(event.dataTransfer.getData('text/plain'));
+  let to = Number(slot.dataset.insertIndex);
+  if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || from >= ruleSegments.length) return;
+  if (from < to) to--;
+  moveRuleSegment(from, to);
+  draggedSegmentIndex = null;
+});
+ruleBuilder.addEventListener('dragend', () => {
+  draggedSegmentIndex = null;
+  ruleBuilder.querySelectorAll('.dragging,.drag-over').forEach(item=>item.classList.remove('dragging','drag-over'));
+});
+$('add-rule-text').onclick = () => insertRuleSegment(ruleSegments.length, 'text');
+$('add-rule-choice').onclick = () => insertRuleSegment(ruleSegments.length, 'choice');
+$('reset-rule-builder').onclick = resetRuleBuilder;
+$('moderation-rule-list').onclick = event => {
+  const edit = event.target.closest('[data-edit-rule]'), remove = event.target.closest('[data-delete-rule]');
+  if (edit) {
+    editingRule = Number(edit.dataset.editRule);
+    try { ruleSegments = parseRulePattern(moderationRules[editingRule]); }
+    catch { ruleSegments = [{type:'text', value:moderationRules[editingRule]}]; }
+    $('moderation-builder-title').textContent = '编辑规则'; $('moderation-rule-submit').textContent = '保存修改';
+    renderRuleBuilder(); $('moderation-rule-form').scrollIntoView({behavior:'smooth',block:'center'});
+  } else if (remove) {
+    const index = Number(remove.dataset.deleteRule);
+    moderationRules.splice(index, 1);
+    if (editingRule === index) resetRuleBuilder(); else if (editingRule > index) editingRule--;
+    renderModerationRules();
+  }
+};
+$('moderation-rule-form').onsubmit = event => { event.preventDefault(); busy(event.submitter, async () => {
+  const pattern = serializeRuleSegments(ruleSegments);
+  const index = moderationRules.findIndex((rule,i)=>rule.toLocaleLowerCase()===pattern.toLocaleLowerCase() && i!==editingRule);
+  if (index >= 0) throw new Error('这条规则已经在列表中');
+  if (editingRule < 0 && moderationRules.length >= 100) throw new Error('规则已达到100条上限');
+  const previousRule = editingRule >= 0 ? moderationRules[editingRule] : null;
+  if (editingRule < 0) moderationRules.push(pattern); else moderationRules[editingRule] = pattern;
+  const total = moderationRules.reduce((sum,rule)=>sum + ruleExpansionCount(rule),0);
+  if (total > 2000) { if (editingRule < 0) moderationRules.pop(); else moderationRules[editingRule] = previousRule; throw new Error('规则组合总数不能超过2000种'); }
+  renderModerationRules(); resetRuleBuilder();
+}); };
+$('moderation-bulk-submit').onclick = () => busy($('moderation-bulk-submit'), async () => {
+  const seenTerms = new Set(), terms = [];
+  for (const value of $('moderation-bulk-words').value.split(/\r?\n/).map(word=>word.trim()).filter(Boolean)) {
+    const key = value.toLocaleLowerCase(); if (!seenTerms.has(key)) { seenTerms.add(key); terms.push(value); }
+  }
+  if (!terms.length) throw new Error('请先填写要添加的词语');
+  if (terms.some(term=>[...term].length>80)) throw new Error('每条普通词最多80个字符');
+  const known = new Set(moderationRules.flatMap(rule=>ruleVariants(rule).map(term=>term.toLocaleLowerCase())));
+  const additions = terms.filter(term=>!known.has(term.toLocaleLowerCase())).map(escapeRuleText);
+  if (!additions.length) throw new Error('这些词语都已在规则中');
+  if (moderationRules.length + additions.length > 100) throw new Error('规则总数不能超过100条');
+  const total = moderationRules.reduce((sum,rule)=>sum + ruleExpansionCount(rule),0) + additions.length;
+  if (total > 2000) throw new Error('规则组合总数不能超过2000种');
+  moderationRules.push(...additions); $('moderation-bulk-words').value = '';
+  renderModerationRules(); toast(`已加入 ${additions.length} 条普通词，请保存规则`);
+});
+$('moderation-settings-form').onsubmit = event => { event.preventDefault(); busy(event.submitter, async () => {
+  if (moderationRules.reduce((sum,rule)=>sum + ruleExpansionCount(rule),0) > 2000) throw new Error('规则组合总数不能超过2000种');
+  const muteThreshold = Number($('harassment-mute-threshold').value);
+  const muteDuration = Number($('harassment-mute-duration').value);
+  if (!Number.isInteger(muteThreshold) || muteThreshold < 1 || muteThreshold > 20) throw new Error('触发次数需为1至20之间的整数');
+  if (!Number.isInteger(muteDuration) || muteDuration < 1 || muteDuration > 1440) throw new Error('禁言时长需为1至1440分钟');
+  const result = await api('moderation-settings', 'PUT', {
+    sensitive_words:moderationRules,
+    harassment_warning_enabled:$('harassment-warning-enabled').checked,
+    harassment_mute_enabled:$('harassment-mute-enabled').checked,
+    harassment_mute_threshold:muteThreshold,
+    harassment_mute_duration_minutes:muteDuration,
+  });
+  moderationRules = result.sensitive_words || moderationRules;
+  renderModerationRules(); await loadModerationStats();
+  $('moderation-save-status').textContent = '已保存，机器人约15秒内同步生效。';
+  toast('敏感词规则已保存');
+}); };
+$('moderation-refresh').onclick = () => loadModerationSettings().catch(error=>toast(error.message));
 $('restore-keyword-prompt').onclick = () => { $('keyword-prompt').value = keywordDefaults; toast('已恢复，保存后生效'); };
 $('restore-prompt').onclick = () => { $('answer-prompt').value = answerDefaults; toast('已恢复初版提示词，保存后生效'); };
 $('answer-settings-form').onsubmit = event => { event.preventDefault(); busy(event.submitter, async () => {
@@ -391,7 +876,7 @@ $('alias-rows').onclick = async event => {
 };
 
 let traceOffset = 0, traceTotal = 0, traceRequest = 0;
-const traceModes = {maintenance:'私聊维护',quota:'今日额度用完',model:'模型回答',document:'原文回退',handoff:'转人工',error:'异常',running:'处理中 / 未完成'};
+const traceModes = {maintenance:'私聊维护',moderation:'敏感词触发撤回',quota:'今日额度用完',model:'模型回答',document:'原文回退',handoff:'转人工',error:'异常',running:'处理中 / 未完成'};
 const traceOrigins = {qq_group:'QQ 群聊',qq_private:'QQ 私聊',preview:'后台预览',api:'API'};
 const traceDelivery = {pending:'未收到发送回执',delivered:'已发送',failed:'发送失败',not_applicable:'无需发送 QQ'};
 const traceTime = value => new Date(value * 1000).toLocaleString('zh-CN');
@@ -416,12 +901,38 @@ $('trace-prev').onclick = () => { traceOffset = Math.max(0,traceOffset-30); load
 $('trace-next').onclick = () => { traceOffset += 30; loadTraces().catch(error=>toast(error.message)); };
 $('close-trace').onclick = () => $('trace-dialog').close();
 const traceText = value => `<div class="trace-text">${esc(value || '无')}</div>`;
+function traceCacheUsage(call) {
+  const u = call.usage || {}, input = u.input_tokens ?? u.prompt_tokens;
+  const hit = u.input_token_details?.cache_read ?? u.prompt_cache_hit_tokens ?? u.prompt_tokens_details?.cached_tokens;
+  if (!Number.isInteger(input) || !Number.isInteger(hit) || input < 0 || hit < 0 || hit > input) return null;
+  return {input, hit, miss: input-hit};
+}
+function renderTraceCacheSummary(calls) {
+  const measured = calls.map(traceCacheUsage).filter(Boolean);
+  if (!measured.length) return '';
+  const total = measured.reduce((a,b)=>({input:a.input+b.input,hit:a.hit+b.hit,miss:a.miss+b.miss}),{input:0,hit:0,miss:0});
+  const ratio = total.input ? (100*total.hit/total.input).toFixed(1)+'%' : '—';
+  return `<p class="info-box">KV 缓存命中率 ${ratio} · 命中 ${total.hit} / 输入 ${total.input} tokens · 未命中 ${total.miss} tokens${measured.length<calls.length?' · '+(calls.length-measured.length)+' 次调用缺少缓存统计':''}</p>`;
+}
+function renderTraceModelCall(call, index) {
+  const label = {keywords_retry:'空召回重试',keywords:'生成检索词',agent:'Agent 调用',agent_final:'工具关闭后的最终回答'}[call.stage] || '生成回答';
+  const status = {ok:'成功',timeout:'超时',error:'失败',running:'处理中'}[call.status] || '';
+  const usage = call.usage || {}, input = usage.input_tokens ?? usage.prompt_tokens;
+  const output = usage.output_tokens ?? usage.completion_tokens;
+  const cache = traceCacheUsage(call);
+  const recordedContent = call.messages || Object.hasOwn(call, 'output');
+  return `<details><summary>第 ${index+1} 次 · ${esc(label)} · ${call.elapsed_ms ?? '—'} ms${status?' · '+status:''}${call.error?' · '+esc(call.error):''}</summary>
+    <p class="hint">输入 ${input ?? '—'} tokens · 输出 ${output ?? '—'} tokens · 缓存命中 ${cache?.hit ?? '—'} · 未命中 ${cache?.miss ?? '—'}${cache?.input?' · 命中率 '+(100*cache.hit/cache.input).toFixed(1)+'%':''}${call.tool_calls!=null?' · 请求工具 '+call.tool_calls+' 次':''}</p>
+    ${call.timeout_seconds!=null?`<p class="hint">本次调用时间上限：${call.timeout_seconds} 秒</p>`:''}
+    ${recordedContent?`<h4>实际输入消息</h4>${(call.messages||[]).map(message=>`<h5>${esc(message.role)}</h5>${traceText(message.content)}`).join('')}<h4>模型输出</h4>${traceText(typeof call.output==='object'?JSON.stringify(call.output,null,2):call.output)}`:'<p class="hint">此次仅记录调用统计，不保存模型推理、图片及完整工具结果。</p>'}
+    ${call.truncated?'<p class="hint">输出已截断</p>':''}</details>`;
+}
 $('trace-list').onclick = event => {
   const button = event.target.closest('[data-trace]');
   if (!button) return;
   busy(button, async () => {
     const row = await api('traces/'+button.dataset.trace), d = row.details;
-    $('trace-detail').innerHTML = `<div class="trace-meta"><span>${esc(traceTime(row.created))}</span><span>${esc(traceOrigins[row.origin])} · ${esc(row.kb_name)}</span><span>${esc(traceModes[row.mode])} · ${row.elapsed_ms} ms</span><span>${esc(traceDelivery[row.delivery])}</span></div><small>Trace ID：${esc(row.id)}<br>用户：${esc(row.user_id || '—')}<br>群：${esc(row.group_id || '—')}<br>会话：${esc(row.session_id || '—')}</small>${d.quota?`<h3>今日额度</h3><p>${d.quota.used} / ${d.quota.limit} 次 · 剩余 ${d.quota.remaining} 次 · ${esc(d.quota.day)}（北京时间）</p>`:''}<h3>用户问题</h3>${traceText(row.question)}<h3>生成的回复</h3>${traceText(row.answer || (d.sticker?'（仅表情包）':''))}<p class="hint">原因：${esc(answerReasons[row.reason] || row.reason || '未完成')}</p>${d.delivery?`<h3>QQ 实际发送内容</h3>${traceText(d.delivery.content)}<p class="hint">${esc(d.delivery.error || '')}</p>`:''}${d.sticker_policy?.mode==='advisory'?'<p class="hint">频率建议：闲聊类可以较高频率使用表情包，也可以只回复表情包；店铺咨询类控制在50%的轮次以下。由模型自主选择，不强制拦截。</p>':d.sticker_policy?.allowed===false?'<p class="hint">历史规则：上一条已附图，本次只发文字。</p>':''}${d.sticker?`<h3>表情包</h3>${traceText(d.sticker.name)}<p>${esc(d.sticker_delivery?.status==='sent'?'已发送':d.sticker_delivery?.status==='failed'?'图片失败，回退文字':'已选择，尚无发送回执')} ${esc(d.sticker_delivery?.error||'')}</p>`:''}${d.retrieval_skipped?'<p class="hint">PE1 判断当前无需检索，已跳过召回。</p>':''}${d.maintenance?`<h3>私聊维护操作</h3>${traceText(JSON.stringify(d.maintenance,null,2))}`:''}<h3>最终检索词</h3>${traceText((d.search_terms||[]).map(group=>Array.isArray(group)?'['+group.join(' + ')+']':group).join(' / '))}<h3>别名说明</h3>${traceText(d.alias_context)}<h3>召回过程</h3>${(d.retrievals||[]).map((search,index)=>`<details open><summary>第 ${index+1} 次召回 · ${search.elapsed_ms} ms · ${(search.searches||[]).length} 组查询 · ${(search.results||[]).length} 个去重分段</summary>${(search.searches||[]).map(group=>`<p class="hint">${group.kind==='original'?'用户原文 · ':''}${esc(JSON.stringify(group.query))} · ${group.elapsed_ms} ms · ${group.hits.length} 个命中</p>${traceText(group.hits.map(hit=>(hit.source_type==='qa'?'QA · ':'文档 · ')+hit.title+' · ID '+hit.chunk_id+' · score '+hit.score).join('\n'))}`).join('')}${(search.results||[]).map(result=>`<details><summary>${result.source_type==='qa'?'QA · ':'文档 · '}${esc(result.title)} · ${result.source_type==='qa'?'参考答案':'分段 '+(result.ordinal+1)} · ${esc(result.document_id)}</summary>${traceText(result.content)}</details>`).join('')}</details>`).join('') || '<p class="hint">本次未执行检索。</p>'}<h3>模型调用</h3>${(d.model_calls||[]).map(call=>`<details><summary>${call.stage==='keywords_retry'?'空召回重试':call.stage==='keywords'?'生成检索词':'生成回答'} · ${call.elapsed_ms} ms${call.error?' · '+esc(call.error):''}</summary>${call.usage?`<p class="hint">输入 ${call.usage.prompt_tokens??"—"} tokens · 缓存命中 ${call.usage.prompt_cache_hit_tokens??"—"} · 未命中 ${call.usage.prompt_cache_miss_tokens??"—"}</p>`:''}<h4>实际输入消息</h4>${(call.messages||[]).map(message=>`<h5>${esc(message.role)}</h5>${traceText(message.content)}`).join('')}<h4>模型输出</h4>${traceText(typeof call.output==='object'?JSON.stringify(call.output,null,2):call.output)}${call.truncated?'<p class="hint">输出已截断</p>':''}</details>`).join('') || '<p class="hint">本次未调用模型。</p>'}<details><summary>携带的历史问答 · ${(d.history||[]).length/2} 轮</summary>${(d.history||[]).map(message=>`<h4>${message.role==='user'?'用户':'机器人'}</h4>${traceText(message.content)}`).join('')}</details><details><summary>本次模型与提示词</summary><p>${esc(d.model || '')}</p><h4>回答 System Prompt</h4>${traceText(d.system_prompt)}<h4>检索词提示词</h4>${traceText(d.keyword_prompt)}</details>${d.error_type?`<p class="error">异常类型：${esc(d.error_type)}</p>`:''}`;
+    $('trace-detail').innerHTML = `<div class="trace-meta"><span>${esc(traceTime(row.created))}</span><span>${esc(traceOrigins[row.origin])} · ${esc(row.kb_name)}</span><span>${esc(traceModes[row.mode])} · ${row.elapsed_ms} ms</span><span>${esc(traceDelivery[row.delivery])}</span></div><small>Trace ID：${esc(row.id)}<br>用户：${esc(row.user_id || '—')}<br>群：${esc(row.group_id || '—')}<br>会话：${esc(row.session_id || '—')}</small>${d.quota?`<h3>今日额度</h3><p>${d.quota.used} / ${d.quota.limit} 次 · 剩余 ${d.quota.remaining} 次 · ${esc(d.quota.day)}（北京时间）</p>`:''}<h3>用户问题</h3>${traceText(row.question)}<h3>生成的回复</h3>${traceText(row.answer || (d.sticker?'（仅表情包）':''))}<p class="hint">原因：${esc(answerReasons[row.reason] || row.reason || '未完成')}</p>${d.delivery?`<h3>QQ 实际发送内容</h3>${traceText(d.delivery.content)}<p class="hint">${esc(d.delivery.error || '')}</p>`:''}${d.sticker_policy?.mode==='advisory'?'<p class="hint">频率建议：闲聊类可以较高频率使用表情包，也可以只回复表情包；店铺咨询类控制在50%的轮次以下。由模型自主选择，不强制拦截。</p>':d.sticker_policy?.allowed===false?'<p class="hint">历史规则：上一条已附图，本次只发文字。</p>':''}${d.sticker?`<h3>表情包</h3>${traceText(d.sticker.name)}<p>${esc(d.sticker_delivery?.status==='sent'?'已发送':d.sticker_delivery?.status==='failed'?'图片失败，回退文字':'已选择，尚无发送回执')} ${esc(d.sticker_delivery?.error||'')}</p>`:''}${d.retrieval_skipped?'<p class="hint">PE1 判断当前无需检索，已跳过召回。</p>':''}${d.maintenance?`<h3>私聊维护操作</h3>${traceText(JSON.stringify(d.maintenance,null,2))}`:''}${d.moderation?`<h3>敏感词撤回事件</h3>${traceText(JSON.stringify(d.moderation,null,2))}<p class="hint">此 Trace 记录的是触发事件；QQ 撤回是否成功请查看机器人服务日志。</p>`:''}<h3>最终检索词</h3>${traceText((d.search_terms||[]).map(group=>Array.isArray(group)?'['+group.join(' + ')+']':group).join(' / '))}<h3>别名说明</h3>${traceText(d.alias_context)}<h3>召回过程</h3>${(d.retrievals||[]).map((search,index)=>`<details open><summary>第 ${index+1} 次召回 · ${search.elapsed_ms} ms · ${(search.searches||[]).length} 组查询 · ${(search.results||[]).length} 个去重分段</summary>${(search.searches||[]).map(group=>`<p class="hint">${group.kind==='original'?'用户原文 · ':''}${esc(JSON.stringify(group.query))} · ${group.elapsed_ms} ms · ${group.hits.length} 个命中</p>${traceText(group.hits.map(hit=>(hit.source_type==='qa'?'QA · ':'文档 · ')+hit.title+' · ID '+hit.chunk_id+' · score '+hit.score).join('\n'))}`).join('')}${(search.results||[]).map(result=>`<details><summary>${result.source_type==='qa'?'QA · ':'文档 · '}${esc(result.title)} · ${result.source_type==='qa'?'参考答案':'分段 '+(result.ordinal+1)} · ${esc(result.document_id)}</summary>${traceText(result.content)}</details>`).join('')}</details>`).join('') || '<p class="hint">本次未执行检索。</p>'}${d.tool_calls?.length?`<h3>工具执行</h3>${d.tool_calls.map(call=>`<p class="hint">${esc(call.name)} · ${esc(call.status)} · ${call.elapsed_ms ?? '—'} ms${call.error?' · '+esc(call.error):''}</p>`).join('')}`:''}<h3>模型调用</h3>${renderTraceCacheSummary(d.model_calls||[])}${(d.model_calls||[]).map(renderTraceModelCall).join('') || '<p class="hint">本次未调用模型。</p>'}<details><summary>携带的历史问答 · ${(d.history||[]).length/2} 轮</summary>${(d.history||[]).map(message=>`<h4>${message.role==='user'?'用户':'机器人'}</h4>${traceText(message.content)}`).join('')}</details><details><summary>本次模型与提示词</summary><p>${esc(d.model || '')}</p><h4>回答 System Prompt</h4>${traceText(d.system_prompt)}<h4>检索词提示词</h4>${traceText(d.keyword_prompt)}</details>${d.error_type?`<p class="error">异常类型：${esc(d.error_type)}</p>`:''}`;
     $('trace-dialog').showModal();
   });
 };
@@ -527,7 +1038,7 @@ $('learning-jobs').onclick=async event=>{try{
  const retry=event.target.closest('[data-learning-retry]');if(retry){await api(`learning/jobs/${retry.dataset.learningRetry}/retry`,'POST',{});await loadLearningJobs();return;}
  const b=event.target.closest('[data-learning-job]');if(!b)return;
  const row=await api(`learning/jobs/${b.dataset.learningJob}`),d=row.details;
- $('learning-detail').innerHTML=`<p>${esc(learningStates[row.status])} · 尝试 ${row.attempts} 次 · ${esc(row.error)}</p><p>Trace ID：${esc(row.id)} · ${esc(learningTriggers[d.trigger]||'')} · ${d.elapsed_ms||0} ms</p><h3>相关性判断</h3>${traceText(d.classification?JSON.stringify(d.classification,null,2):'尚未完成判断')}<h3>人工确认记录</h3>${traceText(JSON.stringify(d.reviews||[],null,2))}<h3>知识变更</h3>${(d.changes||[]).map(c=>`<details open><summary>${esc(c.action)}${c.confidence!=null?' · '+c.confidence+'%':''} · QA ${c.qa_id} · ${esc(c.qq||'')}</summary>${c.before?`<h4>更新前</h4>${traceText(c.before.answer)}<p>原更新时间：${esc(c.before.updated_at)}</p>`:''}${c.after?`<h4>${esc(c.after.question)}</h4>${traceText(c.after.answer)}<p>更新时间：${esc(c.after.updated_at)}</p>`:''}${c.reason?traceText(c.reason):''}${c.change_reason?traceText(c.change_reason):''}${c.proposed?traceText(JSON.stringify(c.proposed,null,2)):''}<h4>来源原话</h4>${traceText(c.quote||'')}<p>消息 ID：${esc(c.source_id)}</p></details>`).join('')||'<p>没有知识变更（闲聊、未执行或执行失败）。</p>'}<h3>聊天上下文</h3>${(d.context||[]).map(m=>`<h4>${esc(m.qq||'普通成员')} · ${esc(new Date(m.at*1000).toLocaleString())}${(d.batch_source_ids||[]).includes(m.message_id)?' · 本批来源':''}</h4>${traceText(m.content)}${m.reference&&(m.reference.quotes||[]).length?`<details open><summary>引用内容（仅用于理解回复对象）</summary>${(m.reference.quotes||[]).map(q=>traceText(q.content)).join('')}</details>`:''}`).join('')}<details><summary>上文去重索引</summary>${traceText(JSON.stringify(d.context_by_source||{},null,2))}</details><details><summary>引用 / @ 双方最近1小时 · 每对10条上文</summary>${traceText(JSON.stringify(d.pair_context_by_source||d.mention_context_by_source||{},null,2))}</details><details><summary>更新前的知识检索</summary>${traceText(JSON.stringify(d.retrievals||[],null,2))}</details><details><summary>模型输入 / 输出</summary>${traceText(JSON.stringify(d.model_calls||[],null,2))}</details>`;
+ $('learning-detail').innerHTML=`<p>${esc(learningStates[row.status])} · 尝试 ${row.attempts} 次 · ${esc(row.error)}</p><p>Trace ID：${esc(row.id)} · ${esc(learningTriggers[d.trigger]||'')} · ${d.elapsed_ms||0} ms</p><h3>相关性判断</h3>${traceText(d.classification?JSON.stringify(d.classification,null,2):'尚未完成判断')}<h3>人工确认记录</h3>${traceText(JSON.stringify(d.reviews||[],null,2))}<h3>知识变更</h3>${(d.changes||[]).map(c=>`<details open><summary>${esc(c.action)}${c.confidence!=null?' · '+c.confidence+'%':''} · QA ${c.qa_id} · ${esc(c.qq||'')}</summary>${c.before?`<h4>更新前</h4>${traceText(c.before.answer)}<p>原更新时间：${esc(c.before.updated_at)}</p>`:''}${c.after?`<h4>${esc(c.after.question)}</h4>${traceText(c.after.answer)}<p>更新时间：${esc(c.after.updated_at)}</p>`:''}${c.reason?traceText(c.reason):''}${c.change_reason?traceText(c.change_reason):''}${c.proposed?traceText(JSON.stringify(c.proposed,null,2)):''}<h4>来源原话</h4>${traceText(c.quote||'')}<p>消息 ID：${esc(c.source_id)}</p></details>`).join('')||'<p>没有知识变更（闲聊、未执行或执行失败）。</p>'}<h3>聊天上下文</h3>${(d.context||[]).map(m=>`<h4>${esc(m.qq||'普通成员')} · ${esc(new Date(m.at*1000).toLocaleString())}${(d.batch_source_ids||[]).includes(m.message_id)?' · 本批来源':''}</h4>${traceText(m.content)}${m.reference&&(m.reference.quotes||[]).length?`<details open><summary>引用内容（仅用于理解回复对象）</summary>${(m.reference.quotes||[]).map(q=>traceText(q.content)).join('')}</details>`:''}`).join('')}<details><summary>上文去重索引</summary>${traceText(JSON.stringify(d.context_by_source||{},null,2))}</details><details><summary>引用 / @ 双方最近1小时 · 每对10条上文</summary>${traceText(JSON.stringify(d.pair_context_by_source||d.mention_context_by_source||{},null,2))}</details><details><summary>更新前的知识检索</summary>${traceText(JSON.stringify(d.retrievals||[],null,2))}</details><details><summary>模型输入 / 输出</summary>${renderTraceCacheSummary(d.model_calls||[])}${traceText(JSON.stringify(d.model_calls||[],null,2))}</details>`;
  $('learning-dialog').showModal();
  }catch(error){toast(error.message);}};
 

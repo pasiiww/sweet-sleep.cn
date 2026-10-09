@@ -10,8 +10,8 @@ class RAGEvaluationTests(unittest.TestCase):
             summary = eval_rag.evaluate(kb)['summary']
         finally:
             temp.cleanup()
-        self.assertEqual(summary['positive'], 26)
-        self.assertEqual(summary['negative'], 3)
-        self.assertEqual(summary['all_gold_at_5'], 26)
-        self.assertEqual(summary['any_gold_at_1'], 26)
+        self.assertEqual(summary['positive'], 27)
+        self.assertEqual(summary['negative'], 5)
+        self.assertEqual(summary['all_gold_at_5'], 27)
+        self.assertEqual(summary['any_gold_at_1'], 27)
         self.assertEqual(summary['forbidden_at_5'], 0)

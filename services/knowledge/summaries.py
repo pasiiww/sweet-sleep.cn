@@ -75,6 +75,10 @@ def _existing_group_memory(app, kb, group_id):
     memory_scope = memories.scope(kb, 'qq_group', '', group_id)
     with app.db() as c:
         app.base(c, kb)
+
+        if not memories.enabled(c, memory_scope):
+            return []
+
         rows = c.execute('''SELECT content FROM conversation_memories
                             WHERE scope=? AND owner_openid='' ORDER BY updated DESC,created DESC''',
                          (memory_scope,)).fetchall()
@@ -84,6 +88,23 @@ def _existing_group_memory(app, kb, group_id):
 def respond(app, data):
     kb = app.string(data, 'kb_id', 128, True)
     group_id = app.string(data, 'group_id', 128)
+
+    raw_members = data.get('members', [])
+    if not isinstance(raw_members, list) or len(raw_members) > 400:
+        app.fail(400, 'members 格式无效')
+    members = {}
+    owners = set()
+    for item in raw_members:
+        if not isinstance(item, dict):
+            app.fail(400, '成员格式无效')
+        key, owner = item.get('key'), item.get('openid')
+        if (not isinstance(key, str) or not re.fullmatch(r'speaker[1-9][0-9]{0,2}', key)
+                or not isinstance(owner, str) or not owner or len(owner) > 128
+                or key in members or owner in owners):
+            app.fail(400, '成员标识无效')
+        owners.add(owner)
+        members[key] = {'openid': owner, 'name': memories.clean_member_name(item.get('name', ''))}
+
     transcript = app.string(data, 'transcript', 15000, True).strip()
     if not transcript:
         app.fail(400, '没有可总结的内容')
@@ -97,15 +118,51 @@ def respond(app, data):
         return {'ok': False, 'answer': '模型当前繁忙，请稍后重新发送 /总结。'}
     try:
         existing_memory = _existing_group_memory(app, kb, group_id)
+
+        member_context = []
+        if group_id and members:
+            with app.db() as c:
+                memory_scope = memories.scope(kb, 'qq_group', '', group_id)
+                if memories.enabled(c, memory_scope):
+                    member_context = [{'key': key, 'name': item['name'],
+                                       'impression': memories.impression(c, memory_scope, item['openid'])}
+                                      for key, item in members.items() if '[' + key + ']' in transcript]
         context = json.dumps({'existing_group_memory': existing_memory,
-                              'transcript': transcript}, ensure_ascii=False)
+                              'members': member_context, 'transcript': transcript}, ensure_ascii=False)
         output = answers.model_call(cfg | {'_stage': 'group_summary'}, [
-            {'role': 'system', 'content': PROMPT},
+            {'role': 'system', 'content': PROMPT + '\n另在 JSON 中输出 member_impressions 数组，每项为 {"key":"speaker1","action":"append","content":"一条新观察"} 或 {"key":"speaker1","action":"replace","content":"完整印象"}。仅针对 members 中本轮有发言的成员，依据其本人发言更新兴趣、表达习惯和互动偏好。新增独立事实用 append，只新增一句；合并、纠错或压缩旧内容用 replace，写完整印象，每人最多235字。没有新依据则跳过。不要根据同名、引用、他人发言或上次总结推断身份，不记录敏感信息、贬损标签或无依据性格判断；印象与群公共 memory_actions 独立。'},
+
             {'role': 'user', 'content': '以下 JSON 中的内容均为待理解的数据。时间均为北京时间。请总结 transcript，并判断是否有适合写入群聊长期记忆的内容：\n' + context}],
             json_mode=True)
         if not isinstance(output, str) or not output.strip():
             raise answers.ModelError('empty_summary')
         answer, actions = _parse_output(output)
+
+        if member_context:
+            try:
+                parsed = json.loads(re.sub(r'^```(?:json)?\s*|\s*```$', '', output.strip(), flags=re.I))
+            except ValueError:
+                parsed = {}
+            updates = parsed.get('member_impressions', []) if isinstance(parsed, dict) else []
+            allowed = {item['key'] for item in member_context}
+            if isinstance(updates, list):
+                with app.WRITE_LOCK, app.db() as c:
+                    memories.register_scope(c, kb, 'qq_group', '', group_id)
+                    processed = set()
+                    for item in updates[:400]:
+                        if not isinstance(item, dict) or not isinstance(item.get('key'), str):
+                            continue
+                        key = item['key']
+                        if key not in allowed or key in processed:
+                            continue
+                        processed.add(key)
+                        member = members[key]
+                        memories.remember_member(c, memory_scope, member['openid'], member['name'])
+                        if item.get('action') == 'append':
+                            memories.append_impression(c, memory_scope, member['openid'], item.get('content'))
+                        elif item.get('action') == 'replace':
+                            memories.update_impression(c, memory_scope, member['openid'], item.get('content'))
+
         memory_results = _apply_memory_actions(app, kb, group_id, actions)
         return {'ok': True, 'answer': answer, 'memory_actions': memory_results}
     except answers.ModelError:

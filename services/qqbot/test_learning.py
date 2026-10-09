@@ -43,6 +43,62 @@ class LearningBotTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(msg.sweet_mentioned,expected)
             if mention.get('is_you') is True:
                 self.assertEqual(msg.sweet_learning['mentions'],[])
+
+    async def test_mention_name_resolves_id_to_member_openid_cache(self):
+        cached = self.message('cached-name')
+        cached.author = SimpleNamespace(member_openid='member-openid')
+        cached.sweet_sender_name = '缓存昵称'
+        self.seen.observe_group_message(cached)
+        msg = compat.FullGroupMessage(None, 'event', {
+            'id': 'mention', 'content': '<@tag-id> 你好', 'group_openid': 'group001',
+            'author': {'member_openid': 'owner001'},
+            'mentions': [{'id': 'tag-id', 'member_openid': 'member-openid'}],
+        }, 'own_bot')
+        resolver = lambda member_id: self.seen.first_member_name('group001', member_id)
+        self.assertEqual(compat.render_mention_tags(msg.content, msg, resolver), '@缓存昵称 你好')
+
+    async def test_mention_name_resolves_tag_id_directly_from_cache_without_metadata(self):
+        cached = self.message('cached-name-direct')
+        cached.author = SimpleNamespace(member_openid='member-openid')
+        cached.sweet_sender_name = '直查昵称'
+        self.seen.observe_group_message(cached)
+        msg = SimpleNamespace(content='<@member-openid> 你好', mentions=[],
+                              sweet_mention_aliases={}, sweet_mention_names={},
+                              sweet_you_mention_ids=set())
+        resolver = lambda member_id: self.seen.first_member_name('group001', member_id)
+        self.assertEqual(compat.render_mention_tags(msg.content, msg, resolver), '@直查昵称 你好')
+
+    async def test_at_event_marks_unmatched_single_tag_as_bot_you(self):
+        dispatched=[];state=ConnectionState(lambda e,m:dispatched.append((e,m)),None)
+        state.robot=SimpleNamespace(id='own_bot')
+        state.parsers['group_at_message_create']({'id':'event','d':{
+            'id':'message','content':'<@opaque-bot-tag> /帮助','group_openid':'group001',
+            'author':{'member_openid':'owner001'},'mentions':[],
+        }})
+        msg=dispatched[0][1]
+        self.assertTrue(msg.sweet_mentioned)
+        self.assertEqual(compat.render_mention_tags(msg.content,msg), '@你 /帮助')
+
+    async def test_at_event_identifies_bot_among_multiple_mention_tags(self):
+        dispatched=[];state=ConnectionState(lambda e,m:dispatched.append((e,m)),None)
+        state.robot=SimpleNamespace(id='own_bot')
+        state.parsers['group_at_message_create']({'id':'event','d':{
+            'id':'message','content':'<@friend-tag> <@bot-tag> /帮助','group_openid':'group001',
+            'author':{'member_openid':'owner001'},
+            'mentions':[{'id':'friend-tag'},{'id':'bot-tag','bot':True}],
+        }})
+        msg=dispatched[0][1]
+        self.assertEqual(compat.render_mention_tags(msg.content,msg), '@群友 @你 /帮助')
+
+    async def test_raw_is_you_mention_renders_as_you(self):
+        msg=compat.FullGroupMessage(None,'event',{
+            'id':'message','content':'<@group-scoped-bot> 你好','group_openid':'group001',
+            'author':{'member_openid':'owner001'},
+            'mentions':[{'id':'group-scoped-bot','is_you':True}],
+        },'own_bot')
+        self.assertTrue(msg.sweet_mentioned)
+        self.assertEqual(compat.render_mention_tags(msg.content,msg), '@你 你好')
+
     async def test_outbox_persistence_and_dedup(self):
         learner=Learner(self.seen.conn,'http://unused','token','kb');msg=self.message()
         msg.sweet_sender_name='这是超过十二字的群友昵称测试'
@@ -98,6 +154,23 @@ class LearningBotTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn('do-not-copy',json.dumps(meta))
         learner=Learner(self.seen.conn,'http://unused','token','kb');learner.observe(dispatched[-1][1])
         body=json.loads(self.seen.conn.execute('SELECT payload FROM learning_outbox').fetchone()[0]);self.assertTrue(body['is_reply'])
+
+    async def test_quoted_image_event_is_forwarded_ephemerally_to_vision_model(self):
+        data = {'id': 'question', 'content': '<@!own_bot> 这张图是什么？',
+                'timestamp': '2026-09-28T12:00:00+08:00', 'group_openid': 'group001',
+                'author': {'member_openid': 'owner001'}, 'message_type': 103,
+                'msg_elements': [{'content': '这张图是什么？', 'attachments': [
+                    {'content_type': 'image/jpeg', 'url': 'https://gchat.qpic.cn/quoted-image'}]}]}
+        message = compat.FullGroupMessage(None, 'event', data, 'own_bot')
+        self.assertEqual(message.sweet_quoted_images, [
+            {'content_type': 'image/jpeg', 'url': 'https://gchat.qpic.cn/quoted-image'}])
+        image = 'data:image/jpeg;base64,/9j/2Q=='
+        self.bot.send_answer = AsyncMock(return_value={'id': 'response'})
+        with patch('bot.read_image_data_url', new=AsyncMock(return_value=image)) as read_image:
+            await self.bot.answer(message, 'group', mentioned=True)
+        self.assertEqual(read_image.await_args.args[0], 'https://gchat.qpic.cn/quoted-image')
+        self.assertEqual(self.retriever.search.call_args.kwargs['image_data_urls'], [image])
+        self.assertEqual(self.seen.conn.execute('SELECT count(*) FROM image_occurrences').fetchone()[0], 0)
     def test_forwarded_history_is_not_a_quoted_reply(self):
         self.assertFalse(compat.reference_metadata({'message_type':102,'msg_elements':[{'content':'凯伊售价100元'}]})['is_reply'])
 

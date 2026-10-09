@@ -28,6 +28,7 @@ def initialize(c):
     c.execute('CREATE TABLE IF NOT EXISTS maintenance_sessions (id TEXT PRIMARY KEY, updated REAL NOT NULL, mode TEXT NOT NULL, history TEXT NOT NULL)')
     c.execute('CREATE TABLE IF NOT EXISTS announcement_sync_requests (id TEXT PRIMARY KEY, created REAL NOT NULL, result TEXT NOT NULL)')
 
+
 def announcement_title(content):
     lines = [line.strip() for line in content.splitlines() if line.strip()]
     generic = {'公告', '群公告', '通知', '公告如下', '通知如下', '标题'}
@@ -91,15 +92,18 @@ search_terms 给出最多8个用户可能采用的同义问法或口语表达，
     except (answers.ModelError, ValueError, TypeError, KeyError, json.JSONDecodeError):
         return fallback, [], False
 
+
 def sync_announcement(app,data):
     user=app.string(data,'user_id',128,True)
     kb_id=app.string(data,'kb_id',80,True)
     message_id=app.string(data,'message_id',200,True)
     content=app.string(data,'content',5000,True)
     request_id=hashlib.sha256((kb_id+'\0'+user+'\0'+message_id).encode()).hexdigest()
+
     # Message-scoped IDs make distinct announcements append as separate documents while
     # retries of the same QQ message remain idempotent.
     doc_id='qq-announcement-'+hashlib.sha256(request_id.encode()).hexdigest()[:32]
+
     with app.WRITE_LOCK,app.db() as c:
         if user not in settings(c)['openids']:
             return {'ok':False,'answer':'此私聊账号尚未获得公告更新权限，请在后台「私聊维护权限」中配置 OpenID。'}
@@ -107,6 +111,7 @@ def sync_announcement(app,data):
         c.execute('DELETE FROM announcement_sync_requests WHERE created<?',(time.time()-90*86400,))
         prior=c.execute('SELECT result FROM announcement_sync_requests WHERE id=?',(request_id,)).fetchone()
         if prior:return json.loads(prior['result'])
+
         cfg=app.answer_config(c)
 
     title,search_terms,rewritten=announcement_metadata(cfg,content)
@@ -122,6 +127,7 @@ def sync_announcement(app,data):
         app.save_document(c,kb,{'title':title,'content':content,'source':'QQ群公告（管理员私聊同步）'},doc_id)
         result={'ok':True,'answer':'群公告已新增为独立条目：'+title,'id':doc_id,'title':title,
                 'title_source':'model' if rewritten else 'fallback','search_terms':search_terms}
+
         c.execute('INSERT INTO announcement_sync_requests VALUES(?,?,?)',
                   (request_id,time.time(),json.dumps(result,ensure_ascii=False)))
         return result

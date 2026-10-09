@@ -9,6 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import server
 import entities
+import tool_service
 
 HERE = Path(__file__).resolve().parent
 
@@ -42,7 +43,8 @@ def evaluate(kb, cases=None, top_k=5):
         catalog = entities.Catalog(server.entity_catalog(conn, kb))
     result = []
     for case in cases:
-        found = server.search_terms(kb, [case['query']], catalog=catalog)['results']
+        found = tool_service.search_knowledge(server, kb, case.get('search_query', case['query']),
+                                              original_query=case['query'], catalog=catalog, top_k=8)['results']
         ranks = {key(row): rank for rank, row in enumerate(found, 1)}
         gold = [('qa', question) for question in case.get('gold_qa', [])]
         gold += [('document', title) for title in case.get('gold_documents', [])]

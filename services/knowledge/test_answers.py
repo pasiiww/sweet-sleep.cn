@@ -111,6 +111,16 @@ class AnswerTests(unittest.TestCase):
         self.assertEqual(result['answer'], '根据资料，请查看营业说明。')
         self.assertEqual(len(result['search_terms']), 2)
 
+    def test_conversation_style_fixture_matches_prompt_rules(self):
+        fixture_path = Path(__file__).parent / 'evals' / 'conversation_style_cases.json'
+        fixture = json.loads(fixture_path.read_text(encoding='utf-8'))
+        case_names = {case['name'] for case in fixture['cases']}
+        self.assertTrue({'casual_chat', 'ba_topic', 'identity_question', 'new_member_welcome'}.issubset(case_names))
+        self.assertIn('不要主动介绍身份', answers.PERSONA_PROMPT)
+        self.assertIn('不要重复邀请用户 @ 你', answers.PERSONA_PROMPT)
+        self.assertIn('不要在结尾附加', answers.PERSONA_PROMPT)
+        self.assertIn('只有对话确实需要澄清时再追问', answers.OUTPUT_RULE)
+
     def test_grouped_retrieval_accepts_partial_terms(self):
         def add(title, content):
             return self.call('POST', f'bases/{self.kb}/documents', {'title': title, 'content': content})['id']

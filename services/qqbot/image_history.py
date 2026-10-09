@@ -1,8 +1,10 @@
 """Group-scoped image history. Only hashes and event metadata reach SQLite."""
 import asyncio
+import base64
 from datetime import datetime, timezone, timedelta
 import hashlib
 import ipaddress
+from io import BytesIO
 import logging
 import re
 from urllib.parse import urlsplit
@@ -11,6 +13,9 @@ import aiohttp
 
 LOG = logging.getLogger('knowledge-bot')
 MAX_BYTES = 20 * 1024 * 1024
+MAX_VISION_IMAGE_BYTES = 4 * 1024 * 1024
+MAX_SOURCE_VISION_IMAGE_BYTES = 12 * 1024 * 1024
+MAX_VISION_IMAGE_PIXELS = 48_000_000
 BEIJING = timezone(timedelta(hours=8))
 
 
@@ -68,6 +73,99 @@ async def hash_image(url, api=None):
             if not size:
                 raise ValueError('Empty image')
             return digest.hexdigest()
+
+
+def image_mime(data):
+    if data.startswith(b'\xff\xd8\xff'):
+        return 'image/jpeg'
+    if data.startswith(b'\x89PNG\r\n\x1a\n'):
+        return 'image/png'
+    if data.startswith((b'GIF87a', b'GIF89a')):
+        return 'image/gif'
+    if len(data) >= 12 and data[:4] == b'RIFF' and data[8:12] == b'WEBP':
+        return 'image/webp'
+    raise ValueError('Unsupported image format')
+
+
+def compress_vision_image(data):
+    """Resize and JPEG-encode a large vision input under the model size limit."""
+    try:
+        from PIL import Image, ImageOps
+    except ImportError as exc:
+        raise ValueError('Image compression is unavailable') from exc
+
+    try:
+        with Image.open(BytesIO(data)) as source:
+            width, height = source.size
+            if width <= 0 or height <= 0 or width * height > MAX_VISION_IMAGE_PIXELS:
+                raise ValueError('Image dimensions exceed the vision limit')
+            # Vision models consume a still image, so use the first frame of an animation.
+            source.seek(0)
+            frame = ImageOps.exif_transpose(source)
+            frame.load()
+            transparent = 'A' in frame.getbands() or 'transparency' in frame.info
+            if transparent:
+                rgba = frame.convert('RGBA')
+                background = Image.new('RGB', rgba.size, 'white')
+                background.paste(rgba, mask=rgba.getchannel('A'))
+                rgb = background
+            else:
+                rgb = frame.convert('RGB')
+
+            resampling = getattr(Image, 'Resampling', Image).LANCZOS
+            max_edge = min(max(rgb.size), 4096)
+            while max_edge >= 256:
+                resized = rgb.copy()
+                if max(resized.size) > max_edge:
+                    resized.thumbnail((max_edge, max_edge), resampling)
+                for quality in (88, 80, 72, 64):
+                    output = BytesIO()
+                    resized.save(output, format='JPEG', quality=quality,
+                                 optimize=True, progressive=True)
+                    encoded = output.getvalue()
+                    if len(encoded) <= MAX_VISION_IMAGE_BYTES:
+                        return encoded
+                max_edge = int(max_edge * 0.8)
+    except ValueError:
+        raise
+    except Exception as exc:
+        # Pillow exposes different decoder exceptions for corrupt formats.
+        raise ValueError('Image cannot be compressed for vision input') from exc
+    raise ValueError('Image cannot be compressed below the vision size limit')
+
+
+async def read_image_data_url(url, api=None):
+    """Fetch one QQ image into bounded memory for this reply; never write it to disk."""
+    url = image_url(url)
+    headers = {'Accept-Encoding': 'identity'}
+    if urlsplit(url).hostname == 'multimedia.nt.qq.com.cn':
+        token = getattr(getattr(api, '_http', None), '_token', None)
+        if token is not None:
+            await token.check_token()
+            headers['Authorization'] = token.get_string()
+    connector = aiohttp.TCPConnector(resolver=PublicResolver(), limit=1)
+    async with aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=15),
+                                     auto_decompress=False) as session:
+        async with session.get(url, headers=headers, allow_redirects=False) as response:
+            if response.status != 200:
+                raise ValueError('Image HTTP failure')
+            if response.content_length is not None and response.content_length > MAX_SOURCE_VISION_IMAGE_BYTES:
+                raise ValueError('Source image exceeds 12 MiB')
+            chunks, size = [], 0
+            async for chunk in response.content.iter_chunked(64 * 1024):
+                size += len(chunk)
+                if size > MAX_SOURCE_VISION_IMAGE_BYTES:
+                    raise ValueError('Source image exceeds 12 MiB')
+                chunks.append(chunk)
+    data = b''.join(chunks)
+    if not data:
+        raise ValueError('Empty image')
+    mime = image_mime(data)
+    if len(data) > MAX_VISION_IMAGE_BYTES:
+        data = await asyncio.to_thread(compress_vision_image, data)
+        mime = 'image/jpeg'
+    encoded = base64.b64encode(data).decode('ascii')
+    return f'data:{mime};base64,{encoded}'
 
 
 class ImageHistory:
@@ -190,9 +288,12 @@ class ImageHistory:
             member, name, at = self.conn.execute('''SELECT member_id,member_name,sent_at FROM image_occurrences
                 WHERE group_id=? AND hash=? ORDER BY sent_at,message_id,slot LIMIT 1''', (group, digest)).fetchone()
             safe_name = re.sub(r'[@<>\x00-\x1f]', '', name)[:60]
-            identity = f'<qqbot-at-user id="{member}" />' if re.fullmatch(r'[A-Za-z0-9_-]{1,128}', member) else '未知成员'
+            safe_name = safe_name.strip()
+            if safe_name == member or re.fullmatch(r'[A-Za-z0-9_-]{16,128}', safe_name):
+                safe_name = ''
+            display_name = safe_name or '昵称未记录的群友'
             first = '这是第一次发送。' if count == 1 else ''
-            parts.append(f'{prefix}{first}这张图在本群已记录 {count} 次。\n最早发送：{safe_name + " " if safe_name else ""}{identity}\n首次时间：{datetime.fromtimestamp(at, BEIJING):%Y-%m-%d %H:%M:%S}（北京时间）')
+            parts.append(f'{prefix}{first}这张图在本群已记录 {count} 次。\n最早发送：{display_name}\n首次时间：{datetime.fromtimestamp(at, BEIJING):%Y-%m-%d %H:%M:%S}（北京时间）')
         if len(records) > 10:
             parts.append('本条消息图片较多，仅展示前10张的统计。')
         return '\n\n'.join(parts)

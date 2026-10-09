@@ -56,6 +56,21 @@ class LearningTests(unittest.TestCase):
         self.assertEqual(result['results'][0]['updated_at'],qa['updated_at'])
         self.assertEqual(row['details']['changes'][0]['qq'],'1229837719')
         self.assertEqual(row['details']['model_calls'][0]['stage'],'learning')
+
+    def test_unchanged_knowledge_is_stable_prefix_for_different_learning_batches(self):
+        for question in ('凯伊售价是多少？', '鹿江手偶在哪里买？'):
+            self.api('POST',f'bases/{self.kb}/qa',{'question':question,'answer':'已有资料'})
+        contents=[]
+        for mid,text in [('price','凯伊售价有新消息'),('purchase','鹿江手偶购买有新消息')]:
+            job=self.event(mid,text,is_reply=True)['job_id']
+            row=self.run_job(job,[])
+            current=row['details']['model_calls'][0]['messages'][-1]['content']
+            payload=json.loads(current)
+            self.assertEqual(list(payload)[:2],['aliases','existing_qa'])
+            self.assertEqual([r['id'] for r in payload['existing_qa']],sorted(r['id'] for r in payload['existing_qa']))
+            contents.append(current)
+        self.assertEqual(contents[0].split('"current_date"')[0],contents[1].split('"current_date"')[0])
+        self.assertNotEqual(contents[0],contents[1])
     def test_short_source_restored_and_noise_skips_model(self):
         job=self.event('original-long-id','凯伊售价100元',is_reply=True)['job_id']
         row=self.run_job(job,[self.fact('m1')])
