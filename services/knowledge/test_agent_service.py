@@ -70,13 +70,23 @@ class AgentServiceTests(unittest.TestCase):
             memories.update_impression(c, scope, 'target-openid', '喜欢日奈')
         request = {'kb_id': self.kb, 'origin': 'qq_group', 'group_id': 'g',
                    'user_id': 'speaker-openid', 'query': '小明觉得这个怎么样',
+                   'member_name': '落落',
                    'mentioned_members': [{'openid': 'target-openid', 'name': '小明'}]}
         with patch.object(agent_service, 'run', return_value={'messages': [AIMessage(content='我记得。')]}) as runner:
-            app.api('POST', '/knowledge/api/agent/answer', request, {})
+            result = app.api('POST', '/knowledge/api/agent/answer', request, {})
         context = json.loads(runner.call_args.args[2][-1]['content'])
         self.assertEqual(context['mentioned_member_impressions'], [
             {'key': 'mentioned1', 'name': '小明', 'impression': '群友印象：喜欢日奈'}])
         self.assertNotIn('target-openid', json.dumps(context, ensure_ascii=False))
+        trace = app.api('GET', '/knowledge/api/traces/' + result['trace_id'], {}, {})
+        trace_context = trace['details']['conversation_context']
+        self.assertEqual(trace_context['message_text'], '小明觉得这个怎么样')
+        self.assertEqual(trace_context['speaker']['name'], '落落')
+        self.assertEqual(trace_context['mentioned_members'], [
+            {'name': '小明', 'impression': '群友印象：喜欢日奈', 'impression_injected': True}])
+        trace_list = app.api('GET', '/knowledge/api/traces', {}, {})
+        self.assertEqual(trace_list['items'][0]['mentioned_names'], ['小明'])
+        self.assertNotIn('target-openid', json.dumps(trace, ensure_ascii=False))
 
     def test_private_answer_injects_own_group_profile_and_searches_public_memory_on_demand(self):
         group_scope = memories.scope(self.kb, 'qq_group', '', 'group-one')

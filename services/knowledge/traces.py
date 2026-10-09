@@ -100,5 +100,10 @@ def query(c, filters, trace_id=None):
         item['sticker_name'] = (details.get('sticker') or {}).get('name','')
         item['search_terms'] = details.get('search_terms', [])
         item['retrieval_count'] = sum(len(search.get('searches', [])) for search in details.get('retrievals', []))
+        context = details.get('conversation_context') or {}
+        item['mentioned_names'] = [member.get('name', '') for member in context.get('mentioned_members', [])
+                                   if isinstance(member, dict) and member.get('name')]
+        item['quoted_names'] = [member.get('name', '') for member in context.get('quoted_members', [])
+                                if isinstance(member, dict) and member.get('name')]
         items.append(item)
     return {'items': items, 'total': total, 'offset': filters['offset'], 'limit': 30}

@@ -297,6 +297,31 @@ def answer(app, data, details):
                     'key': member['key'], 'name': member['name'],
                     'impression': memories.impression(c, memory_scope, member['openid']),
                 })
+        quoted_impression_by_key = {item['key']: item for item in quoted_member_impressions}
+        mentioned_impression_by_key = {item['key']: item for item in mentioned_member_impressions}
+        details['conversation_context'] = {
+            'message_text': query,
+            'speaker': {
+                'name': member_name,
+                'impression': current_member_impression,
+                'impression_injected': bool(memory_enabled and current_member_impression),
+                'current_member_text': member_message_text,
+            },
+            'reply_reference': reference,
+            'quoted_members': [
+                {'name': member['name'], 'reference': member['reference'],
+                 'impression': quoted_impression_by_key.get(key, {}).get('impression', ''),
+                 'impression_injected': bool(quoted_impression_by_key.get(key, {}).get('impression'))}
+                for key, member in quoted_members.items()
+            ],
+            'mentioned_members': [
+                {'name': member['name'],
+                 'impression': mentioned_impression_by_key.get(member['key'], {}).get('impression', ''),
+                 'impression_injected': bool(mentioned_impression_by_key.get(member['key'], {}).get('impression'))}
+                for member in mentioned_members
+            ],
+            'memory_enabled': memory_enabled,
+        }
         group_member_memories = []
         group_member_identity = None
         if origin == 'qq_private' and user_id and memory_enabled:
