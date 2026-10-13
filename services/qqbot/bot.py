@@ -604,6 +604,15 @@ class Retriever:
                     raise RuntimeError('Impressions HTTP ' + str(response.status))
                 return await response.json()
 
+    async def record_impression_recall(self, trace_id, batch_id, results):
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
+            async with session.post(self.api_root + '/group-impression-recalls',
+                headers={'Authorization': 'Bearer ' + self.token},
+                json={'trace_id': trace_id, 'batch_id': batch_id, 'results': results}) as response:
+                if response.status != 200:
+                    raise RuntimeError('Impression recall trace HTTP ' + str(response.status))
+                return await response.json()
+
     async def group_welcome(self):
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
             async with session.get(self.api_root + '/group-welcome',

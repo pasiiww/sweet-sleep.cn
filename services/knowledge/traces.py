@@ -2,6 +2,7 @@
 import hashlib
 import hmac
 import json
+import re
 import secrets
 import time
 
@@ -68,6 +69,48 @@ def delivery(c, trace_id, receipt, status, content, error, sticker=None):
     details['delivery'] = {'status': status, 'content': content, 'error': error, 'at': time.time()}
     c.execute('UPDATE answer_traces SET delivery=?,details=? WHERE id=?', (status, json.dumps(details, ensure_ascii=False), trace_id))
     return {'ok': True}
+
+
+def impression_recall(c, trace_id, batch_id, results):
+    if not re.fullmatch(r'[a-f0-9]{32}', trace_id) or not re.fullmatch(r'[a-f0-9]{64}', batch_id):
+        raise ValueError('印象审核 Trace 标识无效')
+    row = c.execute('SELECT session_id,mode,details FROM answer_traces WHERE id=? AND created>? ',
+                    (trace_id, time.time() - RETENTION)).fetchone()
+    if not row or row['mode'] != 'impressions' or row['session_id'] != batch_id:
+        raise ValueError('印象审核 Trace 不存在或批次不匹配')
+    if not isinstance(results, list) or not results or len(results) > 100:
+        raise ValueError('撤回结果格式无效')
+    details = json.loads(row['details'])
+    impressions = details.get('impressions')
+    if not isinstance(impressions, dict):
+        raise ValueError('印象审核 Trace 内容无效')
+    flagged = {index for index in impressions.get('harassment_indices', []) if type(index) is int}
+    recorded, seen = [], set()
+    for item in results:
+        if not isinstance(item, dict):
+            raise ValueError('撤回结果格式无效')
+        index, status = item.get('index'), item.get('status')
+        if type(index) is not int or index not in flagged or index in seen or status not in ('recalled', 'failed', 'expired'):
+            raise ValueError('撤回结果与审核命中不匹配')
+        seen.add(index)
+        result = {'index': index, 'status': status}
+        if status == 'failed':
+            error_type, error_code = item.get('error_type'), item.get('error_code', '')
+            if not isinstance(error_type, str) or not re.fullmatch(r'[A-Za-z][A-Za-z0-9_.-]{0,79}', error_type):
+                raise ValueError('撤回错误类型无效')
+            if error_code and (not isinstance(error_code, str)
+                               or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,40}', error_code)):
+                raise ValueError('撤回错误码无效')
+            result['error_type'] = error_type
+            if error_code:
+                result['error_code'] = error_code
+        elif 'error_type' in item or 'error_code' in item:
+            raise ValueError('非失败撤回结果不能包含错误字段')
+        recorded.append(result)
+    impressions['harassment_recall_results'] = recorded
+    impressions['harassment_recall_recorded_at'] = time.time()
+    c.execute('UPDATE answer_traces SET details=? WHERE id=?', (json.dumps(details, ensure_ascii=False), trace_id))
+    return {'ok': True, 'recorded': len(recorded)}
 
 
 def query(c, filters, trace_id=None):

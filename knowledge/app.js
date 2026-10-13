@@ -966,7 +966,13 @@ function renderTraceSummary(summary) {
 function renderTraceImpressions(impressions) {
   if (!impressions) return '';
   const moderation = impressions.harassment_scan_window_seconds === undefined ? '' : `<p class="hint">审核本批最近 ${impressions.harassment_scan_window_seconds / 60} 分钟内 ${impressions.harassment_scan_count || 0} 条 · 命中 ${impressions.harassment_flagged || 0} 条${impressions.harassment_indices?.length ? '（消息序号：'+impressions.harassment_indices.join('、')+'）' : ''} · ${impressions.harassment_recall_enabled ? '撤回开关已开启，机器人尝试撤回' : '撤回开关关闭，未调用撤回接口'}</p>`;
-  return `<h3>自动印象任务</h3><p class="hint">每群 100 条有效发言触发 · 本批 ${impressions.transcript_chars} 字符 · ${impressions.member_count} 名成员</p><p class="hint">已更新 ${impressions.updated} / ${impressions.update_limit} 人 · 每条最多 ${impressions.max_chars} 字 · 已忽略 ${impressions.ignored} 项</p>${moderation}`;
+  const recallResults = Array.isArray(impressions.harassment_recall_results) ? impressions.harassment_recall_results.map(item => {
+    const status = {recalled:'已撤回',failed:'撤回失败',expired:'超出窗口，未尝试'}[item.status] || '未知状态';
+    const error = item.status === 'failed' ? ` · ${esc(item.error_type || '未知错误')}${item.error_code ? ' · 错误码 '+esc(item.error_code) : ''}` : '';
+    return `<li>消息 ${esc(item.index)} · ${status}${error}</li>`;
+  }).join('') : '';
+  const recall = recallResults ? `<h4>命中消息处理结果</h4><ul>${recallResults}</ul>` : '';
+  return `<h3>自动印象任务</h3><p class="hint">每群 100 条有效发言触发 · 本批 ${impressions.transcript_chars} 字符 · ${impressions.member_count} 名成员</p><p class="hint">已更新 ${impressions.updated} / ${impressions.update_limit} 人 · 每条最多 ${impressions.max_chars} 字 · 已忽略 ${impressions.ignored} 项</p>${moderation}${recall}`;
 }
 $('trace-list').onclick = event => {
   const button = event.target.closest('[data-trace]');

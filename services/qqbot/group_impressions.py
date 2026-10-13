@@ -3,6 +3,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
 import time
 from datetime import datetime
 
@@ -11,7 +12,7 @@ from group_summary import clean, timestamp, ZONE
 
 LOG = logging.getLogger('knowledge-bot')
 BATCH_SIZE = 100
-HARASSMENT_SCAN_WINDOW_SECONDS = 120
+HARASSMENT_SCAN_WINDOW_SECONDS = 600
 RETENTION = 7 * 86400
 
 
@@ -117,22 +118,48 @@ class GroupImpressions:
         recalled = 0
         message_ids = result.get('harassment_message_ids', [])
         message_times = payload.get('message_times', [])
-        recall_check_time = time.time()
-        message_ids_by_age = {message_id for message_id, sent_at in zip(payload.get('message_ids', []), message_times)
-                              if isinstance(sent_at, (int, float))
-                              and 0 <= recall_check_time - sent_at <= HARASSMENT_SCAN_WINDOW_SECONDS}
+        message_ids_by_index = {message_id: index for index, message_id in
+                                enumerate(payload.get('message_ids', []), 1)}
+        message_times_by_id = dict(zip(payload.get('message_ids', []), message_times))
         group = self.conn.execute('SELECT group_id FROM impression_outbox WHERE batch_id=?', (row[0],)).fetchone()
         recall_enabled = result.get('harassment_recall_enabled') is True
+        recall_results = []
         if (recall_enabled and group and isinstance(message_ids, list)
                 and callable(self.recall_group_message)):
             for message_id in message_ids:
-                if not isinstance(message_id, str) or message_id not in message_ids_by_age:
+                if not isinstance(message_id, str) or message_id not in message_ids_by_index:
+                    continue
+                index = message_ids_by_index[message_id]
+                sent_at = message_times_by_id.get(message_id)
+                age = time.time() - sent_at if isinstance(sent_at, (int, float)) else float('inf')
+                if age < 0 or age > HARASSMENT_SCAN_WINDOW_SECONDS:
+                    recall_results.append({'index': index, 'status': 'expired'})
                     continue
                 try:
                     await self.recall_group_message(group[0], message_id)
                     recalled += 1
+                    recall_results.append({'index': index, 'status': 'recalled'})
                 except Exception as exc:
-                    LOG.warning('IMPRESSION_HARASSMENT_RECALL_FAILED error=%s', type(exc).__name__)
+                    error_type = type(exc).__name__[:80]
+                    error_code = ''
+                    for attr in ('code', 'status_code', 'status'):
+                        value = getattr(exc, attr, None)
+                        if type(value) in (int, str) and re.fullmatch(r'[A-Za-z0-9_.:-]{1,40}', str(value)):
+                            error_code = str(value)
+                            break
+                    recall_result = {'index': index, 'status': 'failed', 'error_type': error_type}
+                    if error_code:
+                        recall_result['error_code'] = error_code
+                    recall_results.append(recall_result)
+                    LOG.warning('IMPRESSION_HARASSMENT_RECALL_FAILED index=%s error_type=%s error_code=%s',
+                                index, error_type, error_code or '-')
+        if recall_results and isinstance(result.get('trace_id'), str):
+            record_recall = getattr(self.retriever, 'record_impression_recall', None)
+            if callable(record_recall):
+                try:
+                    await record_recall(result['trace_id'], row[0], recall_results)
+                except Exception as exc:
+                    LOG.warning('IMPRESSION_HARASSMENT_TRACE_UPDATE_FAILED error=%s', type(exc).__name__)
         with self.conn:
             self.conn.execute('DELETE FROM impression_outbox WHERE batch_id=?', (row[0],))
         LOG.info('IMPRESSION_BATCH_OK updated=%s ignored=%s harassment_flagged=%s recall_enabled=%s recalled=%s',

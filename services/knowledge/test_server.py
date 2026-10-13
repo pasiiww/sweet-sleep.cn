@@ -211,6 +211,8 @@ class KnowledgeTests(unittest.TestCase):
             self.assertEqual(req('api/group-impressions', app.READ_TOKEN, impression_request)[0], 200)
             self.assertEqual(req('api/group-impressions', app.MODERATION_TOKEN, impression_request)[0], 403)
             self.assertEqual(req('api/group-impressions', app.LEARN_TOKEN, impression_request)[0], 403)
+            self.assertEqual(req('api/group-impression-recalls', app.READ_TOKEN, {})[0], 400)
+            self.assertEqual(req('api/group-impression-recalls', app.MODERATION_TOKEN, {})[0], 403)
             memory_status, memory_body = req('api/agent/memory', app.READ_TOKEN, {
                 'kb_id':self.kb,'origin':'qq_group','group_id':'group-one','user_id':'member-one','action':'list'})
             self.assertEqual(memory_status, 200)

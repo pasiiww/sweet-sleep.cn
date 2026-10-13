@@ -16,7 +16,8 @@ class GroupImpressionTests(unittest.IsolatedAsyncioTestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.path = Path(self.temp.name) / 'seen.db'
         self.seen = SeenMessages(self.path)
-        self.retriever = SimpleNamespace(kb_id='kb', update_impressions=AsyncMock(return_value={'ok': True, 'updated': 3}))
+        self.retriever = SimpleNamespace(kb_id='kb', update_impressions=AsyncMock(return_value={'ok': True, 'updated': 3}),
+                                         record_impression_recall=AsyncMock())
         self.store = GroupImpressions(self.seen.conn, self.retriever)
 
     def tearDown(self):
@@ -99,10 +100,10 @@ class GroupImpressionTests(unittest.IsolatedAsyncioTestCase):
         recall = AsyncMock()
         self.store = GroupImpressions(self.seen.conn, self.retriever, recall)
         self.retriever.update_impressions.return_value = {
-            'ok': True, 'updated': 3, 'harassment_message_ids': ['89', '90', '99'],
-            'harassment_recall_enabled': True}
+            'ok': True, 'updated': 3, 'harassment_message_ids': ['89', '88', '90', '99'],
+            'harassment_recall_enabled': True, 'trace_id': 'c' * 32}
         for i in range(100):
-            sent_at = time.time() - 180 if i == 89 else None
+            sent_at = time.time() - 700 if i == 89 else time.time() - 540 if i == 88 else None
             self.store.observe(self.message(i, at=sent_at))
         self.assertTrue(await self.store.flush_once())
         payload = self.retriever.update_impressions.call_args.args[0]
@@ -111,9 +112,29 @@ class GroupImpressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(payload['message_times']), 100)
         self.assertTrue(payload['transcript'].splitlines()[0].startswith('[消息1] '))
         self.assertTrue(payload['transcript'].splitlines()[-1].startswith('[消息100] '))
-        self.assertEqual(recall.await_count, 2)
+        self.assertEqual(recall.await_count, 3)
         recall.assert_any_await('g', '90')
         recall.assert_any_await('g', '99')
+        self.retriever.record_impression_recall.assert_awaited_once_with('c' * 32, payload['batch_id'], [
+            {'index': 1, 'status': 'expired'}, {'index': 2, 'status': 'recalled'},
+            {'index': 91, 'status': 'recalled'},
+            {'index': 100, 'status': 'recalled'}])
+
+    async def test_recall_failure_is_recorded_in_trace_with_platform_code(self):
+        recall = AsyncMock()
+        error = RuntimeError('QQ API rejected recall')
+        error.code = 10031
+        recall.side_effect = error
+        self.store = GroupImpressions(self.seen.conn, self.retriever, recall)
+        self.retriever.update_impressions.return_value = {
+            'ok': True, 'updated': 0, 'harassment_message_ids': ['4'],
+            'harassment_recall_enabled': True, 'trace_id': 'd' * 32}
+        for i in range(100):
+            self.store.observe(self.message(i))
+        self.assertTrue(await self.store.flush_once())
+        batch_id = self.retriever.update_impressions.call_args.args[0]['batch_id']
+        self.retriever.record_impression_recall.assert_awaited_once_with('d' * 32, batch_id, [
+            {'index': 5, 'status': 'failed', 'error_type': 'RuntimeError', 'error_code': '10031'}])
 
     async def test_future_messages_are_not_recalled(self):
         recall = AsyncMock()

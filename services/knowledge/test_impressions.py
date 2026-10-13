@@ -53,7 +53,7 @@ class ImpressionTests(unittest.TestCase):
         self.assertNotIn('private-key', json.dumps(detail))
         self.assertEqual(detail['details']['model_calls'][0]['stage'], 'group_impressions')
         self.assertIn('每轮最多15名成员', model.call_args.args[1][0]['content'])
-        self.assertIn('最近2分钟', model.call_args.args[1][0]['content'])
+        self.assertIn('最近10分钟', model.call_args.args[1][0]['content'])
         self.assertEqual(detail['details']['impressions']['harassment_indices'], [9, 10, 18])
         model_messages = json.dumps(model.call_args.args[1], ensure_ascii=False)
         self.assertNotIn('message-9', model_messages)
@@ -61,6 +61,21 @@ class ImpressionTests(unittest.TestCase):
         self.assertEqual(detail['details']['impressions']['harassment_scan_count'], 17)
         filtered = test_answers.app.api('GET', '/knowledge/api/traces', {}, {'harassment': ['1']})
         self.assertEqual(filtered['total'], 1)
+        recorded = self.call('POST', 'group-impression-recalls', {
+            'trace_id': result['trace_id'], 'batch_id': request['batch_id'],
+            'results': [{'index': 9, 'status': 'recalled'},
+                        {'index': 10, 'status': 'failed', 'error_type': 'ApiError', 'error_code': '10031'},
+                        {'index': 18, 'status': 'expired'}]})
+        self.assertEqual(recorded, {'ok': True, 'recorded': 3})
+        detail = self.call('GET', 'traces/' + result['trace_id'])
+        recall_results = detail['details']['impressions']['harassment_recall_results']
+        self.assertEqual(recall_results[1], {'index': 10, 'status': 'failed',
+                                             'error_type': 'ApiError', 'error_code': '10031'})
+        self.assertNotIn('message-10', json.dumps(recall_results))
+        with self.assertRaises(test_answers.app.Problem):
+            self.call('POST', 'group-impression-recalls', {
+                'trace_id': result['trace_id'], 'batch_id': 'b' * 64,
+                'results': [{'index': 10, 'status': 'failed', 'error_type': 'ApiError'}]})
 
     def test_long_duplicate_invalid_and_unmapped_updates_preserve_existing(self):
         self.configure()

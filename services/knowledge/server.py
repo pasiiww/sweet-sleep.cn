@@ -999,6 +999,14 @@ def api(method, path, data, params):
         return summaries.respond(sys.modules[__name__], data)
     if segments == ['group-impressions'] and method == 'POST':
         return impressions.respond(sys.modules[__name__], data)
+    if segments == ['group-impression-recalls'] and method == 'POST':
+        trace_id = string(data, 'trace_id', 64, True)
+        batch_id = string(data, 'batch_id', 64, True)
+        with execution_budget.locked(WRITE_LOCK), db() as c:
+            try:
+                return traces.impression_recall(c, trace_id, batch_id, data.get('results'))
+            except ValueError as exc:
+                fail(400, str(exc))
     if segments == ['private-maintenance'] and method == 'POST':
         return maintenance.respond(sys.modules[__name__],data)
     if segments == ['private-announcement'] and method == 'POST':
@@ -1387,7 +1395,7 @@ class Handler(BaseHTTPRequestHandler):
                 fail(403, '敏感词专用密钥仅可读取敏感词或提交撤回事件')
             if learner and not admin and not (parsed.path in ('/knowledge/api/private-maintenance','/knowledge/api/private-announcement','/knowledge/api/agent/private-maintenance','/knowledge/api/learning/events','/knowledge/api/owner-notifications/claim','/knowledge/api/owner-notifications/ack') and self.command == 'POST'):
                 fail(403, '学习密钥仅可提交聊天事件或受 OpenID 白名单约束的私聊维护')
-            read_paths = (parsed.path in ('/knowledge/api/retrieve', '/knowledge/api/answer', '/knowledge/api/agent/answer', '/knowledge/api/agent/creative', '/knowledge/api/agent/memory', '/knowledge/api/trace-delivery', '/knowledge/api/group-summary', '/knowledge/api/group-impressions') and self.command == 'POST') or (parsed.path in ('/knowledge/api/group-welcome', '/knowledge/api/drink-menu', '/knowledge/api/drink-weather') and self.command == 'GET')
+            read_paths = (parsed.path in ('/knowledge/api/retrieve', '/knowledge/api/answer', '/knowledge/api/agent/answer', '/knowledge/api/agent/creative', '/knowledge/api/agent/memory', '/knowledge/api/trace-delivery', '/knowledge/api/group-summary', '/knowledge/api/group-impressions', '/knowledge/api/group-impression-recalls') and self.command == 'POST') or (parsed.path in ('/knowledge/api/group-welcome', '/knowledge/api/drink-menu', '/knowledge/api/drink-weather') and self.command == 'GET')
             if not admin and not learner and not moderator and not read_paths:
                 fail(403, '召回密钥仅可调用检索接口')
             if parsed.path in ('/knowledge/api/stickers/upload','/knowledge/api/products/upload') and self.command=='POST':
