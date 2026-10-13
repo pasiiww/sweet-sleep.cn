@@ -153,10 +153,9 @@ def model_call(cfg, messages, json_mode=False, max_tokens=1000):
     record = {'stage': cfg.get('_stage') or ('keywords' if json_mode else 'answer'),
               'messages': messages, 'max_tokens': max_tokens, 'thinking': 'enabled', 'reasoning_effort': 'low',
               'timeout_seconds': cfg.get('_timeout', 20)}
+    usage = {}
     try:
-        usage={}
         text = _model_call(cfg | {'_usage':usage}, messages, json_mode, max_tokens)
-        if usage:record['usage']=usage
         # Never include HTTP headers, upstream error bodies or credentials.
         output = text.replace(cfg['api_key'], '[redacted]') if cfg.get('api_key') else text
         record.update(output=output[:4000], truncated=len(output) > 4000)
@@ -165,6 +164,8 @@ def model_call(cfg, messages, json_mode=False, max_tokens=1000):
         record['error'] = str(exc)
         raise
     finally:
+        if usage:
+            record['usage'] = usage
         record['elapsed_ms'] = round((time.monotonic() - started) * 1000)
         if '_trace' in cfg:
             cfg['_trace']['model_calls'].append(record)

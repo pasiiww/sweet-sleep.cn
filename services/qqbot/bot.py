@@ -23,6 +23,7 @@ from botpy.http import Route
 from learner import Learner
 from image_history import ImageHistory, read_image_data_url
 from group_summary import GroupSummary, timestamp as summary_timestamp
+from group_impressions import GroupImpressions
 import compat
 
 LOG = logging.getLogger('knowledge-bot')
@@ -584,14 +585,22 @@ class Retriever:
                 return await response.json()
 
 
-    async def summarize(self, transcript, group_id='', members=None, trace_meta=None):
+    async def summarize(self, transcript, group_id='', trace_meta=None):
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=AGENT_REQUEST_TIMEOUT)) as session:
             async with session.post(self.api_root + '/group-summary',
                 headers={'Authorization': 'Bearer ' + self.token},
                 json={**(trace_meta or {}), 'kb_id': self.kb_id, 'group_id': group_id,
-                      'transcript': transcript, 'members': members or []}) as response:
+                      'transcript': transcript}) as response:
                 if response.status != 200:
                     raise RuntimeError('Summary HTTP ' + str(response.status))
+                return await response.json()
+
+    async def update_impressions(self, payload):
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=AGENT_REQUEST_TIMEOUT)) as session:
+            async with session.post(self.api_root + '/group-impressions',
+                headers={'Authorization': 'Bearer ' + self.token}, json=payload) as response:
+                if response.status != 200:
+                    raise RuntimeError('Impressions HTTP ' + str(response.status))
                 return await response.json()
 
     async def group_welcome(self):
@@ -785,6 +794,7 @@ class KnowledgeBot(botpy.Client):
         self.retriever, self.seen = retriever, seen
         self.images = ImageHistory(seen.conn)
         self.summaries = GroupSummary(seen.conn)
+        self.impressions = GroupImpressions(seen.conn, retriever)
         self.capacity = asyncio.Semaphore(4)
         self.conversations = {}
         self.learner = None
@@ -798,6 +808,7 @@ class KnowledgeBot(botpy.Client):
             self.learner = Learner(seen.conn, retriever.api_root+"/learning/events", os.environ["KB_LEARN_TOKEN"], retriever.kb_id)
 
     async def on_ready(self):
+        self.impressions.start()
         if self.learner:
             self.learner.api=self.api
             self.learner.start()
@@ -1075,6 +1086,7 @@ class KnowledgeBot(botpy.Client):
         if compat.is_bot(message):return
         if await self.moderate_group_message(message, bot_mentioned=True): return
         self.summaries.observe(message)
+        self.impressions.observe(message)
         self.seen.observe_group_message(message)
         await self.images.observe(message)
         if self.learner: self.learner.observe(message)
@@ -1093,6 +1105,8 @@ class KnowledgeBot(botpy.Client):
             if await self.moderate_group_message(message, bot_mentioned=bool(getattr(message, 'sweet_mentioned', False))): return
             stage = 'summary'
             self.summaries.observe(message)
+            stage = 'impressions'
+            self.impressions.observe(message)
             stage = 'group_context'
             self.seen.observe_group_message(message)
             stage = 'image_history'
@@ -1145,14 +1159,14 @@ class KnowledgeBot(botpy.Client):
         self.summaries.busy.add(group)
         result, delivery, sent_text, delivery_error = None, 'failed', '', ''
         try:
-            transcript, checkpoint, count, members = self.summaries.snapshot(group, summary_timestamp(message), include_members=True)
+            transcript, checkpoint, count = self.summaries.snapshot(group, summary_timestamp(message))
             if not transcript:
                 await message.reply(content='当前范围内没有可总结的新内容（已过滤复读和表情包）。', msg_type=0, msg_seq=1)
                 return
             meta = {'origin': 'qq_group',
                     'user_id': getattr(getattr(message, 'author', None), 'member_openid', ''),
                     'session_id': conversation_key(message, kind, self.retriever.kb_id)}
-            result = await self.retriever.summarize(transcript, group, members, trace_meta=meta)
+            result = await self.retriever.summarize(transcript, group, trace_meta=meta)
             reply = ('刚刚群里主要聊了这些～\n' if result.get('ok') else '') + plain(result['answer'])[:1500]
             sent = await message.reply(content=reply, msg_type=0, msg_seq=1)
             if sent:

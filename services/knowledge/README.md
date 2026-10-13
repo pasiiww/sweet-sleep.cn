@@ -215,9 +215,9 @@ QQ 私聊以知识库和用户 OpenID 隔离短期上下文，SQLite 保存成�
 后台「群聊记忆」页面按知识库选择群聊，再在群范围内查看群公共记忆和各成员提供的个人记忆；可删除单条、清空本群或暂停/开启本群记忆，不单独按个人建立管理入口。`GET /knowledge/api/group-memories?kb_id=...` 列出群，追加 `group_id` 返回条目；管理员可用 `DELETE` 携带 `item_id` 删除单条或不带 `item_id` 清空群，用 `PUT` 携带 `enabled` 切换群记忆；印象条目可用 `PUT` 携带 `item_id`、`impression_mode=append|replace` 和 `content` 追加一句或全量覆盖。页面和接口均不返回成员 OpenID，仅显示首次昵称与稳定成员代号。
 
 
-群友印象：正常群聊 Agent 回复和 `/总结` 会根据本人发言更新兴趣、表达习惯和互动偏好，每人一条、最多240字；模型可选择追加一句或全量覆盖，以知识库/群范围与成员 OpenID 绑定，保存在 `conversation_memories` 的专用条目中（不占用24条显式记忆名额）。下一次群聊回复会分别注入当前成员、引用作者和被艾特成员印象；被艾特成员印象只读，不因他人提及而更新。私聊自动注入该 OpenID 在已参与群范围中的本人昵称、个人事实和印象。群公共记忆不会自动注入；仅在问题涉及群约定、群规或群内讨论时调用 `get_group_memories`，群聊只检索当前群，私聊只检索本人参与过的群。群记忆仍按群隔离，并遵守各群开关。印象沿用 `/记忆`、忘记、清除、暂停/恢复及后台单条删除，关闭时不读取或更新。正常答复末尾的 `<member_impression action="append">…</member_impression>` 或 `<member_impression action="replace">…</member_impression>` 由服务端取出保存，不会出现在 QQ 回复或回答 Trace；没有可靠依据时保留原印象，不额外调用模型。
+群友印象：正常群聊 Agent 回复和每群100条有效发言触发的后台印象任务会根据本人发言更新兴趣、表达习惯和互动偏好，每人一条、最多240字；模型可选择追加一句或全量覆盖，以知识库/群范围与成员 OpenID 绑定，保存在 `conversation_memories` 的专用条目中（不占用24条显式记忆名额）。下一次群聊回复会分别注入当前成员、引用作者和被艾特成员印象；被艾特成员印象只读，不因他人提及而更新。私聊自动注入该 OpenID 在已参与群范围中的本人昵称、个人事实和印象。群公共记忆不会自动注入；仅在问题涉及群约定、群规或群内讨论时调用 `get_group_memories`，群聊只检索当前群，私聊只检索本人参与过的群。群记忆仍按群隔离，并遵守各群开关。印象沿用 `/记忆`、忘记、清除、暂停/恢复及后台单条删除，关闭时不读取或更新。正常答复末尾的 `<member_impression action="append">…</member_impression>` 或 `<member_impression action="replace">…</member_impression>` 由服务端取出保存，不会出现在 QQ 回复或回答 Trace；没有可靠依据时保留原印象，不额外调用模型。
 
-总结请求可附带 `members: [{key: "speaker1", openid: "...", name: "昵称"}]`，并在这轮 `transcript` 发言者昵称后标注 `[speaker1]`。QQ 从本次实际选中的消息生成映射，同名成员使用不同编号；服务端只向模型传昵称、编号和已有印象，绝不传 OpenID。模型额外返回 `member_impressions: [{key: "speaker1", action: "append", content: "一句新印象"}]` 或 `action: "replace"` 加完整印象，后端只接受本轮映射内有发言的编号，再映射回 OpenID 更新；没有映射的旧请求只维护群公共记忆。编号只在本轮有效，不根据上次总结中的昵称或编号猜身份。
+自动印象接口为 POST `/knowledge/api/group-impressions`，使用现有只读密钥；参数为 `kb_id`、`group_id`、64位十六进制 `batch_id`、不超过15000字符的 `transcript` 和本批 `members: [{key, openid, name}]`。模型只接收昵称、编号和已有印象，不接收 OpenID；只接受本批已映射且有发言的成员。独立调用每轮最多更新5人，每条输出最多80字（合计400字），超长、超额、重复或未映射条目忽略，不截断覆盖旧印象。已有印象仍最多240字；append 只追加一句，replace 必须在80字内保留完整含义，否则跳过。关闭群记忆时跳过本批，不调用模型。同一知识库/群/batch_id 的成功回执与印象写入同事务提交，重试不重复追加；失败不记为完成，允许重试，回执保留7天。任务单独记录「自动群友印象」Trace，QQ发送状态为无需发送；不占咨询额度，不写群公共记忆。
 
 后台客服预览也按知识库维护当前页面的30分钟历史，并提供「清空预览对话」；刷新或退出后清空，与QQ历史和长期记忆隔离。
 
@@ -226,7 +226,7 @@ QQ 私聊以知识库和用户 OpenID 隔离短期上下文，SQLite 保存成�
 
 ### 最近7天对话 Trace
 
-从上线开始，为每次 `/answer`、`/agent/answer`、`/agent/creative` 和 `/group-summary` 保存 trace；敏感词触发撤回时也会保存一条标为「敏感词触发撤回」的记录，不调用模型、不占用咨询额度。后台「对话 Trace」支持时间、知识库、来源、回答状态、用户/群 OpenID 和全文关键词筛选，每页30条。列表直接展示问题、检索词、检索次数、回复、耗时、发送状态；详情包含 PE1/PE2 实际输入消息（含系统提示词、资料和各自携带的历史）、模型原始文本输出（每次最多4000字符）、每组命中排名、去重后的分段快照、别名说明、历史问答和本次提示词。撤回 Trace 展示原始命中消息、命中词、候选词及消息 ID；是否成功撤回仍以机器人服务日志为准。转人工也保留曾召回的资料。API Key、鉴权头和上游错误正文不写入；已配置的模型密钥与后台访问密钥在内容中脱敏。
+从上线开始，为每次 `/answer`、`/agent/answer`、`/agent/creative`、`/group-summary` 和 `/group-impressions` 保存 trace；敏感词触发撤回时也会保存一条标为「敏感词触发撤回」的记录，不调用模型、不占用咨询额度。后台「对话 Trace」支持时间、知识库、来源、回答状态、用户/群 OpenID 和全文关键词筛选，每页30条。列表直接展示问题、检索词、检索次数、回复、耗时、发送状态；详情包含 PE1/PE2 实际输入消息（含系统提示词、资料和各自携带的历史）、模型原始文本输出（每次最多4000字符）、每组命中排名、去重后的分段快照、别名说明、历史问答和本次提示词。撤回 Trace 展示原始命中消息、命中词、候选词及消息 ID；是否成功撤回仍以机器人服务日志为准。转人工也保留曾召回的资料。API Key、鉴权头和上游错误正文不写入；已配置的模型密钥与后台访问密钥在内容中脱敏。
 
 `GET /traces` 与 `GET /traces/{id}` 仅管理员可查询。筛选参数 `q,kb_id,origin,mode,user_id,group_id,session_id,start,end,offset`，start/end 为 Unix 秒。七天窗口按服务端时间强制限制；启动及每小时清理过期记录，删除知识库会同时删除其 trace。旧对话未记录的检索过程不回填。
 
@@ -317,4 +317,4 @@ DeepSeek 统一调用层启用 `thinking.type=enabled`、`reasoning_effort=low`�
 
 Owner 通知接收人与私聊维护权限均支持最多20个私聊 OpenID，后台可按行、空格或中英文逗号分隔。通知配置使用 `openids` 数组；旧 `openid` 自动迁移并兼容旧接口。每位收件人独立生成待发送通知和回执，某人的发送失败不会阻止其他人，移出列表后其待发通知不会再认领。两份权限名单保持独立。
 
-群总结接口：POST `/knowledge/api/group-summary`，由现有只读密钥鉴权，参数 `kb_id`、可选 `group_id` 与 `transcript`（1–15000字符）。复用已启用客服模型与4并发槽，使用独立群聊总结提示词；不检索、不写店铺 QA、不扣客服咨询额度。模型以 JSON 返回总结和最多4项群公共记忆操作，只允许保存或忘记稳定的群规、长期约定和固定偏好，服务端过滤个人记忆、临时状态、敏感信息及清空/暂停操作；传入 `group_id` 时在群记忆范围执行，未传则只返回总结。总结模型等待上限60秒，QQ 端请求上限90秒。返回 `ok`、`answer`、`memory_actions`、`mode`、`reason`、`trace_id` 和 QQ 来源的 `trace_receipt`；可传 `origin`（api/preview/qq_group）、`user_id`、`session_id` 关联发起人。每次有效请求（包括模型未配置、繁忙和生成失败）保存7天 Trace，记录实际模型输入/输出、用量、耗时和超时上限；`network_timeout` 与普通 `network_error` 分开记录，格式错误记录 `invalid_summary`。成员 OpenID 映射不进入模型调用详情，密钥按现有规则脱敏。QQ 发送回执沿用 `/trace-delivery`，生成失败提示已发出也标为 delivered，但生成 mode 仍为 error；总结正文发送失败标为 failed。机器人仅在 ok 且发送成功后推进群总结位置。历史未记录的总结无法补回。部署需包含 `summaries.py`。
+群总结接口：POST `/knowledge/api/group-summary`，使用现有只读密钥，参数 `kb_id`、可选 `group_id`、`origin`、`user_id`、`session_id` 与 `transcript`（1–15000字符）。只生成总结，不读写群友印象或群公共记忆；旧请求的 `members` 被忽略，兼容响应保留空 `memory_actions`。模型等待60秒，QQ端等待90秒，不检索、不写QA、不占咨询额度。返回 `ok`、`answer`、`mode`、`reason`、`trace_id` 和 QQ来源的 `trace_receipt`；记录模型输入/输出、用量、耗时和具体错误。QQ发送回执沿用 `/trace-delivery`，只有生成成功并发送成功才推进总结位置。与自动印象任务分别调用模型、分别记录 Trace。部署需包含 `summaries.py` 和 `impressions.py`。

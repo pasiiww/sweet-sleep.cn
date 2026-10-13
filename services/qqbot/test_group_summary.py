@@ -32,7 +32,7 @@ class SummaryTests(unittest.IsolatedAsyncioTestCase):
         query=self.message('q','/总结')
         await self.bot.on_group_message_create(query)
         self.assertIn('明天晚上八点',self.retriever.summarize.call_args.args[0])
-        self.assertIn('超过十二字的群昵称样例长 [speaker1]：',self.retriever.summarize.call_args.args[0])
+        self.assertIn('超过十二字的群昵称样例长：',self.retriever.summarize.call_args.args[0])
         self.assertNotIn('秘密',self.retriever.summarize.call_args.args[0])
         await self.bot.on_group_at_message_create(query)
         self.assertEqual(self.retriever.summarize.await_count,1)
@@ -130,13 +130,13 @@ class SummaryTests(unittest.IsolatedAsyncioTestCase):
         async def handler(request):
             self.assertEqual(request.headers['Authorization'], 'Bearer token')
             self.assertEqual(await request.json(), {
-                'kb_id': 'kb', 'group_id': 'g', 'members': [], 'transcript': '聊天', **meta})
+                'kb_id': 'kb', 'group_id': 'g', 'transcript': '聊天', **meta})
             return web.json_response({'ok': True, 'answer': '总结', 'trace_id': 'trace'})
         app = web.Application()
         app.router.add_post('/knowledge/api/group-summary', handler)
         with patch('bot.aiohttp.ClientTimeout', wraps=aiohttp.ClientTimeout) as timeout:
             async with TestServer(app) as server:
-                result = await Retriever(str(server.make_url('/knowledge/api')), 'token', 'kb').summarize('聊天', 'g', [], meta)
+                result = await Retriever(str(server.make_url('/knowledge/api')), 'token', 'kb').summarize('聊天', 'g', meta)
         self.assertEqual(timeout.call_args.kwargs['total'], 90)
         self.assertEqual(result['trace_id'], 'trace')
 
