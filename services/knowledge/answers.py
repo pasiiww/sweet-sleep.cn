@@ -151,7 +151,8 @@ def model_call(cfg, messages, json_mode=False, max_tokens=1000):
     max_tokens = max(max_tokens, 8192)
     started = time.monotonic()
     record = {'stage': cfg.get('_stage') or ('keywords' if json_mode else 'answer'),
-              'messages': messages, 'max_tokens': max_tokens, 'thinking': 'enabled', 'reasoning_effort': 'low'}
+              'messages': messages, 'max_tokens': max_tokens, 'thinking': 'enabled', 'reasoning_effort': 'low',
+              'timeout_seconds': cfg.get('_timeout', 20)}
     try:
         usage={}
         text = _model_call(cfg | {'_usage':usage}, messages, json_mode, max_tokens)
@@ -201,7 +202,11 @@ def _model_call(cfg, messages, json_mode=False, max_tokens=1000):
     except error.HTTPError as exc:
         raise ModelError({401: 'invalid_key', 402: 'insufficient_balance', 403: 'access_denied',
                           429: 'rate_limited'}.get(exc.code, 'upstream_error')) from None
-    except (TimeoutError, error.URLError, OSError):
+    except TimeoutError:
+        raise ModelError('network_timeout') from None
+    except error.URLError as exc:
+        raise ModelError('network_timeout' if isinstance(exc.reason, TimeoutError) else 'network_error') from None
+    except OSError:
         raise ModelError('network_error') from None
     except (ValueError, KeyError, TypeError, IndexError):
         raise ModelError('invalid_response') from None

@@ -584,11 +584,12 @@ class Retriever:
                 return await response.json()
 
 
-    async def summarize(self, transcript, group_id='', members=None):
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=55)) as session:
+    async def summarize(self, transcript, group_id='', members=None, trace_meta=None):
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=AGENT_REQUEST_TIMEOUT)) as session:
             async with session.post(self.api_root + '/group-summary',
                 headers={'Authorization': 'Bearer ' + self.token},
-                json={'kb_id': self.kb_id, 'group_id': group_id, 'transcript': transcript, 'members': members or []}) as response:
+                json={**(trace_meta or {}), 'kb_id': self.kb_id, 'group_id': group_id,
+                      'transcript': transcript, 'members': members or []}) as response:
                 if response.status != 200:
                     raise RuntimeError('Summary HTTP ' + str(response.status))
                 return await response.json()
@@ -1142,27 +1143,39 @@ class KnowledgeBot(botpy.Client):
             await message.reply(content='本群正在生成总结，请稍候。', msg_type=0, msg_seq=1)
             return
         self.summaries.busy.add(group)
+        result, delivery, sent_text, delivery_error = None, 'failed', '', ''
         try:
             transcript, checkpoint, count, members = self.summaries.snapshot(group, summary_timestamp(message), include_members=True)
             if not transcript:
                 await message.reply(content='当前范围内没有可总结的新内容（已过滤复读和表情包）。', msg_type=0, msg_seq=1)
                 return
-            result = await self.retriever.summarize(transcript, group, members)
+            meta = {'origin': 'qq_group',
+                    'user_id': getattr(getattr(message, 'author', None), 'member_openid', ''),
+                    'session_id': conversation_key(message, kind, self.retriever.kb_id)}
+            result = await self.retriever.summarize(transcript, group, members, trace_meta=meta)
             reply = ('刚刚群里主要聊了这些～\n' if result.get('ok') else '') + plain(result['answer'])[:1500]
             sent = await message.reply(content=reply, msg_type=0, msg_seq=1)
+            if sent:
+                delivery, sent_text = 'delivered', reply
+            else:
+                delivery_error = 'EmptyReply'
             if sent and result.get('ok'):
                 self.summaries.delivered(group, checkpoint, reply)
-            LOG.info('SUMMARY_DELIVERY ok=%s messages=%s memory_actions=%s',
-                     bool(sent and result.get('ok')), count,
+            LOG.info('SUMMARY_DELIVERY generated=%s sent=%s messages=%s memory_actions=%s',
+                     bool(result.get('ok')), bool(sent), count,
                      sum(1 for item in result.get('memory_actions', []) if item.get('ok')))
         except Exception as exc:
+            delivery_error = type(exc).__name__
             LOG.warning('SUMMARY_FAILED error=%s', type(exc).__name__)
             try:
-                await message.reply(content='总结暂时失败，请稍后重试；总结进度没有更新。', msg_type=0, msg_seq=1)
+                if not sent_text:
+                    await message.reply(content='总结暂时失败，请稍后重试；总结进度没有更新。', msg_type=0, msg_seq=1)
             except Exception:
                 LOG.warning('SUMMARY_REPLY_FAILED')
         finally:
             self.summaries.busy.discard(group)
+            if result and result.get('trace_id') and result.get('trace_receipt'):
+                await self.retriever.report_delivery(result, delivery, sent_text, delivery_error)
 
     async def send_answer(self, message, kind, reply, trace, session=''):
         sticker = (trace or {}).get('sticker')

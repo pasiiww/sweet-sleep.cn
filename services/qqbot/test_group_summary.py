@@ -1,16 +1,20 @@
 import time
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 from datetime import datetime, timezone
-from bot import KnowledgeBot, SeenMessages
+import aiohttp
+from aiohttp import web
+from aiohttp.test_utils import TestServer
+from bot import KnowledgeBot, SeenMessages, Retriever, conversation_key
 from group_summary import GroupSummary, clean, LIMIT
 
 
 class SummaryTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.seen = SeenMessages(':memory:')
-        self.retriever = SimpleNamespace(kb_id='kb', summarize=AsyncMock(return_value={'ok':True,'answer':'讨论了活动安排。'}))
+        self.retriever = SimpleNamespace(kb_id='kb', summarize=AsyncMock(return_value={'ok':True,'answer':'讨论了活动安排。'}),
+                                         report_delivery=AsyncMock())
         self.bot = KnowledgeBot(self.retriever, self.seen)
         self.now = time.time()
 
@@ -69,7 +73,7 @@ class SummaryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_inflight_new_messages_survive_checkpoint(self):
         self.bot.summaries.observe(self.message('one','活动开始',-1))
-        async def generate(_, group='', members=None):
+        async def generate(_, group='', members=None, trace_meta=None):
             self.assertEqual(group, 'g')
             self.bot.summaries.observe(self.message('later','活动新增事项',1))
             return {'ok':True,'answer':'活动开始'}
@@ -78,6 +82,63 @@ class SummaryTests(unittest.IsolatedAsyncioTestCase):
         text,_,count=self.bot.summaries.snapshot('g',self.now+2)
         self.assertEqual(count,1)
         self.assertIn('新增事项',text)
+
+    async def test_summary_trace_metadata_and_delivery_are_reported(self):
+        self.bot.summaries.observe(self.message('one', '下周五群里举办活动', -1))
+        result = {'ok': True, 'answer': '下周五有群活动。',
+                  'trace_id': 'summary-trace', 'trace_receipt': 'private-receipt'}
+        self.retriever.summarize.return_value = result
+        query = self.message('q', '/总结')
+        await self.bot.on_group_message_create(query)
+        self.assertEqual(self.retriever.summarize.call_args.kwargs['trace_meta'], {
+            'origin': 'qq_group', 'user_id': 'u',
+            'session_id': conversation_key(query, 'group', 'kb')})
+        self.retriever.report_delivery.assert_awaited_once_with(
+            result, 'delivered', query.reply.call_args.kwargs['content'], '')
+
+    async def test_failed_generation_still_reports_sent_error_message(self):
+        self.bot.summaries.observe(self.message('one', '下周五群里举办活动', -1))
+        result = {'ok': False, 'reason': 'network_timeout', 'answer': '总结失败，请重试。',
+                  'trace_id': 'summary-trace', 'trace_receipt': 'private-receipt'}
+        self.retriever.summarize.return_value = result
+        await self.bot.on_group_message_create(self.message('q', '/总结'))
+        self.retriever.report_delivery.assert_awaited_once_with(
+            result, 'delivered', '总结失败，请重试。', '')
+        self.assertIsNone(self.seen.conn.execute('SELECT * FROM summary_checkpoint').fetchone())
+
+    async def test_failed_or_empty_qq_delivery_is_distinct_from_generation(self):
+        self.bot.summaries.observe(self.message('one', '下周五群里举办活动', -1))
+        result = {'ok': True, 'answer': '下周五有群活动。',
+                  'trace_id': 'summary-trace', 'trace_receipt': 'private-receipt'}
+        self.retriever.summarize.return_value = result
+        for mid, failure, error in [('q1', RuntimeError('private error'), 'RuntimeError'),
+                                    ('q2', None, 'EmptyReply')]:
+            with self.subTest(error=error):
+                self.retriever.report_delivery.reset_mock()
+                query = self.message(mid, '/总结')
+                if failure:
+                    query.reply.side_effect = failure
+                else:
+                    query.reply.return_value = None
+                await self.bot.on_group_message_create(query)
+                self.retriever.report_delivery.assert_awaited_once_with(result, 'failed', '', error)
+                self.assertIsNone(self.seen.conn.execute('SELECT * FROM summary_checkpoint').fetchone())
+                self.assertNotIn('g', self.bot.summaries.busy)
+
+    async def test_summary_request_waits_longer_than_model_and_sends_trace_metadata(self):
+        meta = {'origin': 'qq_group', 'user_id': 'u', 'session_id': 's'}
+        async def handler(request):
+            self.assertEqual(request.headers['Authorization'], 'Bearer token')
+            self.assertEqual(await request.json(), {
+                'kb_id': 'kb', 'group_id': 'g', 'members': [], 'transcript': '聊天', **meta})
+            return web.json_response({'ok': True, 'answer': '总结', 'trace_id': 'trace'})
+        app = web.Application()
+        app.router.add_post('/knowledge/api/group-summary', handler)
+        with patch('bot.aiohttp.ClientTimeout', wraps=aiohttp.ClientTimeout) as timeout:
+            async with TestServer(app) as server:
+                result = await Retriever(str(server.make_url('/knowledge/api')), 'token', 'kb').summarize('聊天', 'g', [], meta)
+        self.assertEqual(timeout.call_args.kwargs['total'], 90)
+        self.assertEqual(result['trace_id'], 'trace')
 
     def test_previous_summary_only_when_checkpoint_is_reached(self):
         store=self.bot.summaries
