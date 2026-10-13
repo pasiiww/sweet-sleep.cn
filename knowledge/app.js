@@ -574,6 +574,7 @@ async function loadModerationSettings() {
   const cfg = await api('moderation-settings');
   moderationRules = Array.isArray(cfg.sensitive_words) ? cfg.sensitive_words : [];
   $('harassment-warning-enabled').checked = cfg.harassment_warning_enabled !== false;
+  $('impression-harassment-recall-enabled').checked = cfg.impression_harassment_recall_enabled === true;
   $('harassment-mute-enabled').checked = cfg.harassment_mute_enabled === true;
   $('harassment-mute-threshold').value = cfg.harassment_mute_threshold ?? 3;
   $('harassment-mute-duration').value = cfg.harassment_mute_duration_minutes ?? 10;
@@ -735,6 +736,7 @@ $('moderation-settings-form').onsubmit = event => { event.preventDefault(); busy
   const result = await api('moderation-settings', 'PUT', {
     sensitive_words:moderationRules,
     harassment_warning_enabled:$('harassment-warning-enabled').checked,
+    impression_harassment_recall_enabled:$('impression-harassment-recall-enabled').checked,
     harassment_mute_enabled:$('harassment-mute-enabled').checked,
     harassment_mute_threshold:muteThreshold,
     harassment_mute_duration_minutes:muteDuration,
@@ -876,7 +878,7 @@ $('alias-rows').onclick = async event => {
 };
 
 let traceOffset = 0, traceTotal = 0, traceRequest = 0;
-const traceModes = {summary:'群聊总结',impressions:'自动群友印象',busy:'模型繁忙',unavailable:'模型未启用',maintenance:'私聊维护',moderation:'敏感词触发撤回',quota:'今日额度用完',model:'模型回答',document:'原文回退',handoff:'转人工',error:'异常',running:'处理中 / 未完成'};
+const traceModes = {summary:'群聊总结',impressions:'群友印象与性骚扰审核',busy:'模型繁忙',unavailable:'模型未启用',maintenance:'私聊维护',moderation:'敏感词触发撤回',quota:'今日额度用完',model:'模型回答',document:'原文回退',handoff:'转人工',error:'异常',running:'处理中 / 未完成'};
 const traceOrigins = {qq_group:'QQ 群聊',qq_private:'QQ 私聊',preview:'后台预览',api:'API'};
 const traceDelivery = {pending:'未收到发送回执',delivered:'已发送',failed:'发送失败',not_applicable:'无需发送 QQ'};
 const traceTime = value => new Date(value * 1000).toLocaleString('zh-CN');
@@ -884,6 +886,7 @@ async function loadTraces(reset = false) {
   if (reset) traceOffset = 0;
   const request = ++traceRequest, params = new URLSearchParams({offset:String(traceOffset)});
   for (const [field,id] of Object.entries({kb_id:'trace-base',q:'trace-query',origin:'trace-origin',mode:'trace-mode',user_id:'trace-user',group_id:'trace-group'})) if ($(id).value.trim()) params.set(field,$(id).value.trim());
+  if ($('trace-harassment-only').checked) params.set('harassment','1');
   for (const field of ['start','end']) if ($('trace-'+field).value) params.set(field,String(new Date($('trace-'+field).value).getTime()/1000));
   if (params.has('start') && params.has('end') && +params.get('start') > +params.get('end')) throw new Error('开始时间不能晚于结束时间');
   $('trace-count').textContent = '正在查询…'; $('trace-prev').disabled = $('trace-next').disabled = true;
@@ -962,7 +965,8 @@ function renderTraceSummary(summary) {
 }
 function renderTraceImpressions(impressions) {
   if (!impressions) return '';
-  return `<h3>自动印象任务</h3><p class="hint">每群 100 条有效发言触发 · 本批 ${impressions.transcript_chars} 字符 · ${impressions.member_count} 名成员</p><p class="hint">已更新 ${impressions.updated} / ${impressions.update_limit} 人 · 每条最多 ${impressions.max_chars} 字 · 已忽略 ${impressions.ignored} 项</p>`;
+  const moderation = impressions.harassment_scan_window_seconds === undefined ? '' : `<p class="hint">审核本批最近 ${impressions.harassment_scan_window_seconds / 60} 分钟内 ${impressions.harassment_scan_count || 0} 条 · 命中 ${impressions.harassment_flagged || 0} 条${impressions.harassment_indices?.length ? '（消息序号：'+impressions.harassment_indices.join('、')+'）' : ''} · ${impressions.harassment_recall_enabled ? '撤回开关已开启，机器人尝试撤回' : '撤回开关关闭，未调用撤回接口'}</p>`;
+  return `<h3>自动印象任务</h3><p class="hint">每群 100 条有效发言触发 · 本批 ${impressions.transcript_chars} 字符 · ${impressions.member_count} 名成员</p><p class="hint">已更新 ${impressions.updated} / ${impressions.update_limit} 人 · 每条最多 ${impressions.max_chars} 字 · 已忽略 ${impressions.ignored} 项</p>${moderation}`;
 }
 $('trace-list').onclick = event => {
   const button = event.target.closest('[data-trace]');

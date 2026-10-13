@@ -535,6 +535,7 @@ class Retriever:
         self._moderation_words = []
         self._moderation_settings = {'sensitive_words': [], 'sensitive_word_expansions': [],
                                      'harassment_warning_enabled': False,
+                                     'impression_harassment_recall_enabled': False,
                                      'harassment_mute_enabled': False,
                                      'harassment_mute_threshold': HARASSMENT_MUTE_THRESHOLD,
                                      'harassment_mute_duration_minutes': HARASSMENT_MUTE_DURATION_MINUTES}
@@ -705,6 +706,9 @@ class Retriever:
                 warning_enabled = data.get('harassment_warning_enabled', True)
                 if type(warning_enabled) is not bool:
                     raise RuntimeError('Invalid harassment warning setting')
+                impression_recall_enabled = data.get('impression_harassment_recall_enabled', False)
+                if type(impression_recall_enabled) is not bool:
+                    raise RuntimeError('Invalid impression harassment recall setting')
                 mute_enabled = data.get('harassment_mute_enabled', False)
                 mute_threshold = data.get('harassment_mute_threshold', HARASSMENT_MUTE_THRESHOLD)
                 mute_minutes = data.get('harassment_mute_duration_minutes', HARASSMENT_MUTE_DURATION_MINUTES)
@@ -715,6 +719,7 @@ class Retriever:
                 self._moderation_settings = {'sensitive_words': list(self._moderation_words),
                                              'sensitive_word_expansions': expansions,
                                              'harassment_warning_enabled': warning_enabled,
+                                             'impression_harassment_recall_enabled': impression_recall_enabled,
                                              'harassment_mute_enabled': mute_enabled,
                                              'harassment_mute_threshold': mute_threshold,
                                              'harassment_mute_duration_minutes': mute_minutes}
@@ -794,7 +799,7 @@ class KnowledgeBot(botpy.Client):
         self.retriever, self.seen = retriever, seen
         self.images = ImageHistory(seen.conn)
         self.summaries = GroupSummary(seen.conn)
-        self.impressions = GroupImpressions(seen.conn, retriever)
+        self.impressions = GroupImpressions(seen.conn, retriever, self.recall_group_message)
         self.capacity = asyncio.Semaphore(4)
         self.conversations = {}
         self.learner = None

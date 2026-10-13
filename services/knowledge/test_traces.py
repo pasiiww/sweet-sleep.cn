@@ -90,5 +90,19 @@ class TraceTests(unittest.TestCase):
         self.assertEqual(self.api('GET','traces',params={'start':[str(time.time()+60)]})['total'],0)
         with self.assertRaises(app.Problem): self.api('GET','traces',params={'start':['nan']})
 
+    def test_harassment_trace_filter_only_returns_flagged_impression_batches(self):
+        with app.db() as c:
+            flagged, _ = traces.create(c,self.kb,'自动印象审核',{'origin':'qq_group','user_id':'','group_id':'g','session_id':''})
+            traces.finish(c,flagged,{'mode':'impressions','reason':'impressions_updated','answer':''},
+                          {'impressions':{'harassment_flagged':2}},0)
+            clear, _ = traces.create(c,self.kb,'自动印象审核',{'origin':'qq_group','user_id':'','group_id':'g','session_id':''})
+            traces.finish(c,clear,{'mode':'impressions','reason':'impressions_updated','answer':''},
+                          {'impressions':{'harassment_flagged':0}},0)
+        result = self.api('GET','traces',params={'harassment':['1']})
+        self.assertEqual(result['total'],1)
+        self.assertEqual(result['items'][0]['id'],flagged)
+        with self.assertRaises(app.Problem):
+            self.api('GET','traces',params={'harassment':['yes']})
+
 
 if __name__ == '__main__': unittest.main()

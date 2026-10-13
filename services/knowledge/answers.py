@@ -131,6 +131,7 @@ def defaults():
             'system_prompt': DEFAULT_PROMPT, 'keyword_prompt': KEYWORD_PROMPT, 'handoff_groups': {},
             'group_welcome': DEFAULT_GROUP_WELCOME, 'admin_qq': '471718054', 'admin_name': '落落',
             'sensitive_words': DEFAULT_SENSITIVE_WORDS.copy(), 'harassment_warning_enabled': True,
+            'impression_harassment_recall_enabled': False,
             'harassment_mute_enabled': False, 'harassment_mute_threshold': 3,
             'harassment_mute_duration_minutes': 10,
             'drink_menu': [dict(item) for item in DEFAULT_DRINK_MENU],

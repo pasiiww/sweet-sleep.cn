@@ -206,7 +206,7 @@ class KnowledgeTests(unittest.TestCase):
             self.assertEqual(req('api/bases', app.ADMIN_TOKEN)[0], 200)
             self.assertEqual(req('api/retrieve', app.READ_TOKEN, {'kb_id': self.kb, 'query': '退款'})[0], 200)
             impression_request = {'kb_id': self.kb, 'group_id': 'group-one', 'batch_id': 'a' * 64,
-                'transcript': '群友 [speaker1]：喜欢绘画',
+                'transcript': '[消息1] 群友 [speaker1]：喜欢绘画', 'message_ids': ['group-message-1'],
                 'members': [{'key': 'speaker1', 'openid': 'member-one', 'name': '群友'}]}
             self.assertEqual(req('api/group-impressions', app.READ_TOKEN, impression_request)[0], 200)
             self.assertEqual(req('api/group-impressions', app.MODERATION_TOKEN, impression_request)[0], 403)

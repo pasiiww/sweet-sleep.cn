@@ -11,12 +11,13 @@ from group_summary import clean, timestamp, ZONE
 
 LOG = logging.getLogger('knowledge-bot')
 BATCH_SIZE = 100
+HARASSMENT_SCAN_WINDOW_SECONDS = 120
 RETENTION = 7 * 86400
 
 
 class GroupImpressions:
-    def __init__(self, conn, retriever):
-        self.conn, self.retriever, self.task = conn, retriever, None
+    def __init__(self, conn, retriever, recall_group_message=None):
+        self.conn, self.retriever, self.recall_group_message, self.task = conn, retriever, recall_group_message, None
         conn.executescript('''
             CREATE TABLE IF NOT EXISTS impression_seen (
                 group_id TEXT NOT NULL, message_id TEXT NOT NULL, created REAL NOT NULL,
@@ -75,14 +76,23 @@ class GroupImpressions:
             group = row[0]
             rows = self.conn.execute('SELECT id,message_id,member,name,content,at FROM impression_messages WHERE group_id=? ORDER BY id LIMIT ?',
                                      (group, BATCH_SIZE)).fetchall()
-            members, lines = {}, []
-            for _, _, owner, name, content, at in sorted(rows, key=lambda r: (r[5], r[0])):
+            members, lines, message_ids, message_times = {}, [], [], []
+            ordered_rows = sorted(rows, key=lambda r: (r[5], r[0]))
+            for index, row in enumerate(ordered_rows, 1):
+                _, message_id, owner, name, content, at = row
+                name = ' '.join(name.split())[:12]
                 item = members.setdefault(owner, {'key': 'speaker' + str(len(members) + 1), 'openid': owner, 'name': name})
                 text = content if len(content) <= 100 else content[:99] + '…'
-                lines.append(f'[{datetime.fromtimestamp(at, ZONE):%m-%d %H:%M}] {name or item["key"]} [{item["key"]}]：{text}')
+                text = ' '.join(text.split())
+                lines.append(f'[消息{index}] [{datetime.fromtimestamp(at, ZONE):%m-%d %H:%M}] {name or item["key"]} [{item["key"]}]：{text}')
+                message_ids.append(message_id)
+                message_times.append(float(at))
             batch = hashlib.sha256(json.dumps([group, [r[1] for r in rows]], ensure_ascii=False).encode()).hexdigest()
             payload = {'kb_id': self.retriever.kb_id, 'group_id': group, 'batch_id': batch,
-                       'members': list(members.values()), 'transcript': '\n'.join(lines)}
+                       'members': list(members.values()), 'transcript': '\n'.join(lines),
+                       'message_times': message_times,
+                       # Kept outside the model prompt; the backend maps approved time-window indexes to QQ IDs.
+                       'message_ids': message_ids}
             self.conn.execute('INSERT INTO impression_outbox(batch_id,group_id,payload,created) VALUES(?,?,?,?)',
                               (batch, group, json.dumps(payload, ensure_ascii=False), time.time()))
             self.conn.executemany('DELETE FROM impression_messages WHERE id=?', [(r[0],) for r in rows])
@@ -94,7 +104,8 @@ class GroupImpressions:
         if not row:
             return False
         try:
-            result = await self.retriever.update_impressions(json.loads(row[1]))
+            payload = json.loads(row[1])
+            result = await self.retriever.update_impressions(payload)
             if not result.get('ok'):
                 raise RuntimeError('Impression generation failed')
         except Exception as exc:
@@ -103,9 +114,30 @@ class GroupImpressions:
                                   (time.time() + min(600, 15 * 2 ** min(row[2], 6)), row[0]))
             LOG.warning('IMPRESSION_BATCH_FAILED error=%s', type(exc).__name__)
             return False
+        recalled = 0
+        message_ids = result.get('harassment_message_ids', [])
+        message_times = payload.get('message_times', [])
+        recall_check_time = time.time()
+        message_ids_by_age = {message_id for message_id, sent_at in zip(payload.get('message_ids', []), message_times)
+                              if isinstance(sent_at, (int, float))
+                              and 0 <= recall_check_time - sent_at <= HARASSMENT_SCAN_WINDOW_SECONDS}
+        group = self.conn.execute('SELECT group_id FROM impression_outbox WHERE batch_id=?', (row[0],)).fetchone()
+        recall_enabled = result.get('harassment_recall_enabled') is True
+        if (recall_enabled and group and isinstance(message_ids, list)
+                and callable(self.recall_group_message)):
+            for message_id in message_ids:
+                if not isinstance(message_id, str) or message_id not in message_ids_by_age:
+                    continue
+                try:
+                    await self.recall_group_message(group[0], message_id)
+                    recalled += 1
+                except Exception as exc:
+                    LOG.warning('IMPRESSION_HARASSMENT_RECALL_FAILED error=%s', type(exc).__name__)
         with self.conn:
             self.conn.execute('DELETE FROM impression_outbox WHERE batch_id=?', (row[0],))
-        LOG.info('IMPRESSION_BATCH_OK updated=%s ignored=%s', result.get('updated', 0), result.get('ignored', 0))
+        LOG.info('IMPRESSION_BATCH_OK updated=%s ignored=%s harassment_flagged=%s recall_enabled=%s recalled=%s',
+                 result.get('updated', 0), result.get('ignored', 0), result.get('harassment_flagged', 0),
+                 recall_enabled, recalled)
         return True
 
     def start(self):

@@ -66,6 +66,7 @@ class ModerationTests(unittest.TestCase):
             'sensitive_words': ['(蛇/🐍)(精/米青)'], 'harassment_warning_enabled': False})
         self.assertEqual(len(result['sensitive_word_expansions'][0]), 4)
         self.assertFalse(result['harassment_warning_enabled'])
+        self.assertFalse(result['impression_harassment_recall_enabled'])
         self.assertEqual(self.call('GET', 'moderation-settings')['sensitive_words'], ['(蛇/🐍)(精/米青)'])
         self.assertTrue(self.call('GET', 'answer-settings')['enabled'])
         self.assertEqual(self.call('GET', 'answer-settings')['system_prompt'], defaults['system_prompt'])
@@ -73,9 +74,11 @@ class ModerationTests(unittest.TestCase):
     def test_auto_mute_settings_are_editable_and_persist_through_answer_settings(self):
         result = self.call('PUT', 'moderation-settings', {
             'sensitive_words': ['cbz'], 'harassment_mute_enabled': True,
+            'impression_harassment_recall_enabled': True,
             'harassment_mute_threshold': 5, 'harassment_mute_duration_minutes': 25,
         })
         self.assertTrue(result['harassment_mute_enabled'])
+        self.assertTrue(result['impression_harassment_recall_enabled'])
         self.assertEqual(result['harassment_mute_threshold'], 5)
         self.assertEqual(result['harassment_mute_duration_minutes'], 25)
 
@@ -83,6 +86,7 @@ class ModerationTests(unittest.TestCase):
         answer_cfg['enabled'] = not answer_cfg['enabled']
         self.call('PUT', 'answer-settings', answer_cfg)
         self.assertEqual(self.call('GET', 'moderation-settings')['harassment_mute_enabled'], True)
+        self.assertTrue(self.call('GET', 'moderation-settings')['impression_harassment_recall_enabled'])
         self.assertEqual(self.call('GET', 'moderation-settings')['harassment_mute_threshold'], 5)
         self.assertEqual(self.call('GET', 'moderation-settings')['harassment_mute_duration_minutes'], 25)
 
@@ -90,6 +94,7 @@ class ModerationTests(unittest.TestCase):
         base = {'sensitive_words': []}
         for field, values in (
             ('harassment_mute_enabled', [1, 'true']),
+            ('impression_harassment_recall_enabled', [1, 'true']),
             ('harassment_mute_threshold', [True, 0, 21]),
             ('harassment_mute_duration_minutes', [True, 0, 1441]),
         ):

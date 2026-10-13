@@ -89,6 +89,8 @@ def query(c, filters, trace_id=None):
     if filters.get('q'):
         where.append('(instr(lower(t.question),lower(?))>0 OR instr(lower(t.answer),lower(?))>0 OR instr(lower(t.details),lower(?))>0)')
         args.extend([filters['q']] * 3)
+    if filters.get('harassment_only'):
+        where.append("t.mode='impressions' AND CAST(json_extract(t.details,'$.impressions.harassment_flagged') AS INTEGER)>0")
     clause = ' AND '.join(where)
     total = c.execute('SELECT count(*) FROM answer_traces t WHERE ' + clause, args).fetchone()[0]
     rows = c.execute('''SELECT t.id,t.created,t.kb_id,b.name AS kb_name,t.question,t.answer,t.origin,t.user_id,t.group_id,t.session_id,t.mode,t.reason,t.elapsed_ms,t.delivery,t.details

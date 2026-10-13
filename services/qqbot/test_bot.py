@@ -535,7 +535,7 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.seen.conn.execute('SELECT count(*) FROM harassment_strikes').fetchone()[0], 3)
         self.assertEqual(self.seen.conn.execute('SELECT count(*) FROM harassment_warning_attempts').fetchone()[0], 0)
 
-    async def test_sexual_terms_without_bot_mention_do_not_trigger_harassment_actions(self):
+    async def test_sexual_terms_without_bot_mention_are_not_recalled_or_counted(self):
         self.retriever.moderation_words = AsyncMock(return_value=[])
         self.bot.api._http.request = AsyncMock(return_value={})
         message=self.identified('中出', 'sexual-not-targeted')

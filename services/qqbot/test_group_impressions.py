@@ -2,6 +2,7 @@ import json
 import tempfile
 import time
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -22,10 +23,11 @@ class GroupImpressionTests(unittest.IsolatedAsyncioTestCase):
         self.seen.conn.close()
         self.temp.cleanup()
 
-    def message(self, i, group='g', content=None):
+    def message(self, i, group='g', content=None, at=None):
+        timestamp = datetime.fromtimestamp(at, timezone.utc).isoformat() if at else None
         return SimpleNamespace(id=str(i), group_openid=group, content=content or f'喜欢角色{i}',
             author=SimpleNamespace(member_openid=f'owner-{i % 7}'), sweet_sender_name='同名',
-            reply=AsyncMock())
+            reply=AsyncMock(), timestamp=timestamp)
 
     async def test_100_message_threshold_dedup_restart_and_group_isolation(self):
         for i in range(99):
@@ -81,6 +83,60 @@ class GroupImpressionTests(unittest.IsolatedAsyncioTestCase):
         second = self.retriever.update_impressions.call_args.args[0]
         self.assertNotEqual(first['batch_id'], second['batch_id'])
         self.assertFalse(await self.store.flush_once())
+
+    async def test_maximum_roster_and_names_fit_backend_transcript_limit(self):
+        for i in range(100):
+            message = self.message(i, content='字' * 100)
+            message.author = SimpleNamespace(member_openid=f'owner-{i}')
+            message.sweet_sender_name = '名' * 12
+            self.store.observe(message)
+        self.assertTrue(await self.store.flush_once())
+        payload = self.retriever.update_impressions.call_args.args[0]
+        self.assertEqual(len(payload['members']), 100)
+        self.assertLessEqual(len(payload['transcript']), 15000)
+
+    async def test_flagged_tail_message_ids_are_recalled(self):
+        recall = AsyncMock()
+        self.store = GroupImpressions(self.seen.conn, self.retriever, recall)
+        self.retriever.update_impressions.return_value = {
+            'ok': True, 'updated': 3, 'harassment_message_ids': ['89', '90', '99'],
+            'harassment_recall_enabled': True}
+        for i in range(100):
+            sent_at = time.time() - 180 if i == 89 else None
+            self.store.observe(self.message(i, at=sent_at))
+        self.assertTrue(await self.store.flush_once())
+        payload = self.retriever.update_impressions.call_args.args[0]
+        self.assertCountEqual(payload['message_ids'], [str(i) for i in range(100)])
+        self.assertEqual(payload['message_ids'][0], '89')
+        self.assertEqual(len(payload['message_times']), 100)
+        self.assertTrue(payload['transcript'].splitlines()[0].startswith('[消息1] '))
+        self.assertTrue(payload['transcript'].splitlines()[-1].startswith('[消息100] '))
+        self.assertEqual(recall.await_count, 2)
+        recall.assert_any_await('g', '90')
+        recall.assert_any_await('g', '99')
+
+    async def test_future_messages_are_not_recalled(self):
+        recall = AsyncMock()
+        self.store = GroupImpressions(self.seen.conn, self.retriever, recall)
+        self.retriever.update_impressions.return_value = {
+            'ok': True, 'updated': 0, 'harassment_message_ids': ['1'],
+            'harassment_recall_enabled': True}
+        for i in range(100):
+            sent_at = time.time() + 20 if i == 1 else None
+            self.store.observe(self.message(i, at=sent_at))
+        self.assertTrue(await self.store.flush_once())
+        recall.assert_not_awaited()
+
+    async def test_impression_harassment_recall_stays_off_until_enabled(self):
+        recall = AsyncMock()
+        self.store = GroupImpressions(self.seen.conn, self.retriever, recall)
+        self.retriever.update_impressions.return_value = {
+            'ok': True, 'updated': 0, 'harassment_flagged': 1,
+            'harassment_message_ids': [], 'harassment_recall_enabled': False}
+        for i in range(100):
+            self.store.observe(self.message(i))
+        self.assertTrue(await self.store.flush_once())
+        recall.assert_not_awaited()
 
     async def test_qq_events_collect_once_and_moderated_text_never_enters_batches(self):
         self.retriever.search = AsyncMock(return_value={'answer': '回复'})

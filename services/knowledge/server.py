@@ -854,6 +854,9 @@ def api(method, path, data, params):
             mute_enabled = data.get('harassment_mute_enabled')
             if mute_enabled is not None and type(mute_enabled) is not bool:
                 fail(400, 'harassment_mute_enabled 必须为布尔值')
+            impression_recall_enabled = data.get('impression_harassment_recall_enabled')
+            if impression_recall_enabled is not None and type(impression_recall_enabled) is not bool:
+                fail(400, 'impression_harassment_recall_enabled 必须为布尔值')
             with execution_budget.locked(WRITE_LOCK), db() as c:
                 cfg = answer_config(c)
                 cfg['sensitive_words'] = words
@@ -861,6 +864,8 @@ def api(method, path, data, params):
                     cfg['harassment_warning_enabled'] = warning_enabled
                 if mute_enabled is not None:
                     cfg['harassment_mute_enabled'] = mute_enabled
+                if impression_recall_enabled is not None:
+                    cfg['impression_harassment_recall_enabled'] = impression_recall_enabled
                 mute_threshold = data.get('harassment_mute_threshold', cfg.get('harassment_mute_threshold', 3))
                 mute_minutes = data.get('harassment_mute_duration_minutes',
                                         cfg.get('harassment_mute_duration_minutes', 10))
@@ -876,6 +881,7 @@ def api(method, path, data, params):
             return {'sensitive_words': words,
                     'sensitive_word_expansions': moderation.expand_sensitive_words(words),
                     'harassment_warning_enabled': cfg.get('harassment_warning_enabled', True),
+                    'impression_harassment_recall_enabled': cfg.get('impression_harassment_recall_enabled', False),
                     'harassment_mute_enabled': cfg.get('harassment_mute_enabled', False),
                     'harassment_mute_threshold': cfg.get('harassment_mute_threshold', 3),
                     'harassment_mute_duration_minutes': cfg.get('harassment_mute_duration_minutes', 10)}
@@ -886,6 +892,7 @@ def api(method, path, data, params):
                 return {'sensitive_words': words,
                         'sensitive_word_expansions': moderation.expand_sensitive_words(words),
                         'harassment_warning_enabled': cfg.get('harassment_warning_enabled', True),
+                        'impression_harassment_recall_enabled': cfg.get('impression_harassment_recall_enabled', False),
                         'harassment_mute_enabled': cfg.get('harassment_mute_enabled', False),
                         'harassment_mute_threshold': cfg.get('harassment_mute_threshold', 3),
                         'harassment_mute_duration_minutes': cfg.get('harassment_mute_duration_minutes', 10)}
@@ -1122,6 +1129,10 @@ def api(method, path, data, params):
                 fail(403, str(exc))
         if segments and segments[0] == 'traces' and method == 'GET':
             filters = {key: params.get(key, [''])[0][:200] for key in ('kb_id','origin','mode','user_id','group_id','session_id','q')}
+            harassment_filter = params.get('harassment', [''])[0]
+            if harassment_filter not in ('', '1'):
+                fail(400, 'harassment 筛选值无效')
+            filters['harassment_only'] = harassment_filter == '1'
             try:
                 filters['offset'] = max(0, min(1000000, int(params.get('offset', ['0'])[0])))
                 for key in ('start', 'end'):
@@ -1163,6 +1174,7 @@ def api(method, path, data, params):
                        'group_welcome': string(data, 'group_welcome', 1000, True) if 'group_welcome' in data else cfg['group_welcome'],
                        'sensitive_words': words,
                        'harassment_warning_enabled': harassment_warning_enabled,
+                       'impression_harassment_recall_enabled': cfg.get('impression_harassment_recall_enabled', False),
                        'harassment_mute_enabled': cfg.get('harassment_mute_enabled', False),
                        'harassment_mute_threshold': cfg.get('harassment_mute_threshold', 3),
                        'harassment_mute_duration_minutes': cfg.get('harassment_mute_duration_minutes', 10),
