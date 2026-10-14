@@ -5,10 +5,9 @@ import json
 import logging
 import re
 import time
-from datetime import datetime
 
 import compat
-from group_summary import clean, timestamp, ZONE
+from group_summary import clean, timestamp
 
 LOG = logging.getLogger('knowledge-bot')
 BATCH_SIZE = 100
@@ -85,7 +84,7 @@ class GroupImpressions:
                 item = members.setdefault(owner, {'key': 'speaker' + str(len(members) + 1), 'openid': owner, 'name': name})
                 text = content if len(content) <= 100 else content[:99] + '…'
                 text = ' '.join(text.split())
-                lines.append(f'[消息{index}] [{datetime.fromtimestamp(at, ZONE):%m-%d %H:%M}] {name or item["key"]} [{item["key"]}]：{text}')
+                lines.append(f'[消息{index}] [{item["key"]}] {name or item["key"]}：{text}')
                 message_ids.append(message_id)
                 message_times.append(float(at))
             batch = hashlib.sha256(json.dumps([group, [r[1] for r in rows]], ensure_ascii=False).encode()).hexdigest()
@@ -106,7 +105,21 @@ class GroupImpressions:
             return False
         try:
             payload = json.loads(row[1])
-            result = await self.retriever.update_impressions(payload)
+            review = await self.retriever.review_harassment(payload)
+            if not review.get('ok'):
+                raise RuntimeError('Harassment review failed')
+            raw_indices = review.get('harassment_indices')
+            line_count = len(payload.get('transcript', '').splitlines())
+            if (not isinstance(raw_indices, list)
+                    or any(type(index) is not int or not 1 <= index <= line_count for index in raw_indices)):
+                raise RuntimeError('Invalid harassment review result')
+            flagged_indices = set(raw_indices)
+            memory_transcript = '\n'.join(line for index, line in enumerate(payload['transcript'].splitlines(), 1)
+                                           if index not in flagged_indices)
+            memory_payload = {'kb_id': payload['kb_id'], 'group_id': payload['group_id'],
+                              'batch_id': payload['batch_id'], 'members': payload['members'],
+                              'transcript': memory_transcript}
+            result = await self.retriever.update_impressions(memory_payload)
             if not result.get('ok'):
                 raise RuntimeError('Impression generation failed')
         except Exception as exc:
@@ -116,21 +129,19 @@ class GroupImpressions:
             LOG.warning('IMPRESSION_BATCH_FAILED error=%s', type(exc).__name__)
             return False
         recalled = 0
-        message_ids = result.get('harassment_message_ids', [])
+        message_ids = payload.get('message_ids', [])
         message_times = payload.get('message_times', [])
-        message_ids_by_index = {message_id: index for index, message_id in
-                                enumerate(payload.get('message_ids', []), 1)}
-        message_times_by_id = dict(zip(payload.get('message_ids', []), message_times))
+        message_ids_by_index = dict(enumerate(message_ids, 1))
         group = self.conn.execute('SELECT group_id FROM impression_outbox WHERE batch_id=?', (row[0],)).fetchone()
-        recall_enabled = result.get('harassment_recall_enabled') is True
+        recall_enabled = review.get('harassment_recall_enabled') is True
         recall_results = []
         if (recall_enabled and group and isinstance(message_ids, list)
                 and callable(self.recall_group_message)):
-            for message_id in message_ids:
-                if not isinstance(message_id, str) or message_id not in message_ids_by_index:
+            for index in sorted(flagged_indices):
+                message_id = message_ids_by_index.get(index)
+                if not isinstance(message_id, str):
                     continue
-                index = message_ids_by_index[message_id]
-                sent_at = message_times_by_id.get(message_id)
+                sent_at = message_times[index - 1] if index <= len(message_times) else None
                 age = time.time() - sent_at if isinstance(sent_at, (int, float)) else float('inf')
                 if age < 0 or age > HARASSMENT_SCAN_WINDOW_SECONDS:
                     recall_results.append({'index': index, 'status': 'expired'})
@@ -153,17 +164,17 @@ class GroupImpressions:
                     recall_results.append(recall_result)
                     LOG.warning('IMPRESSION_HARASSMENT_RECALL_FAILED index=%s error_type=%s error_code=%s',
                                 index, error_type, error_code or '-')
-        if recall_results and isinstance(result.get('trace_id'), str):
+        if recall_results and isinstance(review.get('trace_id'), str):
             record_recall = getattr(self.retriever, 'record_impression_recall', None)
             if callable(record_recall):
                 try:
-                    await record_recall(result['trace_id'], row[0], recall_results)
+                    await record_recall(review['trace_id'], row[0], recall_results)
                 except Exception as exc:
                     LOG.warning('IMPRESSION_HARASSMENT_TRACE_UPDATE_FAILED error=%s', type(exc).__name__)
         with self.conn:
             self.conn.execute('DELETE FROM impression_outbox WHERE batch_id=?', (row[0],))
         LOG.info('IMPRESSION_BATCH_OK updated=%s ignored=%s harassment_flagged=%s recall_enabled=%s recalled=%s',
-                 result.get('updated', 0), result.get('ignored', 0), result.get('harassment_flagged', 0),
+                 result.get('updated', 0), result.get('ignored', 0), len(flagged_indices),
                  recall_enabled, recalled)
         return True
 

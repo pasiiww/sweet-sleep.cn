@@ -76,15 +76,17 @@ def impression_recall(c, trace_id, batch_id, results):
         raise ValueError('印象审核 Trace 标识无效')
     row = c.execute('SELECT session_id,mode,details FROM answer_traces WHERE id=? AND created>? ',
                     (trace_id, time.time() - RETENTION)).fetchone()
-    if not row or row['mode'] != 'impressions' or row['session_id'] != batch_id:
+    if not row or row['mode'] not in ('harassment_review', 'impressions') or row['session_id'] != batch_id:
         raise ValueError('印象审核 Trace 不存在或批次不匹配')
     if not isinstance(results, list) or not results or len(results) > 100:
         raise ValueError('撤回结果格式无效')
     details = json.loads(row['details'])
-    impressions = details.get('impressions')
-    if not isinstance(impressions, dict):
+    review_key = 'harassment_review' if row['mode'] == 'harassment_review' else 'impressions'
+    review = details.get(review_key)
+    if not isinstance(review, dict):
         raise ValueError('印象审核 Trace 内容无效')
-    flagged = {index for index in impressions.get('harassment_indices', []) if type(index) is int}
+    indices_key = 'indices' if review_key == 'harassment_review' else 'harassment_indices'
+    flagged = {index for index in review.get(indices_key, []) if type(index) is int}
     recorded, seen = [], set()
     for item in results:
         if not isinstance(item, dict):
@@ -107,8 +109,8 @@ def impression_recall(c, trace_id, batch_id, results):
         elif 'error_type' in item or 'error_code' in item:
             raise ValueError('非失败撤回结果不能包含错误字段')
         recorded.append(result)
-    impressions['harassment_recall_results'] = recorded
-    impressions['harassment_recall_recorded_at'] = time.time()
+    review['recall_results'] = recorded
+    review['recall_recorded_at'] = time.time()
     c.execute('UPDATE answer_traces SET details=? WHERE id=?', (json.dumps(details, ensure_ascii=False), trace_id))
     return {'ok': True, 'recorded': len(recorded)}
 
@@ -133,7 +135,7 @@ def query(c, filters, trace_id=None):
         where.append('(instr(lower(t.question),lower(?))>0 OR instr(lower(t.answer),lower(?))>0 OR instr(lower(t.details),lower(?))>0)')
         args.extend([filters['q']] * 3)
     if filters.get('harassment_only'):
-        where.append("t.mode='impressions' AND CAST(json_extract(t.details,'$.impressions.harassment_flagged') AS INTEGER)>0")
+        where.append("((t.mode='impressions' AND CAST(json_extract(t.details,'$.impressions.harassment_flagged') AS INTEGER)>0) OR (t.mode='harassment_review' AND CAST(json_extract(t.details,'$.harassment_review.flagged') AS INTEGER)>0))")
     clause = ' AND '.join(where)
     total = c.execute('SELECT count(*) FROM answer_traces t WHERE ' + clause, args).fetchone()[0]
     rows = c.execute('''SELECT t.id,t.created,t.kb_id,b.name AS kb_name,t.question,t.answer,t.origin,t.user_id,t.group_id,t.session_id,t.mode,t.reason,t.elapsed_ms,t.delivery,t.details

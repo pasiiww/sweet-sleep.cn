@@ -147,19 +147,29 @@ class NoRedirect(request.HTTPRedirectHandler):
         return None
 
 
-def model_call(cfg, messages, json_mode=False, max_tokens=1000):
-    # Thinking and final output share the completion budget.
-    max_tokens = max(max_tokens, 8192)
+def model_call(cfg, messages, json_mode=False, max_tokens=1000, allow_small_max_tokens=False):
+    # Most existing callers keep the full reasoning budget; bounded background jobs may opt into a smaller cap.
+    max_tokens = min(max_tokens, 8192) if allow_small_max_tokens else max(max_tokens, 8192)
     started = time.monotonic()
     record = {'stage': cfg.get('_stage') or ('keywords' if json_mode else 'answer'),
-              'messages': messages, 'max_tokens': max_tokens, 'thinking': 'enabled', 'reasoning_effort': 'low',
+              'max_tokens': max_tokens, 'thinking': 'enabled', 'reasoning_effort': 'low',
               'timeout_seconds': cfg.get('_timeout', 20)}
+    if cfg.get('_trace_hide_content'):
+        record['messages'] = [{'role': message.get('role'), 'content_omitted': True,
+                               'content_length': len(message.get('content', ''))
+                               if isinstance(message.get('content'), str) else None}
+                              for message in messages]
+    else:
+        record['messages'] = messages
     usage = {}
     try:
         text = _model_call(cfg | {'_usage':usage}, messages, json_mode, max_tokens)
         # Never include HTTP headers, upstream error bodies or credentials.
         output = text.replace(cfg['api_key'], '[redacted]') if cfg.get('api_key') else text
-        record.update(output=output[:4000], truncated=len(output) > 4000)
+        if cfg.get('_trace_hide_content'):
+            record['output_chars'] = len(output)
+        else:
+            record.update(output=output[:4000], truncated=len(output) > 4000)
         return text
     except ModelError as exc:
         record['error'] = str(exc)
@@ -172,9 +182,9 @@ def model_call(cfg, messages, json_mode=False, max_tokens=1000):
             cfg['_trace']['model_calls'].append(record)
 
 
-def _model_call(cfg, messages, json_mode=False, max_tokens=1000):
+def _model_call(cfg, messages, json_mode=False, max_tokens=8192):
     payload = {'model': cfg['model'], 'thinking': {'type': 'enabled'}, 'reasoning_effort': 'low',
-               'max_tokens': max(max_tokens, 8192), 'stream': False, 'messages': messages}
+               'max_tokens': min(max_tokens, 8192), 'stream': False, 'messages': messages}
     if cfg.get('_tools'):
         payload.update(tools=cfg['_tools'], parallel_tool_calls=False)
     if json_mode:

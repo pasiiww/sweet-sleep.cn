@@ -597,11 +597,23 @@ class Retriever:
                 return await response.json()
 
     async def update_impressions(self, payload):
+        memory_payload = {key: payload[key] for key in ('kb_id', 'group_id', 'batch_id', 'transcript', 'members')
+                          if key in payload}
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=AGENT_REQUEST_TIMEOUT)) as session:
             async with session.post(self.api_root + '/group-impressions',
-                headers={'Authorization': 'Bearer ' + self.token}, json=payload) as response:
+                headers={'Authorization': 'Bearer ' + self.token}, json=memory_payload) as response:
                 if response.status != 200:
                     raise RuntimeError('Impressions HTTP ' + str(response.status))
+                return await response.json()
+
+    async def review_harassment(self, payload):
+        review_payload = {key: payload[key] for key in ('kb_id', 'group_id', 'batch_id', 'transcript', 'message_times')
+                          if key in payload}
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=AGENT_REQUEST_TIMEOUT)) as session:
+            async with session.post(self.api_root + '/group-harassment-review',
+                headers={'Authorization': 'Bearer ' + self.token}, json=review_payload) as response:
+                if response.status != 200:
+                    raise RuntimeError('Harassment review HTTP ' + str(response.status))
                 return await response.json()
 
     async def record_impression_recall(self, trace_id, batch_id, results):

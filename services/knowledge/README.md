@@ -217,9 +217,13 @@ QQ 私聊以知识库和用户 OpenID 隔离短期上下文，SQLite 保存成�
 
 群友印象：正常群聊 Agent 回复和每群100条有效发言触发的后台印象任务会根据本人发言更新兴趣、表达习惯和互动偏好，每人一条、最多240字；模型可选择追加一句或全量覆盖，以知识库/群范围与成员 OpenID 绑定，保存在 `conversation_memories` 的专用条目中（不占用24条显式记忆名额）。下一次群聊回复会分别注入当前成员、引用作者和被艾特成员印象；被艾特成员印象只读，不因他人提及而更新。私聊自动注入该 OpenID 在已参与群范围中的本人昵称、个人事实和印象。群公共记忆不会自动注入；仅在问题涉及群约定、群规或群内讨论时调用 `get_group_memories`，群聊只检索当前群，私聊只检索本人参与过的群。群记忆仍按群隔离，并遵守各群开关。印象沿用 `/记忆`、忘记、清除、暂停/恢复及后台单条删除，关闭时不读取或更新。正常答复末尾的 `<member_impression action="append">…</member_impression>` 或 `<member_impression action="replace">…</member_impression>` 由服务端取出保存，不会出现在 QQ 回复或回答 Trace；没有可靠依据时保留原印象，不额外调用模型。
 
-自动印象接口为 POST `/knowledge/api/group-impressions`，使用现有只读密钥；参数为 `kb_id`、`group_id`、64位十六进制 `batch_id`、不超过15000字符的 `transcript`、本批 `members: [{key, openid, name}]`，以及与逐行消息序号对齐的 `message_ids`、`message_times`。模型只接收昵称、编号和已有印象，不接收 OpenID、QQ 消息 ID 或原始发送时间；只接受本批已映射且有发言的成员。独立调用每轮最多更新15人，每条输出最多80字（合计1200字），超长、超额、重复或未映射条目忽略，不截断覆盖旧印象。已有印象仍最多240字；append 只追加一句，replace 必须在80字内保留完整含义，否则跳过。关闭群记忆时仍执行性骚扰判断，但跳过印象写入。
+自动印象维护接口为 POST `/knowledge/api/group-impressions`，使用现有只读密钥；参数为 `kb_id`、`group_id`、64位十六进制 `batch_id`、审核后的 `transcript`（不超过15000字符）及本批 `members: [{key, openid, name}]`。它是单独的记忆维护任务，不接收审核时间或 QQ 消息 ID，也不判断撤回。模型只接收昵称、编号和已有印象，不接收 OpenID；只接受本批已映射且在未标记发言中出现的成员。每轮最多更新15人，每条输出最多80字（合计1200字），超长、超额、重复或未映射条目忽略，不截断覆盖旧印象。已有印象仍最多240字；append 只追加一句，replace 必须在80字内保留完整含义，否则跳过。关闭群记忆时审核照常运行，但记忆任务跳过模型调用和印象写入。
 
-每批同时审核 transcript 生成时最近10分钟内的发言，判断是否含性骚扰、开房/性行为邀约及通过谐音、拆字、符号或暗示表达的同类内容；服务端仅接受这些消息序号，并把时间仍在窗口内的 QQ 消息 ID 映射给机器人。QQ 撤回开关 `impression_harassment_recall_enabled` 保存在后台敏感词设置中，默认关闭；关闭时依旧记录判断 Trace，不返回撤回 ID。开启后 QQ 端在调用前再次确认消息仍处于10分钟扫描窗口内。被标记的发言不能成为印象依据。模型只看消息内容和序号，消息 ID/发送时间始终留在 QQ 服务与后端映射层。同一知识库/群/batch_id 的成功回执与印象写入同事务提交，重试不重复追加；失败不记为完成，允许重试，回执保留7天。任务单独记录「群友印象与性骚扰审核」Trace，并显示实际更新人数、扫描范围、命中数和撤回开关状态；Trace 可以筛选仅查看性骚扰命中项。撤回开关开启时，成功、失败与超窗未尝试的结果按消息序号补记到同一条 Trace；失败包含异常类型及 QQ API 错误码，不保存 QQ 消息 ID。不占咨询额度，不写群公共记忆。
+独立审核接口为 POST `/knowledge/api/group-harassment-review`，同样使用只读密钥；参数为 `kb_id`、`group_id`、相同的64位 `batch_id`、原始 `transcript` 和对齐的 `message_times`。只审核生成时最近10分钟的候选发言，判断性骚扰、开房/性行为邀约及通过谐音、拆字、符号、外语或暗示表达的同类内容。审核模型不接收 QQ 消息 ID、OpenID 或原始发送时间，只能返回给定候选的消息序号。QQ 消息 ID 和发送时间只保存在机器人本地；QQ 端依据审核返回的序号映射本地消息并在实际撤回前再次核对10分钟时限。审核失败时不启动记忆任务；成功判断按知识库/群/batch_id 缓存7天，记忆重试会复用审核结果。
+
+撤回开关 `impression_harassment_recall_enabled` 保存在后台敏感词设置中，默认关闭；关闭时仍生成审核结果和独立 Trace，不调用撤回接口。审核 Trace 显示扫描数量、命中序号和开关状态，Trace 可筛选仅看性骚扰命中；撤回开启时成功、失败和超窗未尝试的结果按消息序号写回审核 Trace，失败包括异常类型和 QQ API 错误码，不包含消息 ID。审核与记忆分别记录「性骚扰判断」和「维护群友印象」Trace，不占咨询额度，不写群公共记忆。同一知识库/群/batch_id 的记忆成功回执与印象写入同事务提交，失败不记为完成并可重试。
+
+两个模型调用共享完全相同的稳定系统提示词前缀，各自任务说明放在提示词后段，以便 DeepSeek 自动复用相同输入前缀的缓存；缓存由服务商按前缀匹配且不保证每次命中。审核输出上限2048 tokens，记忆输出上限4096 tokens（均含推理与最终输出），避免单个任务占满原先8192 tokens 的完成预算。
 
 机器人使用 `POST /knowledge/api/group-impression-recalls`（只读召回密钥）回写撤回结果；接口只接受该批次 Trace 中已命中的消息序号。
 
@@ -230,7 +234,7 @@ QQ 私聊以知识库和用户 OpenID 隔离短期上下文，SQLite 保存成�
 
 ### 最近7天对话 Trace
 
-从上线开始，为每次 `/answer`、`/agent/answer`、`/agent/creative`、`/group-summary` 和 `/group-impressions` 保存 trace；敏感词触发撤回时也会保存一条标为「敏感词触发撤回」的记录，不调用模型、不占用咨询额度。后台「对话 Trace」支持时间、知识库、来源、回答状态、用户/群 OpenID 和全文关键词筛选，每页30条。列表直接展示问题、检索词、检索次数、回复、耗时、发送状态；详情包含 PE1/PE2 实际输入消息（含系统提示词、资料和各自携带的历史）、模型原始文本输出（每次最多4000字符）、每组命中排名、去重后的分段快照、别名说明、历史问答和本次提示词。撤回 Trace 展示原始命中消息、命中词、候选词及消息 ID；是否成功撤回仍以机器人服务日志为准。转人工也保留曾召回的资料。API Key、鉴权头和上游错误正文不写入；已配置的模型密钥与后台访问密钥在内容中脱敏。
+从上线开始，为每次 `/answer`、`/agent/answer`、`/agent/creative`、`/group-summary`、`/group-impressions` 和 `/group-harassment-review` 保存 Trace；敏感词触发撤回时也会保存一条标为「敏感词触发撤回」的记录，不调用模型、不占用咨询额度。后台「对话 Trace」支持时间、知识库、来源、回答状态、用户/群 OpenID 和全文关键词筛选，每页30条；性骚扰筛选同时匹配新审核 Trace 与旧版合并 Trace。列表直接展示问题、检索词、检索次数、回复、耗时、发送状态；详情包含 PE1/PE2 实际输入消息（含系统提示词、资料和各自携带的历史）、模型原始文本输出（每次最多4000字符）、每组命中排名、去重后的分段快照、别名说明、历史问答和本次提示词。撤回判断 Trace 只显示命中序号及撤回结果，不保存 QQ 消息 ID。转人工也保留曾召回的资料。API Key、鉴权头和上游错误正文不写入；已配置的模型密钥与后台访问密钥在内容中脱敏。
 
 `GET /traces` 与 `GET /traces/{id}` 仅管理员可查询。筛选参数 `q,kb_id,origin,mode,user_id,group_id,session_id,start,end,offset`，start/end 为 Unix 秒。七天窗口按服务端时间强制限制；启动及每小时清理过期记录，删除知识库会同时删除其 trace。旧对话未记录的检索过程不回填。
 
@@ -321,4 +325,4 @@ DeepSeek 统一调用层启用 `thinking.type=enabled`、`reasoning_effort=low`�
 
 Owner 通知接收人与私聊维护权限均支持最多20个私聊 OpenID，后台可按行、空格或中英文逗号分隔。通知配置使用 `openids` 数组；旧 `openid` 自动迁移并兼容旧接口。每位收件人独立生成待发送通知和回执，某人的发送失败不会阻止其他人，移出列表后其待发通知不会再认领。两份权限名单保持独立。
 
-群总结接口：POST `/knowledge/api/group-summary`，使用现有只读密钥，参数 `kb_id`、可选 `group_id`、`origin`、`user_id`、`session_id` 与 `transcript`（1–15000字符）。只生成总结，不读写群友印象或群公共记忆；旧请求的 `members` 被忽略，兼容响应保留空 `memory_actions`。模型等待60秒，QQ端等待90秒，不检索、不写QA、不占咨询额度。返回 `ok`、`answer`、`mode`、`reason`、`trace_id` 和 QQ来源的 `trace_receipt`；记录模型输入/输出、用量、耗时和具体错误。QQ发送回执沿用 `/trace-delivery`，只有生成成功并发送成功才推进总结位置。与自动印象任务分别调用模型、分别记录 Trace。部署需包含 `summaries.py` 和 `impressions.py`。
+群总结接口：POST `/knowledge/api/group-summary`，使用现有只读密钥，参数 `kb_id`、可选 `group_id`、`origin`、`user_id`、`session_id` 与 `transcript`（1–15000字符）。只生成总结，不读写群友印象或群公共记忆；旧请求的 `members` 被忽略，兼容响应保留空 `memory_actions`。模型等待60秒，QQ端等待90秒，不检索、不写QA、不占咨询额度。返回 `ok`、`answer`、`mode`、`reason`、`trace_id` 和 QQ来源的 `trace_receipt`；记录模型输入/输出、用量、耗时和具体错误。QQ发送回执沿用 `/trace-delivery`，只有生成成功并发送成功才推进总结位置。与自动印象的记忆维护和性骚扰审核分别调用模型、分别记录 Trace。总结功能部署需包含 `summaries.py` 与 QQ 侧 `group_summary.py`。

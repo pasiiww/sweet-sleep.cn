@@ -5,7 +5,7 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 from bot import SeenMessages, KnowledgeBot
 from group_impressions import GroupImpressions
@@ -16,8 +16,14 @@ class GroupImpressionTests(unittest.IsolatedAsyncioTestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.path = Path(self.temp.name) / 'seen.db'
         self.seen = SeenMessages(self.path)
-        self.retriever = SimpleNamespace(kb_id='kb', update_impressions=AsyncMock(return_value={'ok': True, 'updated': 3}),
+        self.retriever = SimpleNamespace(kb_id='kb',
+                                         review_harassment=AsyncMock(return_value={'ok': True, 'harassment_indices': [],
+                                                                                   'harassment_recall_enabled': False}),
+                                         update_impressions=AsyncMock(return_value={'ok': True, 'updated': 3}),
                                          record_impression_recall=AsyncMock())
+        self.task_calls = Mock()
+        self.task_calls.attach_mock(self.retriever.review_harassment, 'review')
+        self.task_calls.attach_mock(self.retriever.update_impressions, 'memory')
         self.store = GroupImpressions(self.seen.conn, self.retriever)
 
     def tearDown(self):
@@ -38,6 +44,7 @@ class GroupImpressionTests(unittest.IsolatedAsyncioTestCase):
         self.store.observe(self.message(99, content='[图片] 😀'))
         self.store.observe(self.message(0, 'other'))
         self.assertFalse(await self.store.flush_once())
+        self.retriever.review_harassment.assert_not_awaited()
         self.retriever.update_impressions.assert_not_awaited()
         self.seen.conn.close()
         self.seen = SeenMessages(self.path)
@@ -47,6 +54,8 @@ class GroupImpressionTests(unittest.IsolatedAsyncioTestCase):
         payload = self.retriever.update_impressions.call_args.args[0]
         self.assertEqual(len(payload['transcript'].splitlines()), 100)
         self.assertEqual(len(payload['members']), 7)
+        self.assertNotIn('message_ids', payload)
+        self.assertNotIn('message_times', payload)
         self.assertNotIn('owner-', payload['transcript'])
         self.assertEqual(len(payload['batch_id']), 64)
         self.assertEqual(self.seen.conn.execute('SELECT count(*) FROM impression_messages').fetchone()[0], 1)
@@ -72,6 +81,7 @@ class GroupImpressionTests(unittest.IsolatedAsyncioTestCase):
         self.retriever.update_impressions.side_effect = None
         self.assertTrue(await self.store.flush_once())
         self.assertEqual(first, self.retriever.update_impressions.call_args.args[0])
+        self.assertEqual(self.retriever.review_harassment.await_count, 2)
         self.assertEqual(self.seen.conn.execute('SELECT count(*) FROM impression_messages').fetchone()[0], 1)
 
     async def test_batch_text_is_bounded_and_each_100_messages_remain_separate(self):
@@ -99,24 +109,25 @@ class GroupImpressionTests(unittest.IsolatedAsyncioTestCase):
     async def test_flagged_tail_message_ids_are_recalled(self):
         recall = AsyncMock()
         self.store = GroupImpressions(self.seen.conn, self.retriever, recall)
-        self.retriever.update_impressions.return_value = {
-            'ok': True, 'updated': 3, 'harassment_message_ids': ['89', '88', '90', '99'],
+        self.retriever.review_harassment.return_value = {
+            'ok': True, 'harassment_indices': [2, 91, 100],
             'harassment_recall_enabled': True, 'trace_id': 'c' * 32}
         for i in range(100):
             sent_at = time.time() - 700 if i == 89 else time.time() - 540 if i == 88 else None
             self.store.observe(self.message(i, at=sent_at))
         self.assertTrue(await self.store.flush_once())
-        payload = self.retriever.update_impressions.call_args.args[0]
-        self.assertCountEqual(payload['message_ids'], [str(i) for i in range(100)])
-        self.assertEqual(payload['message_ids'][0], '89')
-        self.assertEqual(len(payload['message_times']), 100)
-        self.assertTrue(payload['transcript'].splitlines()[0].startswith('[消息1] '))
-        self.assertTrue(payload['transcript'].splitlines()[-1].startswith('[消息100] '))
+        review_payload = self.retriever.review_harassment.call_args.args[0]
+        memory_payload = self.retriever.update_impressions.call_args.args[0]
+        self.assertEqual(len(review_payload['message_times']), 100)
+        self.assertTrue(memory_payload['transcript'].splitlines()[0].startswith('[消息1] '))
+        self.assertTrue(memory_payload['transcript'].splitlines()[-1].startswith('[消息99] '))
+        self.assertNotIn('message_ids', memory_payload)
+        self.assertNotIn('message_times', memory_payload)
         self.assertEqual(recall.await_count, 3)
         recall.assert_any_await('g', '90')
         recall.assert_any_await('g', '99')
-        self.retriever.record_impression_recall.assert_awaited_once_with('c' * 32, payload['batch_id'], [
-            {'index': 1, 'status': 'expired'}, {'index': 2, 'status': 'recalled'},
+        self.retriever.record_impression_recall.assert_awaited_once_with('c' * 32, memory_payload['batch_id'], [
+            {'index': 2, 'status': 'recalled'},
             {'index': 91, 'status': 'recalled'},
             {'index': 100, 'status': 'recalled'}])
 
@@ -126,22 +137,21 @@ class GroupImpressionTests(unittest.IsolatedAsyncioTestCase):
         error.code = 10031
         recall.side_effect = error
         self.store = GroupImpressions(self.seen.conn, self.retriever, recall)
-        self.retriever.update_impressions.return_value = {
-            'ok': True, 'updated': 0, 'harassment_message_ids': ['4'],
+        self.retriever.review_harassment.return_value = {
+            'ok': True, 'harassment_indices': [5],
             'harassment_recall_enabled': True, 'trace_id': 'd' * 32}
         for i in range(100):
             self.store.observe(self.message(i))
         self.assertTrue(await self.store.flush_once())
-        batch_id = self.retriever.update_impressions.call_args.args[0]['batch_id']
+        batch_id = self.retriever.review_harassment.call_args.args[0]['batch_id']
         self.retriever.record_impression_recall.assert_awaited_once_with('d' * 32, batch_id, [
             {'index': 5, 'status': 'failed', 'error_type': 'RuntimeError', 'error_code': '10031'}])
 
     async def test_future_messages_are_not_recalled(self):
         recall = AsyncMock()
         self.store = GroupImpressions(self.seen.conn, self.retriever, recall)
-        self.retriever.update_impressions.return_value = {
-            'ok': True, 'updated': 0, 'harassment_message_ids': ['1'],
-            'harassment_recall_enabled': True}
+        self.retriever.review_harassment.return_value = {
+            'ok': True, 'harassment_indices': [], 'harassment_recall_enabled': True}
         for i in range(100):
             sent_at = time.time() + 20 if i == 1 else None
             self.store.observe(self.message(i, at=sent_at))
@@ -151,13 +161,29 @@ class GroupImpressionTests(unittest.IsolatedAsyncioTestCase):
     async def test_impression_harassment_recall_stays_off_until_enabled(self):
         recall = AsyncMock()
         self.store = GroupImpressions(self.seen.conn, self.retriever, recall)
-        self.retriever.update_impressions.return_value = {
-            'ok': True, 'updated': 0, 'harassment_flagged': 1,
-            'harassment_message_ids': [], 'harassment_recall_enabled': False}
+        self.retriever.review_harassment.return_value = {
+            'ok': True, 'harassment_indices': [1], 'harassment_recall_enabled': False}
         for i in range(100):
             self.store.observe(self.message(i))
         self.assertTrue(await self.store.flush_once())
         recall.assert_not_awaited()
+        memory_payload = self.retriever.update_impressions.call_args.args[0]
+        self.assertNotIn('[消息1] ', memory_payload['transcript'])
+
+    async def test_review_precedes_memory_and_flagged_content_is_excluded(self):
+        recall = AsyncMock()
+        self.store = GroupImpressions(self.seen.conn, self.retriever, recall)
+        self.retriever.review_harassment.return_value = {
+            'ok': True, 'harassment_indices': [3], 'harassment_recall_enabled': False}
+        for i in range(100):
+            self.store.observe(self.message(i))
+        self.assertTrue(await self.store.flush_once())
+        self.assertEqual([call[0] for call in self.task_calls.mock_calls], ['review', 'memory'])
+        memory_payload = self.retriever.update_impressions.call_args.args[0]
+        self.assertNotIn('[消息3] ', memory_payload['transcript'])
+        self.assertIn('[消息2] ', memory_payload['transcript'])
+        self.assertNotIn('message_ids', memory_payload)
+        self.assertNotIn('message_times', memory_payload)
 
     async def test_qq_events_collect_once_and_moderated_text_never_enters_batches(self):
         self.retriever.search = AsyncMock(return_value={'answer': '回复'})

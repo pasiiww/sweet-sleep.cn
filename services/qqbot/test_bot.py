@@ -2,6 +2,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import tempfile
+import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
@@ -309,6 +310,41 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result['results'][0]['content'], 'test')
         finally:
             await runner.cleanup()
+
+    async def test_group_review_and_memory_use_separate_payloads(self):
+        received = {}
+        async def review(request):
+            received['review'] = await request.json()
+            self.assertEqual(request.headers['Authorization'], 'Bearer read-test')
+            return web.json_response({'ok': True, 'harassment_indices': [],
+                                      'harassment_recall_enabled': False})
+        async def memory(request):
+            received['memory'] = await request.json()
+            self.assertEqual(request.headers['Authorization'], 'Bearer read-test')
+            return web.json_response({'ok': True, 'updated': 0})
+        app = web.Application()
+        app.router.add_post('/group-harassment-review', review)
+        app.router.add_post('/group-impressions', memory)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, '127.0.0.1', 0)
+        await site.start()
+        try:
+            port = site._server.sockets[0].getsockname()[1]
+            retriever = Retriever(f'http://127.0.0.1:{port}/retrieve', 'read-test', 'kb-test')
+            payload = {'kb_id': 'kb-test', 'group_id': 'group1', 'batch_id': 'a' * 64,
+                       'transcript': '[消息1] 群友 [speaker1]：普通发言',
+                       'message_times': [time.time()], 'message_ids': ['private-qq-message-id'],
+                       'members': [{'key': 'speaker1', 'openid': 'private-openid', 'name': '群友'}]}
+            await retriever.review_harassment(payload)
+            await retriever.update_impressions(payload)
+        finally:
+            await runner.cleanup()
+        self.assertEqual(received['review']['message_times'], payload['message_times'])
+        self.assertNotIn('message_ids', received['review'])
+        self.assertNotIn('members', received['review'])
+        self.assertNotIn('message_times', received['memory'])
+        self.assertNotIn('message_ids', received['memory'])
 
     async def test_http_moderation_report_sends_candidates_with_trigger_count(self):
         received = {}
