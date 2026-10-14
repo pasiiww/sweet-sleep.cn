@@ -185,6 +185,19 @@ class GroupImpressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('message_ids', memory_payload)
         self.assertNotIn('message_times', memory_payload)
 
+    async def test_review_disabled_still_sends_the_complete_batch_to_memory(self):
+        self.retriever.review_harassment.return_value = {
+            'ok': True, 'reason': 'review_disabled', 'harassment_indices': [],
+            'harassment_recall_enabled': False, 'harassment_review_enabled': False}
+        for i in range(100):
+            self.store.observe(self.message(i))
+        self.assertTrue(await self.store.flush_once())
+        self.assertEqual([call[0] for call in self.task_calls.mock_calls], ['review', 'memory'])
+        memory_payload = self.retriever.update_impressions.call_args.args[0]
+        self.assertEqual(len(memory_payload['transcript'].splitlines()), 100)
+        self.assertIn('[消息3] ', memory_payload['transcript'])
+        self.retriever.record_impression_recall.assert_not_awaited()
+
     async def test_qq_events_collect_once_and_moderated_text_never_enters_batches(self):
         self.retriever.search = AsyncMock(return_value={'answer': '回复'})
         bot = KnowledgeBot(self.retriever, self.seen)

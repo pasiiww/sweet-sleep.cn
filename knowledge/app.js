@@ -574,6 +574,7 @@ async function loadModerationSettings() {
   const cfg = await api('moderation-settings');
   moderationRules = Array.isArray(cfg.sensitive_words) ? cfg.sensitive_words : [];
   $('harassment-warning-enabled').checked = cfg.harassment_warning_enabled !== false;
+  $('impression-harassment-review-enabled').checked = cfg.impression_harassment_review_enabled !== false;
   $('impression-harassment-recall-enabled').checked = cfg.impression_harassment_recall_enabled === true;
   $('harassment-mute-enabled').checked = cfg.harassment_mute_enabled === true;
   $('harassment-mute-threshold').value = cfg.harassment_mute_threshold ?? 3;
@@ -736,6 +737,7 @@ $('moderation-settings-form').onsubmit = event => { event.preventDefault(); busy
   const result = await api('moderation-settings', 'PUT', {
     sensitive_words:moderationRules,
     harassment_warning_enabled:$('harassment-warning-enabled').checked,
+    impression_harassment_review_enabled:$('impression-harassment-review-enabled').checked,
     impression_harassment_recall_enabled:$('impression-harassment-recall-enabled').checked,
     harassment_mute_enabled:$('harassment-mute-enabled').checked,
     harassment_mute_threshold:muteThreshold,
@@ -957,7 +959,7 @@ function renderTraceModelCall(call, index) {
 function traceReason(row, details) {
   const summaryReasons = {summary_generated:'总结生成成功',model_disabled:'总结模型尚未启用或配置',model_busy:'总结模型当前繁忙',network_timeout:'总结模型请求超时',network_error:'总结模型网络异常',invalid_key:'总结模型 API Key 无效',insufficient_balance:'总结模型余额不足',access_denied:'总结模型无访问权限',rate_limited:'总结模型请求被限流',upstream_error:'总结模型服务异常',invalid_response:'总结模型响应异常',output_truncated:'总结模型输出被截断',invalid_summary:'总结内容格式无效',empty_summary:'总结内容为空',internal_error:'总结服务内部异常'};
   const impressionReasons = {impressions_updated:'印象更新完成',memory_disabled:'群聊记忆已关闭，跳过本批',no_safe_messages:'没有未标记的发言，跳过印象更新',invalid_impressions:'印象输出格式无效',network_timeout:'印象模型请求超时',network_error:'印象模型网络异常',output_truncated:'印象模型输出被截断',model_disabled:'印象模型未启用或配置',model_busy:'印象模型当前繁忙',internal_error:'印象服务内部异常'};
-  const harassmentReasons = {harassment_reviewed:'性骚扰判断完成',no_recent_messages:'最近10分钟内没有待审核发言',invalid_harassment_review:'性骚扰判断输出格式无效',network_timeout:'判断模型请求超时',network_error:'判断模型网络异常',output_truncated:'判断模型输出被截断',model_disabled:'判断模型未启用或配置',model_busy:'判断模型当前繁忙',internal_error:'判断服务内部异常'};
+  const harassmentReasons = {harassment_reviewed:'性骚扰判断完成',review_disabled:'性骚扰判断已关闭',no_recent_messages:'最近10分钟内没有待审核发言',invalid_harassment_review:'性骚扰判断输出格式无效',network_timeout:'判断模型请求超时',network_error:'判断模型网络异常',output_truncated:'判断模型输出被截断',model_disabled:'判断模型未启用或配置',model_busy:'判断模型当前繁忙',internal_error:'判断服务内部异常'};
   return (details.harassment_review ? harassmentReasons[row.reason] : details.impressions ? impressionReasons[row.reason] : details.summary ? summaryReasons[row.reason] : answerReasons[row.reason]) || row.reason || '未完成';
 }
 function renderTraceSummary(summary) {
@@ -978,7 +980,10 @@ function renderTraceHarassmentReview(review) {
     return `<li>消息 ${esc(item.index)} · ${status}${error}</li>`;
   }).join('') : '';
   const recall = recallResults ? `<h4>命中消息处理结果</h4><ul>${recallResults}</ul>` : '';
-  return `<h3>性骚扰判断任务</h3><p class="hint">最近 ${review.scan_window_seconds / 60} 分钟 · 扫描 ${review.scan_count || 0} 条 · 命中 ${review.flagged || 0} 条${review.indices?.length ? '（消息序号：'+review.indices.join('、')+'）' : ''}</p><p class="hint">${review.recall_enabled ? '撤回开关已开启，机器人尝试撤回' : '撤回开关关闭，未调用撤回接口'}</p>${recall}`;
+  const reviewStatus = review.review_enabled === false
+    ? `判断已关闭 · ${review.candidate_count || 0} 条近期候选未审核`
+    : `最近 ${review.scan_window_seconds / 60} 分钟 · 扫描 ${review.scan_count || 0} 条 · 命中 ${review.flagged || 0} 条${review.indices?.length ? '（消息序号：'+review.indices.join('、')+'）' : ''}`;
+  return `<h3>性骚扰判断任务</h3><p class="hint">${reviewStatus}</p><p class="hint">${review.recall_enabled ? '撤回开关已开启，机器人尝试撤回' : '撤回开关关闭，未调用撤回接口'}</p>${recall}`;
 }
 $('trace-list').onclick = event => {
   const button = event.target.closest('[data-trace]');

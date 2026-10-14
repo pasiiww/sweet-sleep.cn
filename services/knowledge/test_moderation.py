@@ -31,6 +31,7 @@ class ModerationTests(unittest.TestCase):
         self.assertEqual(self.call('GET', 'answer-settings')['sensitive_words'], answers.DEFAULT_SENSITIVE_WORDS)
         moderation_settings = self.call('GET', 'moderation-settings')
         self.assertFalse(moderation_settings['harassment_mute_enabled'])
+        self.assertTrue(moderation_settings['impression_harassment_review_enabled'])
         self.assertEqual(moderation_settings['harassment_mute_threshold'], 3)
         self.assertEqual(moderation_settings['harassment_mute_duration_minutes'], 10)
         self.configure([' cbz ', 'CBZ', 'bad phrase'])
@@ -63,10 +64,13 @@ class ModerationTests(unittest.TestCase):
         defaults = answers.defaults()
         self.configure(['cbz'])
         result = self.call('PUT', 'moderation-settings', {
-            'sensitive_words': ['(蛇/🐍)(精/米青)'], 'harassment_warning_enabled': False})
+            'sensitive_words': ['(蛇/🐍)(精/米青)'], 'harassment_warning_enabled': False,
+            'impression_harassment_review_enabled': False})
         self.assertEqual(len(result['sensitive_word_expansions'][0]), 4)
         self.assertFalse(result['harassment_warning_enabled'])
         self.assertFalse(result['impression_harassment_recall_enabled'])
+        self.assertFalse(result['impression_harassment_review_enabled'])
+        self.assertFalse(self.call('GET', 'moderation-settings')['impression_harassment_review_enabled'])
         self.assertEqual(self.call('GET', 'moderation-settings')['sensitive_words'], ['(蛇/🐍)(精/米青)'])
         self.assertTrue(self.call('GET', 'answer-settings')['enabled'])
         self.assertEqual(self.call('GET', 'answer-settings')['system_prompt'], defaults['system_prompt'])
@@ -89,12 +93,14 @@ class ModerationTests(unittest.TestCase):
         self.assertTrue(self.call('GET', 'moderation-settings')['impression_harassment_recall_enabled'])
         self.assertEqual(self.call('GET', 'moderation-settings')['harassment_mute_threshold'], 5)
         self.assertEqual(self.call('GET', 'moderation-settings')['harassment_mute_duration_minutes'], 25)
+        self.assertTrue(self.call('GET', 'moderation-settings')['impression_harassment_review_enabled'])
 
     def test_auto_mute_settings_reject_invalid_values(self):
         base = {'sensitive_words': []}
         for field, values in (
             ('harassment_mute_enabled', [1, 'true']),
             ('impression_harassment_recall_enabled', [1, 'true']),
+            ('impression_harassment_review_enabled', [1, 'true']),
             ('harassment_mute_threshold', [True, 0, 21]),
             ('harassment_mute_duration_minutes', [True, 0, 1441]),
         ):

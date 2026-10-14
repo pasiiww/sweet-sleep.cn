@@ -59,6 +59,7 @@ class ImpressionTests(unittest.TestCase):
                             detail['details']['model_calls'][0]['messages']))
         self.assertNotIn('喜欢角色', json.dumps(detail, ensure_ascii=False))
         self.assertEqual(detail['details']['impressions']['max_completion_tokens'], 4096)
+        self.assertEqual([message['role'] for message in model.call_args.args[1]], ['system', 'user'])
         self.assertIn('每轮最多15名成员', model.call_args.args[1][0]['content'])
         self.assertNotIn('sexual_harassment', json.dumps(model.call_args.args[1]))
         self.assertEqual(model.call_args.args[3], impressions.MAX_COMPLETION_TOKENS)
@@ -94,12 +95,12 @@ class ImpressionTests(unittest.TestCase):
         with test_answers.app.db() as c:
             self.assertEqual(memories.impression(c, memories.scope(self.kb, 'qq_group', '', 'g'), 'private-2'), '')
 
-    def test_both_prompts_keep_the_same_cache_prefix_before_task_rules(self):
-        shared = group_task_prompts.COMMON_PREFIX
-        self.assertTrue(impressions.PROMPT.startswith(shared))
-        self.assertTrue(harassment_review.PROMPT.startswith(shared))
-        self.assertIn('本次任务：', impressions.PROMPT[len(shared):])
-        self.assertIn('本次任务：', harassment_review.PROMPT[len(shared):])
+    def test_task_prompt_precedes_shared_rules_and_model_message_follows_prompt(self):
+        shared = group_task_prompts.COMMON_RULES
+        self.assertTrue(impressions.PROMPT.startswith('本次任务：'))
+        self.assertTrue(harassment_review.PROMPT.startswith('本次任务：'))
+        self.assertTrue(impressions.PROMPT.endswith(shared))
+        self.assertTrue(harassment_review.PROMPT.endswith(shared))
 
     def test_disabled_memory_and_empty_safe_transcript_skip_model(self):
         self.configure(api_key='private-key')
@@ -165,6 +166,7 @@ class ImpressionTests(unittest.TestCase):
         self.assertEqual(detail['details']['harassment_review']['indices'], [10, 12])
         self.assertEqual(detail['details']['harassment_review']['recall_enabled'], True)
         self.assertEqual(model.call_args.args[3], harassment_review.MAX_COMPLETION_TOKENS)
+        self.assertEqual([message['role'] for message in model.call_args.args[1]], ['system', 'user'])
         filtered = test_answers.app.api('GET', '/knowledge/api/traces', {}, {'harassment': ['1']})
         self.assertEqual(filtered['total'], 1)
         recorded = self.call('POST', 'group-impression-recalls', {
@@ -180,6 +182,37 @@ class ImpressionTests(unittest.TestCase):
             self.call('POST', 'group-impression-recalls', {
                 'trace_id': result['trace_id'], 'batch_id': 'c' * 64,
                 'results': [{'index': 12, 'status': 'failed', 'error_type': 'ApiError'}]})
+
+    def test_disabling_review_keeps_memory_task_active_and_uses_all_messages(self):
+        self.configure(api_key='private-key')
+        self.call('PUT', 'moderation-settings', {
+            'sensitive_words': [], 'impression_harassment_review_enabled': False,
+            'impression_harassment_recall_enabled': True,
+        })
+        review_request = self.review_request(batch='7' * 64, count=3)
+        with patch.object(answers, '_model_call') as model:
+            skipped = self.call('POST', 'group-harassment-review', review_request)
+            repeated = self.call('POST', 'group-harassment-review', review_request)
+            model.assert_not_called()
+        self.assertEqual(skipped, repeated)
+        self.assertEqual(skipped['reason'], 'review_disabled')
+        self.assertEqual(skipped['harassment_indices'], [])
+        self.assertEqual(skipped['harassment_scan_count'], 0)
+        self.assertFalse(skipped['harassment_recall_enabled'])
+        detail = self.call('GET', 'traces/' + skipped['trace_id'])
+        self.assertFalse(detail['details']['harassment_review']['review_enabled'])
+        self.assertEqual(detail['details']['harassment_review']['candidate_count'], 3)
+
+        memory_request = self.request(1, batch='8' * 64)
+        output = json.dumps({'member_impressions': [
+            {'key': 'speaker1', 'action': 'append', 'content': '喜欢绘画'}]})
+        with patch.object(answers, '_model_call', return_value=output) as model:
+            updated = self.call('POST', 'group-impressions', memory_request)
+        self.assertTrue(updated['ok'])
+        self.assertEqual(updated['updated'], 1)
+        self.assertEqual([message['role'] for message in model.call_args.args[1]], ['system', 'user'])
+        self.assertEqual(json.loads(model.call_args.args[1][1]['content'])['transcript'],
+                         memory_request['transcript'])
 
     def test_review_rejects_bad_times_and_never_scans_outside_window(self):
         self.configure(api_key='private-key')

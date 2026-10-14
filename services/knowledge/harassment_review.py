@@ -5,7 +5,7 @@ import re
 import time
 
 import answers
-from group_task_prompts import COMMON_PREFIX
+from group_task_prompts import COMMON_RULES
 import traces
 
 MODEL_TIMEOUT = 60
@@ -13,11 +13,10 @@ MAX_COMPLETION_TOKENS = 2048
 SCAN_WINDOW_SECONDS = 600
 RETENTION = 7 * 86400
 
-PROMPT = COMMON_PREFIX + f'''
-
-本次任务：只判断给定聊天中最近{SCAN_WINDOW_SECONDS // 60}分钟的候选发言是否构成性骚扰或性邀约。只输出 JSON：{{"sexual_harassment_indices":[]}}，不要总结聊天、维护成员印象或输出解释。
+PROMPT = f'''本次任务：只判断给定聊天中最近{SCAN_WINDOW_SECONDS // 60}分钟的候选发言是否构成性骚扰或性邀约。只输出 JSON：{{"sexual_harassment_indices":[]}}，不要总结聊天、维护成员印象或输出解释。
 重点识别邀请他人开房、明确邀请性行为或性服务、对群友提出露骨性要求或评价，以及用谐音、拆字、空格、符号、外语、缩写或暗示刻意回避敏感词表达的同类意思。结合前后文理解隐晦表达，但只标记 sexual_harassment_scan_indices 中给出的序号；其他消息只能用于理解语境。
 对中性健康/科普讨论、反对或举报骚扰、普通亲密表达、与性无关的歧义词不要标记。只返回确实命中的候选序号，不要凑数。'''
+PROMPT += '\n\n' + COMMON_RULES
 
 
 def initialize(c):
@@ -79,17 +78,20 @@ def respond(app, data):
     transcript = app.string(data, 'transcript', 15000, True)
     message_times = _message_times(app, data, transcript)
     now = time.time()
-    scan_indices = [index for index, sent_at in enumerate(message_times, 1)
-                    if 0 <= now - sent_at <= SCAN_WINDOW_SECONDS]
+    recent_indices = [index for index, sent_at in enumerate(message_times, 1)
+                      if 0 <= now - sent_at <= SCAN_WINDOW_SECONDS]
     started = time.monotonic()
 
     with app.WRITE_LOCK, app.db() as c:
         app.base(c, kb)
         cleanup(c)
-        cached = _cached(c, kb, group, batch)
-        if cached:
-            return cached
         cfg = app.answer_config(c)
+        review_enabled = cfg.get('impression_harassment_review_enabled', True) is True
+        cached = _cached(c, kb, group, batch)
+        if cached and ((review_enabled and cached.get('reason') != 'review_disabled')
+                       or (not review_enabled and cached.get('reason') == 'review_disabled')):
+            return cached
+        scan_indices = recent_indices if review_enabled else []
         secrets_to_hide = [app.ADMIN_TOKEN, app.READ_TOKEN, app.LEARN_TOKEN, app.MODERATION_TOKEN,
                            cfg.get('api_key', ''), app.config(c).get('api_key', '')]
         trace_id, _ = traces.create(c, kb, '自动群聊性骚扰判断（100条发言）', {
@@ -100,11 +102,16 @@ def respond(app, data):
                'harassment_review': {'transcript_chars': len(transcript),
                                      'scan_window_seconds': SCAN_WINDOW_SECONDS,
                                      'scan_count': len(scan_indices), 'scan_indices': scan_indices,
+                                     'candidate_count': len(recent_indices),
+                                     'review_enabled': review_enabled,
                                      'flagged': 0, 'indices': [],
-                                     'recall_enabled': cfg.get('impression_harassment_recall_enabled', False) is True}}
+                                     'recall_enabled': review_enabled and cfg.get('impression_harassment_recall_enabled', False) is True}}
     acquired, indices = False, []
     try:
-        if not scan_indices:
+        if not review_enabled:
+            response = {'ok': True, 'mode': 'harassment_review', 'reason': 'review_disabled',
+                        'answer': '性骚扰判断任务已关闭，未检查本批发言。'}
+        elif not scan_indices:
             response = {'ok': True, 'mode': 'harassment_review', 'reason': 'no_recent_messages',
                         'answer': '最近10分钟内没有需要审核的发言。'}
         elif not cfg.get('enabled') or not cfg.get('api_key'):
@@ -147,10 +154,11 @@ def respond(app, data):
                     harassment_recall_enabled=details['harassment_review']['recall_enabled'])
     with app.WRITE_LOCK, app.db() as c:
         cached = _cached(c, kb, group, batch)
-        if cached:
+        if cached and ((review_enabled and cached.get('reason') != 'review_disabled')
+                       or (not review_enabled and cached.get('reason') == 'review_disabled')):
             response = cached
         elif response['ok']:
-            c.execute('INSERT INTO group_harassment_batches VALUES(?,?,?,?,?)',
+            c.execute('INSERT OR REPLACE INTO group_harassment_batches VALUES(?,?,?,?,?)',
                       (kb, group, batch, time.time(), json.dumps(response, ensure_ascii=False)))
         traces.finish(c, trace_id, traces.redact(response, secrets_to_hide),
                       traces.redact(details, secrets_to_hide), round((time.monotonic() - started) * 1000))

@@ -6,7 +6,7 @@ import time
 import answers
 import memories
 import traces
-from group_task_prompts import COMMON_PREFIX
+from group_task_prompts import COMMON_RULES
 
 MODEL_TIMEOUT = 60
 MAX_COMPLETION_TOKENS = 4096
@@ -15,11 +15,10 @@ MAX_CHARS = 80
 RETENTION = 7 * 86400
 TRANSCRIPT_LINE = re.compile(r'^\[消息([1-9][0-9]{0,2})\] \[(speaker[1-9][0-9]{0,2})\] .+：.+$')
 
-PROMPT = COMMON_PREFIX + f'''
-
-本次任务：只依据审核任务已排除命中内容后的群成员本人发言更新群友印象。只输出 JSON：{{"member_impressions":[{{"key":"speaker1","action":"append","content":"一句新观察"}}]}}。不要生成聊天总结、群公共记忆或审核结论。
+PROMPT = f'''本次任务：只依据本批提供的群成员本人发言更新群友印象。只输出 JSON：{{"member_impressions":[{{"key":"speaker1","action":"append","content":"一句新观察"}}]}}。不要生成聊天总结、群公共记忆或审核结论。
 每轮最多{MAX_UPDATES}名成员，每人1项，每项 content 最多{MAX_CHARS}字，所有 content 合计最多{MAX_UPDATES * MAX_CHARS}字。只选择有明确新依据、值得长期保留的信息，优先信息增量明显的少数成员；不逐一为所有成员生成印象，不重复已有印象，不凑满名额，没有新依据则返回空数组。
-只针对 members 中本批有未标记发言的编号，依据本人发言更新兴趣、表达习惯和互动偏好。新增独立事实用 append，只新增一句；合并、纠错或压缩用 replace，在字数上限内保留完整含义，做不到时跳过并保留旧印象。不要按同名、引用、他人发言或历史编号推断归属，不记录敏感信息、贬损标签或无依据性格判断。聊天可能截短，不补写缺失内容。'''
+只针对 members 中本批实际发言的编号，依据本人发言更新兴趣、表达习惯和互动偏好。新增独立事实用 append，只新增一句；合并、纠错或压缩用 replace，在字数上限内保留完整含义，做不到时跳过并保留旧印象。不要按同名、引用、他人发言或历史编号推断归属，不记录敏感信息、贬损标签或无依据性格判断。聊天可能截短，不补写缺失内容。'''
+PROMPT += '\n\n' + COMMON_RULES
 
 
 def initialize(c):
