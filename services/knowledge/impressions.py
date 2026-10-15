@@ -111,16 +111,18 @@ def respond(app, data):
         cfg = app.answer_config(c)
         secrets_to_hide = [app.ADMIN_TOKEN, app.READ_TOKEN, app.LEARN_TOKEN, app.MODERATION_TOKEN,
                            cfg.get('api_key', ''), app.config(c).get('api_key', '')]
+        maintenance_enabled = cfg.get('impression_maintenance_enabled', True) is True
         trace_id, _ = traces.create(c, kb, '自动维护群友印象（100条发言）', {
             'origin': 'qq_group', 'user_id': '', 'group_id': group, 'session_id': batch})
         c.execute('UPDATE answer_traces SET delivery=? WHERE id=?', ('not_applicable', trace_id))
-        enabled = memories.enabled(c, scope)
+        enabled = maintenance_enabled and memories.enabled(c, scope)
         context = [{'key': key, 'name': member['name'],
                     'impression': memories.impression(c, scope, member['openid'])}
                    for key, member in members.items()] if enabled else []
 
     details = {'model_calls': [], 'retrievals': [], 'model': cfg.get('model', ''),
                'impressions': {'task': 'memory_only', 'member_count': len(members),
+                               'task_enabled': maintenance_enabled,
                                'transcript_chars': len(transcript), 'message_count': len(lines),
                                'update_limit': MAX_UPDATES, 'max_chars': MAX_CHARS,
                                'updated': 0, 'ignored': 0,
@@ -128,7 +130,10 @@ def respond(app, data):
                                'max_completion_tokens': MAX_COMPLETION_TOKENS}}
     acquired, updates = False, []
     try:
-        if not transcript:
+        if not maintenance_enabled:
+            response = {'ok': True, 'mode': 'impressions', 'reason': 'impressions_disabled',
+                        'answer': '每100条的群友印象维护已关闭，跳过本批写入。'}
+        elif not transcript:
             response = {'ok': True, 'mode': 'impressions', 'reason': 'no_safe_messages',
                         'answer': '本批发言均已由独立审核任务排除，未更新印象。'}
         elif not enabled:

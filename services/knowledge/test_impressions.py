@@ -115,6 +115,30 @@ class ImpressionTests(unittest.TestCase):
         self.assertEqual(empty['reason'], 'no_safe_messages')
         self.assertEqual(self.call('GET', 'traces/' + empty['trace_id'])['mode'], 'impressions')
 
+    def test_disabled_maintenance_switch_skips_model_and_writes_but_completes_batch(self):
+        self.configure(api_key='private-key')
+        self.call('PUT', 'moderation-settings', {
+            'sensitive_words': [], 'impression_harassment_review_enabled': False,
+            'impression_maintenance_enabled': False})
+        request = self.request(1, batch='e' * 64)
+        with patch.object(answers, '_model_call') as model:
+            result = self.call('POST', 'group-impressions', request)
+            again = self.call('POST', 'group-impressions', request)
+            model.assert_not_called()
+        self.assertEqual(result, again)
+        self.assertTrue(result['ok'])
+        self.assertEqual(result['reason'], 'impressions_disabled')
+        self.assertEqual(result['updated'], 0)
+        self.assertEqual(result['ignored'], 0)
+        scope = memories.scope(self.kb, 'qq_group', '', 'g')
+        with test_answers.app.db() as c:
+            self.assertEqual(memories.impression(c, scope, 'private-1'), '')
+            self.assertEqual(c.execute('SELECT count(*) FROM group_impression_batches').fetchone()[0], 1)
+        detail = self.call('GET', 'traces/' + result['trace_id'])
+        self.assertEqual(detail['reason'], 'impressions_disabled')
+        self.assertFalse(detail['details']['impressions']['task_enabled'])
+        self.assertEqual(detail['details']['model_calls'], [])
+
     def test_failed_memory_batch_retries_and_update_transaction_rolls_back(self):
         self.configure(api_key='private-key')
         output = json.dumps({'member_impressions': [{'key': 'speaker1', 'action': 'append', 'content': '喜欢绘画'}]})

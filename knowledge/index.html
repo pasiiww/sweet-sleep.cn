@@ -58,7 +58,9 @@
           <label class="checkbox"><input id="harassment-warning-enabled" type="checkbox">启用性骚扰提醒</label>
           <span class="hint">关闭后仍会统计并尝试撤回，只不发送提醒。</span>
           <label class="checkbox"><input id="impression-harassment-review-enabled" type="checkbox">启用自动印象任务的性骚扰判断</label>
-          <span class="hint">关闭后跳过判断；每100条发言的印象任务仍会运行并使用完整批次。撤回由下方独立开关控制。</span>
+          <span class="hint">关闭后跳过判断；每100条发言的印象维护由下方独立开关控制。撤回也由独立开关控制。</span>
+          <label class="checkbox"><input id="impression-maintenance-enabled" type="checkbox">启用每100条发言的群友印象维护</label>
+          <span class="hint">关闭后批次仍会记录 Trace 并结单，但不调用印象模型、不写入群友印象；普通对话记忆保持不变。</span>
           <label class="checkbox"><input id="impression-harassment-recall-enabled" type="checkbox">启用自动印象审核的性骚扰撤回</label>
           <span class="hint">默认关闭；关闭时仍会审核并记录 Trace，不调用撤回接口。观察命中准确率后可在这里开启。</span>
           <div class="harassment-mute-config">

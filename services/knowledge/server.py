@@ -862,6 +862,9 @@ def api(method, path, data, params):
             impression_review_enabled = data.get('impression_harassment_review_enabled')
             if impression_review_enabled is not None and type(impression_review_enabled) is not bool:
                 fail(400, 'impression_harassment_review_enabled 必须为布尔值')
+            impression_maintenance_enabled = data.get('impression_maintenance_enabled')
+            if impression_maintenance_enabled is not None and type(impression_maintenance_enabled) is not bool:
+                fail(400, 'impression_maintenance_enabled 必须为布尔值')
             with execution_budget.locked(WRITE_LOCK), db() as c:
                 cfg = answer_config(c)
                 cfg['sensitive_words'] = words
@@ -873,6 +876,8 @@ def api(method, path, data, params):
                     cfg['impression_harassment_recall_enabled'] = impression_recall_enabled
                 if impression_review_enabled is not None:
                     cfg['impression_harassment_review_enabled'] = impression_review_enabled
+                if impression_maintenance_enabled is not None:
+                    cfg['impression_maintenance_enabled'] = impression_maintenance_enabled
                 mute_threshold = data.get('harassment_mute_threshold', cfg.get('harassment_mute_threshold', 3))
                 mute_minutes = data.get('harassment_mute_duration_minutes',
                                         cfg.get('harassment_mute_duration_minutes', 10))
@@ -890,6 +895,7 @@ def api(method, path, data, params):
                     'harassment_warning_enabled': cfg.get('harassment_warning_enabled', True),
                     'impression_harassment_recall_enabled': cfg.get('impression_harassment_recall_enabled', False),
                     'impression_harassment_review_enabled': cfg.get('impression_harassment_review_enabled', True),
+                    'impression_maintenance_enabled': cfg.get('impression_maintenance_enabled', True),
                     'harassment_mute_enabled': cfg.get('harassment_mute_enabled', False),
                     'harassment_mute_threshold': cfg.get('harassment_mute_threshold', 3),
                     'harassment_mute_duration_minutes': cfg.get('harassment_mute_duration_minutes', 10)}
@@ -902,6 +908,7 @@ def api(method, path, data, params):
                         'harassment_warning_enabled': cfg.get('harassment_warning_enabled', True),
                         'impression_harassment_recall_enabled': cfg.get('impression_harassment_recall_enabled', False),
                         'impression_harassment_review_enabled': cfg.get('impression_harassment_review_enabled', True),
+                        'impression_maintenance_enabled': cfg.get('impression_maintenance_enabled', True),
                         'harassment_mute_enabled': cfg.get('harassment_mute_enabled', False),
                         'harassment_mute_threshold': cfg.get('harassment_mute_threshold', 3),
                         'harassment_mute_duration_minutes': cfg.get('harassment_mute_duration_minutes', 10)}
@@ -1195,6 +1202,7 @@ def api(method, path, data, params):
                        'harassment_warning_enabled': harassment_warning_enabled,
                        'impression_harassment_recall_enabled': cfg.get('impression_harassment_recall_enabled', False),
                        'impression_harassment_review_enabled': cfg.get('impression_harassment_review_enabled', True),
+                       'impression_maintenance_enabled': cfg.get('impression_maintenance_enabled', True),
                        'harassment_mute_enabled': cfg.get('harassment_mute_enabled', False),
                        'harassment_mute_threshold': cfg.get('harassment_mute_threshold', 3),
                        'harassment_mute_duration_minutes': cfg.get('harassment_mute_duration_minutes', 10),

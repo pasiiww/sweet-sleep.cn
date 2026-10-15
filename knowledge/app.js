@@ -575,6 +575,7 @@ async function loadModerationSettings() {
   moderationRules = Array.isArray(cfg.sensitive_words) ? cfg.sensitive_words : [];
   $('harassment-warning-enabled').checked = cfg.harassment_warning_enabled !== false;
   $('impression-harassment-review-enabled').checked = cfg.impression_harassment_review_enabled !== false;
+  $('impression-maintenance-enabled').checked = cfg.impression_maintenance_enabled !== false;
   $('impression-harassment-recall-enabled').checked = cfg.impression_harassment_recall_enabled === true;
   $('harassment-mute-enabled').checked = cfg.harassment_mute_enabled === true;
   $('harassment-mute-threshold').value = cfg.harassment_mute_threshold ?? 3;
@@ -738,6 +739,7 @@ $('moderation-settings-form').onsubmit = event => { event.preventDefault(); busy
     sensitive_words:moderationRules,
     harassment_warning_enabled:$('harassment-warning-enabled').checked,
     impression_harassment_review_enabled:$('impression-harassment-review-enabled').checked,
+    impression_maintenance_enabled:$('impression-maintenance-enabled').checked,
     impression_harassment_recall_enabled:$('impression-harassment-recall-enabled').checked,
     harassment_mute_enabled:$('harassment-mute-enabled').checked,
     harassment_mute_threshold:muteThreshold,
@@ -958,7 +960,7 @@ function renderTraceModelCall(call, index) {
 }
 function traceReason(row, details) {
   const summaryReasons = {summary_generated:'总结生成成功',model_disabled:'总结模型尚未启用或配置',model_busy:'总结模型当前繁忙',network_timeout:'总结模型请求超时',network_error:'总结模型网络异常',invalid_key:'总结模型 API Key 无效',insufficient_balance:'总结模型余额不足',access_denied:'总结模型无访问权限',rate_limited:'总结模型请求被限流',upstream_error:'总结模型服务异常',invalid_response:'总结模型响应异常',output_truncated:'总结模型输出被截断',invalid_summary:'总结内容格式无效',empty_summary:'总结内容为空',internal_error:'总结服务内部异常'};
-  const impressionReasons = {impressions_updated:'印象更新完成',memory_disabled:'群聊记忆已关闭，跳过本批',no_safe_messages:'没有未标记的发言，跳过印象更新',invalid_impressions:'印象输出格式无效',network_timeout:'印象模型请求超时',network_error:'印象模型网络异常',output_truncated:'印象模型输出被截断',model_disabled:'印象模型未启用或配置',model_busy:'印象模型当前繁忙',internal_error:'印象服务内部异常'};
+  const impressionReasons = {impressions_updated:'印象更新完成',impressions_disabled:'每100条的印象维护已关闭，跳过写入',memory_disabled:'群聊记忆已关闭，跳过本批',no_safe_messages:'没有未标记的发言，跳过印象更新',invalid_impressions:'印象输出格式无效',network_timeout:'印象模型请求超时',network_error:'印象模型网络异常',output_truncated:'印象模型输出被截断',model_disabled:'印象模型未启用或配置',model_busy:'印象模型当前繁忙',internal_error:'印象服务内部异常'};
   const harassmentReasons = {harassment_reviewed:'性骚扰判断完成',review_disabled:'性骚扰判断已关闭',no_recent_messages:'最近10分钟内没有待审核发言',invalid_harassment_review:'性骚扰判断输出格式无效',network_timeout:'判断模型请求超时',network_error:'判断模型网络异常',output_truncated:'判断模型输出被截断',model_disabled:'判断模型未启用或配置',model_busy:'判断模型当前繁忙',internal_error:'判断服务内部异常'};
   return (details.harassment_review ? harassmentReasons[row.reason] : details.impressions ? impressionReasons[row.reason] : details.summary ? summaryReasons[row.reason] : answerReasons[row.reason]) || row.reason || '未完成';
 }
@@ -970,7 +972,7 @@ function renderTraceImpressions(impressions) {
   if (!impressions) return '';
   const legacyModeration = impressions.harassment_scan_window_seconds === undefined ? '' : `<p class="hint">旧版合并任务：审核本批最近 ${impressions.harassment_scan_window_seconds / 60} 分钟内 ${impressions.harassment_scan_count || 0} 条 · 命中 ${impressions.harassment_flagged || 0} 条${impressions.harassment_indices?.length ? '（消息序号：'+impressions.harassment_indices.join('、')+'）' : ''} · ${impressions.harassment_recall_enabled ? '撤回开关已开启' : '撤回开关关闭'}</p>`;
   const legacyRecall = Array.isArray(impressions.harassment_recall_results) ? `<ul>${impressions.harassment_recall_results.map(item => `<li>消息 ${esc(item.index)} · ${{recalled:'已撤回',failed:'撤回失败',expired:'超出窗口，未尝试'}[item.status] || '未知状态'}${item.status === 'failed' ? ` · ${esc(item.error_type || '未知错误')}${item.error_code ? ' · 错误码 '+esc(item.error_code) : ''}` : ''}</li>`).join('')}</ul>` : '';
-  return `<h3>群友印象维护任务</h3><p class="hint">每群 100 条有效发言触发 · 本批 ${impressions.transcript_chars} 字符 · ${impressions.member_count} 名成员</p><p class="hint">已更新 ${impressions.updated} / ${impressions.update_limit} 人 · 每条最多 ${impressions.max_chars} 字 · 已忽略 ${impressions.ignored} 项 · 输出上限 ${impressions.max_completion_tokens || '—'} tokens</p>${legacyModeration}${legacyRecall}`;
+  return `<h3>群友印象维护任务</h3><p class="hint">每群 100 条有效发言触发 · 本批 ${impressions.transcript_chars} 字符 · ${impressions.member_count} 名成员 · ${impressions.task_enabled === false ? '任务开关已关闭，跳过模型与写入' : '任务开关已开启'}</p><p class="hint">已更新 ${impressions.updated} / ${impressions.update_limit} 人 · 每条最多 ${impressions.max_chars} 字 · 已忽略 ${impressions.ignored} 项 · 输出上限 ${impressions.max_completion_tokens || '—'} tokens</p>${legacyModeration}${legacyRecall}`;
 }
 function renderTraceHarassmentReview(review) {
   if (!review) return '';

@@ -133,6 +133,7 @@ def defaults():
             'sensitive_words': DEFAULT_SENSITIVE_WORDS.copy(), 'harassment_warning_enabled': True,
             'impression_harassment_recall_enabled': False,
             'impression_harassment_review_enabled': True,
+            'impression_maintenance_enabled': True,
             'harassment_mute_enabled': False, 'harassment_mute_threshold': 3,
             'harassment_mute_duration_minutes': 10,
             'drink_menu': [dict(item) for item in DEFAULT_DRINK_MENU],
