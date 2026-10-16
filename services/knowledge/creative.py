@@ -51,11 +51,11 @@ def respond(app, data):
     started = time.monotonic()
     acquired = False
     try:
-        quota = app.reserve_daily_query(meta['user_id'])
+        quota = app.reserve_daily_creative_query(meta['user_id'])
         details['quota'] = quota
         if not quota['allowed']:
             response = {'mode': 'quota', 'reason': 'daily_quota_exhausted',
-                        'answer': f'今天的{app.DAILY_QUERY_LIMIT}次咨询/创作额度已经用完啦～明天零点恢复，再来找我聊呀 ♡'}
+                        'answer': f'今天的俳句/对联{app.DAILY_CREATIVE_LIMIT}次创作额度已经用完啦～明天零点恢复，再来找我聊呀 ♡'}
         elif not cfg.get('enabled') or not cfg.get('api_key'):
             response = {'mode': 'unavailable', 'reason': 'model_disabled',
                         'answer': '创作模型暂时没有启用或配置，请联系管理员。'}

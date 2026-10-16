@@ -15,17 +15,41 @@ class QuotaTests(unittest.TestCase):
     def tearDown(self):self.guard.stop();self.temp.cleanup()
     def ask(self,origin='qq_group',user='same-user',group='one'):
         return app.respond({'kb_id':self.kb,'query':'测试','origin':origin,'user_id':user,'group_id':group})
-    def test_forty_shared_across_channels_and_no_pipeline_on_forty_first(self):
+    def test_ten_chat_queries_shared_across_channels_and_no_pipeline_on_eleventh(self):
         with patch.object(app,'respond_pipeline',return_value={'mode':'model','reason':'ok','answer':'mock'}) as pipeline:
-            for i in range(40):
+            for i in range(10):
                 r=self.ask('qq_private' if i%2 else 'qq_group',group=str(i))
                 self.assertEqual(r['quota']['used'],i+1)
-            r=self.ask('qq_private');self.assertEqual(r['mode'],'quota');self.assertEqual(pipeline.call_count,40)
+                self.assertEqual(r['quota']['limit'],10)
+            r=self.ask('qq_private');self.assertEqual(r['mode'],'quota');self.assertEqual(pipeline.call_count,10)
+            self.assertEqual(r['quota']['remaining'],0)
             with app.db() as c:
                 d=json.loads(c.execute('SELECT details FROM answer_traces WHERE id=?',(r['trace_id'],)).fetchone()[0])
                 self.assertEqual(d['model_calls'],[]);self.assertEqual(d['retrievals'],[])
             self.assertEqual(self.ask(user='other')['mode'],'model')
             app.initialize();self.assertEqual(self.ask()['mode'],'quota')
+
+    def test_couplets_and_haiku_share_three_daily_creative_calls_separate_from_chat(self):
+        requests = (('couplet', 'qq_private'), ('haiku', 'qq_group'), ('couplet', 'qq_private'))
+        for index, (style, origin) in enumerate(requests, 1):
+            result=app.api('POST','/knowledge/api/agent/creative',{
+                'kb_id':self.kb,'style':style,'query':'山色入帘青','origin':origin,
+                'user_id':'same-user','group_id':'group-one'}, {})
+            self.assertEqual(result['quota']['used'],index)
+            self.assertEqual(result['quota']['limit'],3)
+        blocked=app.api('POST','/knowledge/api/agent/creative',{
+            'kb_id':self.kb,'style':'haiku','query':'春夜微雨','origin':'qq_private',
+            'user_id':'same-user'}, {})
+        self.assertEqual(blocked['mode'],'quota')
+        self.assertEqual(blocked['quota']['used'],3)
+        self.assertEqual(blocked['quota']['remaining'],0)
+        chat=self.ask(origin='qq_private',user='same-user')
+        self.assertEqual(chat['quota']['used'],1)
+        self.assertEqual(chat['quota']['limit'],10)
+        other=app.api('POST','/knowledge/api/agent/creative',{
+            'kb_id':self.kb,'style':'haiku','query':'春夜微雨','origin':'qq_private',
+            'user_id':'other-user'}, {})
+        self.assertEqual(other['quota']['used'],1)
     def test_concurrency_atomic_and_beijing_midnight_reset(self):
         # 2026-09-09 23:59:59 Beijing, one second before the daily reset.
         from datetime import datetime
@@ -33,9 +57,24 @@ class QuotaTests(unittest.TestCase):
         with patch.object(app.time,'time',return_value=at):
             with ThreadPoolExecutor(max_workers=8) as pool:
                 results=list(pool.map(lambda _:app.reserve_daily_query('one'),range(50)))
-            self.assertEqual(sum(r['allowed'] for r in results),40)
+                self.assertEqual(sum(r['allowed'] for r in results),10)
+                self.assertEqual({r['limit'] for r in results},{10})
         with patch.object(app.time,'time',return_value=at+1):
             r=app.reserve_daily_query('one');self.assertEqual(r['used'],1);self.assertEqual(r['day'],'2026-09-10')
+
+    def test_creative_quota_is_atomic_and_resets_at_beijing_midnight(self):
+        from datetime import datetime
+        at=datetime.fromisoformat('2026-09-09T23:59:59+08:00').timestamp()
+        with patch.object(app.time,'time',return_value=at):
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                results=list(pool.map(lambda _:app.reserve_daily_creative_query('one'),range(30)))
+            self.assertEqual(sum(r['allowed'] for r in results),3)
+            self.assertEqual({r['limit'] for r in results},{3})
+        with patch.object(app.time,'time',return_value=at+1):
+            r=app.reserve_daily_creative_query('one')
+            self.assertTrue(r['allowed'])
+            self.assertEqual(r['used'],1)
+            self.assertEqual(r['day'],'2026-09-10')
     def test_missing_qq_identity_rejected(self):
         with self.assertRaises(app.Problem):self.ask(user='')
 

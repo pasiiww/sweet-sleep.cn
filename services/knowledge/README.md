@@ -158,9 +158,9 @@ curl https://sweet-sleep.cn/knowledge/api/retrieve \
 - `POST /knowledge/api/answer-settings/test`：管理者用已保存配置发送一条测试请求，会产生服务商调用费用。
 - `POST /knowledge/api/answer`：管理密钥或召回密钥可调用，参数 `kb_id`、`query`、可选 `group_id`。配置了模型后，此接口可产生调用费用。机器人不能修改提示词或模型配置。
 
-- `POST /knowledge/api/agent/answer`：QQ 机器人使用的 LangChain 回答入口；沿用每日额度、会话历史与 trace。全部工具合计最多调用8次，最多调用10次模型；第9次工具调用会被系统拦截，由模型根据已取得的资料直接完成回复。群聊默认携带本群最近10条聊天，需要更多时 agent 才调用与 stdio MCP 共用的 `get_recent_chat_messages` 查询当前群最近7天记录；聊天记录会附带最多12字的发送者昵称。群聊记忆按群隔离，私聊记忆按用户隔离；本人昵称、个人事实与印象自动注入，群公共记忆只有在问题相关时才由 `get_group_memories` 工具检索。群聊限定当前群，私聊限定本人参与过的群，并遵守各群记忆开关。群聊提问会按 OpenID 注入当前发言者、引用作者及被艾特成员的印象。BA 问题优先查 GameKee，资料不足时可再查 Blue Archive Wikiru。
+- `POST /knowledge/api/agent/answer`：QQ 机器人使用的 LangChain 回答入口；按用户 OpenID 共享每天10条普通对话额度，并沿用会话历史与 Trace。全部工具合计最多调用8次，最多调用10次模型；第9次工具调用会被系统拦截，由模型根据已取得的资料直接完成回复。群聊默认携带本群最近10条聊天，需要更多时 agent 才调用与 stdio MCP 共用的 `get_recent_chat_messages` 查询当前群最近7天记录；聊天记录会附带最多12字的发送者昵称。群聊记忆按群隔离，私聊记忆按用户隔离；本人昵称、个人事实与印象自动注入，群公共记忆只有在问题相关时才由 `get_group_memories` 工具检索。群聊限定当前群，私聊限定本人参与过的群，并遵守各群记忆开关。群聊提问会按 OpenID 注入当前发言者、引用作者及被艾特成员的印象。BA 问题优先查 GameKee，资料不足时可再查 Blue Archive Wikiru。
   如果 `origin=qq_group` 且请求带 `image_data_urls`，最多接收1张、4 MiB以内的 JPEG/PNG/GIF/WebP data URL，以多模态消息直接交给模型。QQ 机器人可临时读取不超过12 MiB的源图，超过4 MiB时先缩小分辨率并转为 JPEG，再提交给本接口。图片内容只在本次请求内存中处理，不写入 Trace、会话历史或知识库；请求体上限对该接口单独放宽到 6,000,000 字节。
-- `POST /knowledge/api/agent/creative`：QQ 机器人的对联和俳句入口。参数 `kb_id`、`style`（`couplet`/`haiku`）、`query`、`origin` 和 `user_id`，可附 `reply_reference`；引用内容优先作为创作素材。可选 `image_data_urls` 最多1张、4 MiB以内的 JPEG/PNG/GIF/WebP data URL，与创作文本一同作为模型输入；QQ 机器人可临时读取不超过12 MiB的源图，超过4 MiB时先缩小分辨率并转为 JPEG。图片只在本次请求内存中处理，不写入 Trace、数据库或会话历史。接口使用后台已配置的客服模型，不检索知识库；每次有效请求占用用户每日40次共享额度，并记录 Trace 和 QQ 发送回执；请求体上限为 6,000,000 字节。
+- `POST /knowledge/api/agent/creative`：QQ 机器人的对联和俳句入口。参数 `kb_id`、`style`（`couplet`/`haiku`）、`query`、`origin` 和 `user_id`，可附 `reply_reference`；引用内容优先作为创作素材。可选 `image_data_urls` 最多1张、4 MiB以内的 JPEG/PNG/GIF/WebP data URL，与创作文本一同作为模型输入；QQ 机器人可临时读取不超过12 MiB的源图，超过4 MiB时先缩小分辨率并转为 JPEG。图片只在本次请求内存中处理，不写入 Trace、数据库或会话历史。接口使用后台已配置的客服模型，不检索知识库；俳句与对联合计每用户每天3次，与普通对话额度分开，并记录 Trace 和 QQ 发送回执；请求体上限为 6,000,000 字节。
 - `POST /knowledge/api/agent/memory`：QQ 机器人查看、清空、关闭或重新开启当前群/用户的长期记忆。机器人只提交身份和操作，不可读取其他群或用户记忆。
 - `POST /knowledge/api/agent/private-maintenance`：QQ 私聊管理员使用的 LangChain 维护入口；沿用 OpenID 白名单、先读取后修改、写入幂等和 trace。agent 最多调用8次工具、10次模型。
 
@@ -314,7 +314,7 @@ DeepSeek 统一调用层启用 `thinking.type=enabled`、`reasoning_effort=low`�
 ### 私聊维护工具
 
 
-私聊 `/help` 查看指令，`/公告 公告内容` 调用客服模型生成检索标题与近义词后新增公告条目，正文保持原文；`/modify 知识库 修改要求`、`/modify qa 修改要求`、`/add 商品库 商品信息` 开始维护。后续自然语言沿用所选库，最近30分钟最多6轮维护历史与顾客咨询隔离；`/退出` 结束。群聊不开放写操作，维护不占顾客20次咨询额度。
+私聊 `/help` 查看指令，`/公告 公告内容` 调用客服模型生成检索标题与近义词后新增公告条目，正文保持原文；`/modify 知识库 修改要求`、`/modify qa 修改要求`、`/add 商品库 商品信息` 开始维护。后续自然语言沿用所选库，最近30分钟最多6轮维护历史与顾客咨询隔离；`/退出` 结束。群聊不开放写操作，维护不占顾客每日10条对话额度。
 
 
 后台「模型设置 → 私聊维护权限」配置独立私聊 OpenID 白名单，公告同步和其他私聊维护共用该名单，通知收件人不自动获得权限。`GET/PUT /private-maintenance-settings` 仅管理密钥可访问；`POST /private-maintenance`、`POST /private-announcement` 仅服务端学习密钥或管理密钥可访问，公告接口会再次校验 OpenID 白名单；普通召回密钥不可调用。QQ 端传入平台真实 `user_openid`、消息 ID 和固定知识库 ID。公告文档使用每库稳定 ID，按消息 ID 幂等，服务端仅缓存同步回执哈希，不保存私聊 OpenID。

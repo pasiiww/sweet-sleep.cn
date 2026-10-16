@@ -48,7 +48,8 @@ MODERATION_TOKEN = os.environ.get('KB_MODERATION_TOKEN', '')
 WRITE_LOCK = threading.RLock()
 VECTOR_LOCK = threading.Lock()
 ANSWER_SLOTS = threading.BoundedSemaphore(4)
-DAILY_QUERY_LIMIT = 40
+DAILY_QUERY_LIMIT = 10
+DAILY_CREATIVE_LIMIT = 3
 MAX_CHUNKS = 10000
 DRINK_WEATHER_CACHE = {'key': None, 'expires': 0.0, 'forecasts': None, 'available': False}
 DRINK_WEATHER_CACHE_LOCK = threading.Lock()
@@ -104,6 +105,7 @@ def initialize():
         CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS entity_catalog (kb_id TEXT PRIMARY KEY REFERENCES bases(id) ON DELETE CASCADE, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS daily_queries (user_id TEXT NOT NULL, day TEXT NOT NULL, used INTEGER NOT NULL, PRIMARY KEY(user_id,day));
+        CREATE TABLE IF NOT EXISTS daily_creative_queries (user_id TEXT NOT NULL, day TEXT NOT NULL, used INTEGER NOT NULL, PRIMARY KEY(user_id,day));
         CREATE TABLE IF NOT EXISTS app_settings (name TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS drink_weather_daily (
           forecast_date TEXT PRIMARY KEY, max_temp REAL NOT NULL, fetched_at TEXT NOT NULL);
@@ -589,15 +591,32 @@ def search_terms(kb_id, terms, original_query='', catalog=None, *, max_results=8
     return {'results': selected, 'searches': searches}
 
 
-def reserve_daily_query(user_id):
-    # Identity only: channels, groups, knowledge bases and cleared sessions share this counter.
+def reserve_daily_quota(user_id, table, limit):
+    if table not in ('daily_queries', 'daily_creative_queries'):
+        raise ValueError('unknown daily quota table')
     day=datetime.fromtimestamp(time.time(),timezone(timedelta(hours=8))).date().isoformat()
     with execution_budget.locked(WRITE_LOCK),db() as c:
         c.execute('DELETE FROM daily_queries WHERE day<?',(day,))
-        c.execute('INSERT OR IGNORE INTO daily_queries VALUES(?,?,0)',(user_id,day))
-        allowed=c.execute('UPDATE daily_queries SET used=used+1 WHERE user_id=? AND day=? AND used<?',(user_id,day,DAILY_QUERY_LIMIT)).rowcount==1
-        used=c.execute('SELECT used FROM daily_queries WHERE user_id=? AND day=?',(user_id,day)).fetchone()[0]
-    return {'allowed':allowed,'used':used,'limit':DAILY_QUERY_LIMIT,'remaining':DAILY_QUERY_LIMIT-used,'day':day,'timezone':'Asia/Shanghai'}
+        c.execute('DELETE FROM daily_creative_queries WHERE day<?',(day,))
+        c.execute(f'INSERT OR IGNORE INTO {table} VALUES(?,?,0)',(user_id,day))
+        allowed=c.execute(f'UPDATE {table} SET used=used+1 WHERE user_id=? AND day=? AND used<?',
+                          (user_id,day,limit)).rowcount==1
+        stored_used=c.execute(f'SELECT used FROM {table} WHERE user_id=? AND day=?',
+                              (user_id,day)).fetchone()[0]
+    # A pre-deployment shared counter can exceed the new chat cap. Keep it intact,
+    # but report a bounded value so clients never display negative remaining quota.
+    used=min(stored_used,limit)
+    return {'allowed':allowed,'used':used,'limit':limit,'remaining':limit-used,'day':day,'timezone':'Asia/Shanghai'}
+
+
+def reserve_daily_query(user_id):
+    # Chat identity only: channels, groups, knowledge bases and cleared sessions share this counter.
+    return reserve_daily_quota(user_id, 'daily_queries', DAILY_QUERY_LIMIT)
+
+
+def reserve_daily_creative_query(user_id):
+    # Couplets and haiku share a separate daily counter for the same user identity.
+    return reserve_daily_quota(user_id, 'daily_creative_queries', DAILY_CREATIVE_LIMIT)
 
 
 def respond(data, pipeline=None):
@@ -621,7 +640,7 @@ def respond(data, pipeline=None):
         quota=reserve_daily_query(meta['user_id']) if meta['user_id'] else None
         if quota:details['quota']=quota
         if quota and not quota['allowed']:
-            response={'mode':'quota','reason':'daily_quota_exhausted','answer':f'今天的{DAILY_QUERY_LIMIT}次咨询/创作额度已经用完啦～明天零点恢复，再来找我聊呀 ♡','handoff':False,'mention_openids':[],'results':[]}
+            response={'mode':'quota','reason':'daily_quota_exhausted','answer':f'今天的{DAILY_QUERY_LIMIT}条对话额度已经用完啦～明天零点恢复，再来找我聊呀 ♡','handoff':False,'mention_openids':[],'results':[]}
         else:
             response = (pipeline or respond_pipeline)(data, details)
         if quota:response['quota']=quota
