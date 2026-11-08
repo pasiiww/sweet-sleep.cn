@@ -27,7 +27,7 @@ class DeadlineTests(unittest.TestCase):
 
     def test_default_schedule_and_idempotency(self):
         item = self.create()
-        self.assertEqual(item['reminders'], ['2026-01-01T09:00:00+08:00', '2026-01-02T09:00:00+08:00', '2026-01-03T09:00:00+08:00'])
+        self.assertEqual(item['reminders'], ['2026-01-01T09:00:00+08:00', '2026-01-02T09:00:00+08:00', '2026-01-03T09:00:00+08:00', '2026-01-03T17:30:00+08:00'])
         self.assertEqual(self.create()['id'], item['id'])
         self.assertEqual(self.db.execute('SELECT count(*) FROM ddl_items').fetchone()[0], 1)
         self.assertEqual(self.db.execute('SELECT owner FROM ddl_items').fetchone()[0], 'bob')
@@ -38,6 +38,22 @@ class DeadlineTests(unittest.TestCase):
         self.assertEqual([datetime.fromtimestamp(t, deadlines.TZ).isoformat() for t in weekly], ['2026-01-05T09:30:00+08:00'])
         repeat = deadlines.schedule(deadlines.parse_date('2026-01-01T11:00'), {'start': '2026-01-01T09:00', 'every_minutes': 60}, self.now)
         self.assertEqual(len(repeat), 3)
+
+    def test_backfill_existing_default_reminders_only_once(self):
+        default = self.create()
+        custom = self.create(scope='g2', rule=json.dumps({'times': ['2026-01-02T09:00']}))
+        self.db.execute('DELETE FROM ddl_reminders WHERE item_id=? AND at=?',
+                        (default['id'], deadlines.parse_date('2026-01-03T17:30')))
+        self.db.execute("DELETE FROM ddl_migrations WHERE name='default_half_hour_v1'")
+        deadlines.init(self.db)
+        deadlines.init(self.db)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM ddl_reminders WHERE item_id=? AND at=?',
+                         (default['id'], deadlines.parse_date('2026-01-03T17:30'))).fetchone()[0], 1)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM ddl_reminders WHERE item_id=?', (custom['id'],)).fetchone()[0], 1)
+
+    def test_half_hour_skipped_when_already_past(self):
+        due = deadlines.parse_date('2026-01-01T08:20')
+        self.assertNotIn(due - 1800, deadlines.schedule(due, {}, self.now))
 
     def test_fallback_is_scoped_and_acknowledged(self):
         self.create(rule=json.dumps({'times': ['2026-01-01T09:00']}))

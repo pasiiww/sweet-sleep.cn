@@ -18,6 +18,11 @@ def init(c):
       id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER NOT NULL REFERENCES ddl_items(id),
       at REAL NOT NULL, state TEXT NOT NULL DEFAULT 'pending', lease TEXT NOT NULL DEFAULT '',
       leased_until REAL NOT NULL DEFAULT 0, UNIQUE(item_id,at))''')
+    c.execute('CREATE TABLE IF NOT EXISTS ddl_migrations (name TEXT PRIMARY KEY)')
+    if c.execute("INSERT OR IGNORE INTO ddl_migrations(name) VALUES('default_half_hour_v1')").rowcount:
+        c.execute('''INSERT OR IGNORE INTO ddl_reminders(item_id,at)
+          SELECT id,due-1800 FROM ddl_items
+          WHERE status='active' AND rule='{}' AND due-1800>?''', (time.time(),))
 
 
 def parse_date(value):
@@ -31,6 +36,7 @@ def schedule(due, rule, now):
     end = datetime.fromtimestamp(due, TZ)
     times = set()
     if not rule:
+        times.add(due - 1800)
         days = [0, 1, 2, 4, 7, 15, 30, 60, 90]
         n, step = 90, 60
         while n < (due-now)/86400 and n < 10000:
