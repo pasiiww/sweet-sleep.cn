@@ -23,6 +23,20 @@ def init(c):
         c.execute('''INSERT OR IGNORE INTO ddl_reminders(item_id,at)
           SELECT id,due-1800 FROM ddl_items
           WHERE status='active' AND rule='{}' AND due-1800>?''', (time.time(),))
+    if c.execute("INSERT OR IGNORE INTO ddl_migrations(name) VALUES('early_morning_v1')").rowcount:
+        for row in c.execute("SELECT id,due,rule FROM ddl_items WHERE status='active'").fetchall():
+            try:
+                rule = json.loads(row['rule'])
+                start = rule.get('created_at')
+                if not rule.get('default_policy') or start is None or not default_rule(row['due'], start).get('early_morning'):
+                    continue
+                morning = datetime.fromtimestamp(start, TZ).replace(hour=9, minute=0, second=0, microsecond=0).timestamp()
+                rule['early_morning'] = True
+                c.execute('UPDATE ddl_items SET rule=? WHERE id=?', (json.dumps(rule, ensure_ascii=False), row['id']))
+                if morning > time.time():
+                    c.execute('INSERT OR IGNORE INTO ddl_reminders(item_id,at) VALUES(?,?)', (row['id'], morning))
+            except (ValueError, TypeError, KeyError, OverflowError, AttributeError):
+                continue
 
 
 def parse_date(value):
@@ -34,8 +48,9 @@ def describe_rule(rule):
     if not rule:
         return '原默认提醒规则（以已安排时间为准）'
     if rule.get('default_policy'):
-        return {'short': '剩余时间过半及到时提醒', 'medium': '截止前30分钟及到时提醒',
-                'long': '截止当天及提前1、2、4、7、15天的上午9点，以及到时提醒'}[rule['default_policy']]
+        description = {'short': '剩余时间过半及到时提醒', 'medium': '截止前30分钟及到时提醒',
+                       'long': '截止当天及提前1、2、4、7、15天的上午9点，以及到时提醒'}[rule['default_policy']]
+        return description + ('；另在当天上午9点提醒' if rule.get('early_morning') else '')
     parts = []
     if rule.get('times'):
         values = rule['times']
@@ -63,8 +78,13 @@ def owner_context(c, kb, kind, scope, owner):
 
 def default_rule(due, now):
     remaining = due - now
-    return {'default_policy': 'short' if remaining < 3600 else 'medium' if remaining <= 86400 else 'long',
+    rule = {'default_policy': 'short' if remaining < 3600 else 'medium' if remaining <= 86400 else 'long',
             'created_at': now}
+    start, end = datetime.fromtimestamp(now, TZ), datetime.fromtimestamp(due, TZ)
+    morning = start.replace(hour=9, minute=0, second=0, microsecond=0).timestamp()
+    if start.hour < 4 and start.date() == end.date() and now < morning < due:
+        rule['early_morning'] = True
+    return rule
 
 
 def schedule(due, rule, now):
@@ -76,10 +96,12 @@ def schedule(due, rule, now):
     times = set()
     if rule.get('default_policy'):
         policy = rule['default_policy']
-        if policy not in ('short', 'medium', 'long') or set(rule) != {'default_policy', 'created_at'}:
+        if policy not in ('short', 'medium', 'long') or not {'default_policy', 'created_at'} <= set(rule) or set(rule) - {'default_policy', 'created_at', 'early_morning'} or type(rule.get('early_morning', False)) is not bool:
             raise ValueError('默认提醒规则无效')
         start = float(rule['created_at'])
         times.add(due)
+        if rule.get('early_morning'):
+            times.add(datetime.fromtimestamp(start, TZ).replace(hour=9, minute=0, second=0, microsecond=0).timestamp())
         if policy == 'short':
             times.add(start + (due-start)/2)
         elif policy == 'medium':
@@ -135,7 +157,7 @@ def schedule(due, rule, now):
     return result
 
 
-def manage(c, kb, kind, scope, creator, mentions, request_id, action, item_id=0, title='', due='', owner='current', rule_json=''):
+def manage(c, kb, kind, scope, creator, mentions, request_id, action, item_id=0, title='', due='', owner='current', rule_json='', creator_name=''):
     init(c)
     if not scope or not creator or not request_id:
         return {'error': '缺少会话或消息身份，无法操作'}
@@ -145,7 +167,7 @@ def manage(c, kb, kind, scope, creator, mentions, request_id, action, item_id=0,
     if action == 'add':
         if not title.strip() or len(title) > 200:
             return {'error': '事项名称须为1至200字'}
-        owners = {'current': (creator, '当前发言者')}
+        owners = {'current': (creator, creator_name.strip()[:100] or '你')}
         owners.update({m['key']: (m['openid'], m['name']) for m in mentions})
         if owner not in owners:
             return {'error': '负责人无法确认，请让用户明确指定自己或在当前消息中@负责人'}

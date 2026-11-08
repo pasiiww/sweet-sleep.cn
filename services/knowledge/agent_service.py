@@ -469,7 +469,8 @@ def answer(app, data, details):
             reserve_tool()
             with app.db() as c:
                 result = deadlines.manage(c, kb, origin, group if origin == 'qq_group' else user_id,
-                    user_id, mentioned_members, request_id, action, item_id, title, due, owner, rule_json)
+                    user_id, mentioned_members, request_id, action, item_id, title, due, owner, rule_json,
+                    creator_name=member_name)
             if action == 'add' and result.get('ok'):
                 created_deadlines.append(result)
             return json.dumps(result, ensure_ascii=False)
@@ -571,6 +572,8 @@ def answer(app, data, details):
         system += ('\n用户要求管理DDL、截止事项或提醒时使用 manage_deadline，当前时间为北京时间 ' +
                    __import__('datetime').datetime.now(deadlines.TZ).isoformat(timespec='minutes') +
                    '。不得把DDL当作普通记忆。先列出再修改、完成或删除；不确定目标、日期或负责人时先询问。'
+                   '北京时间00:00至03:59，用户口语中的“明天”“明早”默认指当前日历日期的白天；'
+                   '用户明确说日期、星期或明确指再过一个日历日时以明确表达为准；有歧义则询问，回执显示实际日期。'
                    '仅用户明确表示自己负责时owner=current，群内指定他人必须在当前消息中@且使用mentioned编号；不能猜测。'
                    '只根据工具回执确认写入，创建或修改后说明截止时间和提醒时间。默认提醒规则传空字符串；用户指定时间或频率则按工具格式转换。')
 

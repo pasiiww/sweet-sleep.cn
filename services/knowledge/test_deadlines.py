@@ -66,6 +66,40 @@ class DeadlineTests(unittest.TestCase):
         times = deadlines.schedule(due, deadlines.default_rule(due, self.now), self.now)
         self.assertEqual(times, [self.now + 3600, due])
 
+    def test_early_morning_adds_nine_only_when_before_due(self):
+        now = deadlines.parse_date('2026-11-09T02:00')
+        due = deadlines.parse_date('2026-11-09T15:00')
+        rule = deadlines.default_rule(due, now)
+        self.assertEqual(deadlines.schedule(due, rule, now), [
+            deadlines.parse_date('2026-11-09T09:00'), deadlines.parse_date('2026-11-09T14:30'), due])
+        self.assertIn('上午9点', deadlines.describe_rule(rule))
+        for created, target in [('2026-11-09T04:00', '2026-11-09T15:00'),
+                                ('2026-11-09T02:00', '2026-11-09T08:00'),
+                                ('2026-11-09T02:00', '2026-11-10T15:00')]:
+            self.assertFalse(deadlines.default_rule(deadlines.parse_date(target), deadlines.parse_date(created)).get('early_morning', False))
+
+    def test_existing_early_morning_default_is_backfilled_once(self):
+        with patch('deadlines.time.time', return_value=deadlines.parse_date('2026-11-09T02:00')):
+            result = deadlines.manage(self.db, 'kb', 'qq_private', 'u', 'u', [], 'm', 'add',
+                                      title='预约', due='2026-11-09T15:00')
+            row = self.db.execute('SELECT rule FROM ddl_items WHERE id=?', (result['id'],)).fetchone()
+            rule = json.loads(row['rule'])
+            del rule['early_morning']
+            self.db.execute('UPDATE ddl_items SET rule=? WHERE id=?', (json.dumps(rule), result['id']))
+            self.db.execute('DELETE FROM ddl_reminders WHERE item_id=? AND at=?', (result['id'], deadlines.parse_date('2026-11-09T09:00')))
+            self.db.execute("DELETE FROM ddl_migrations WHERE name='early_morning_v1'")
+            deadlines.init(self.db)
+            deadlines.init(self.db)
+            self.assertEqual(self.db.execute('SELECT count(*) FROM ddl_reminders WHERE item_id=? AND at=?',
+                (result['id'], deadlines.parse_date('2026-11-09T09:00'))).fetchone()[0], 1)
+
+    def test_current_owner_uses_sender_name_or_you(self):
+        common = (self.db, 'kb', 'qq_private', 'alice', 'alice', [], 'm1', 'add')
+        result = deadlines.manage(*common, title='预约', due='2026-01-03T18:00', creator_name='小花')
+        self.assertEqual(result['owner'], '小花')
+        result = deadlines.manage(self.db, 'kb', 'qq_private', 'bob', 'bob', [], 'm2', 'add', title='预约', due='2026-01-03T18:00')
+        self.assertEqual(result['owner'], '你')
+
     def test_owner_context_does_not_cross_user_or_conversation(self):
         self.create()
         self.create(scope='g2', request='another')

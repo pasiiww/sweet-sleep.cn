@@ -39,6 +39,7 @@ class AgentServiceTests(unittest.TestCase):
                    'message_id': 'ddl-message', 'query': '让小明负责提交申请',
                    'mentioned_members': [{'openid': 'owner', 'name': '小明'}]}
         def create(cfg, tools, messages, prompt, limit):
+            self.assertIn('00:00至03:59', prompt)
             ddl = next(t for t in tools if t.name == 'manage_deadline')
             result = json.loads(ddl.invoke({'action': 'add', 'title': '提交申请',
                 'due': '2030-01-10T18:00', 'owner': 'mentioned1'}))
