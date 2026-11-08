@@ -55,6 +55,14 @@ class DeadlineTests(unittest.TestCase):
         due = deadlines.parse_date('2026-01-01T08:20')
         self.assertNotIn(due - 1800, deadlines.schedule(due, {}, self.now))
 
+    def test_owner_context_does_not_cross_user_or_conversation(self):
+        self.create()
+        self.create(scope='g2', request='another')
+        self.assertEqual([item['title'] for item in deadlines.owner_context(self.db, 'kb', 'qq_group', 'g1', 'bob')], ['提交申请'])
+        self.assertEqual(deadlines.owner_context(self.db, 'kb', 'qq_group', 'g1', 'alice'), [])
+        self.assertEqual(deadlines.owner_context(self.db, 'kb', 'qq_private', 'bob', 'bob'), [])
+        self.assertEqual(deadlines.owner_context(self.db, 'kb', 'qq_group', 'g3', 'bob'), [])
+
     def test_fallback_is_scoped_and_acknowledged(self):
         self.create(rule=json.dumps({'times': ['2026-01-01T09:00']}))
         with patch('deadlines.time.time', return_value=self.now + 3700):

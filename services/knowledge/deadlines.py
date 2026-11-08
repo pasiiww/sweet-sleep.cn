@@ -30,6 +30,34 @@ def parse_date(value):
     return (value.replace(tzinfo=TZ) if value.tzinfo is None else value).timestamp()
 
 
+def describe_rule(rule):
+    if not rule:
+        return '截止当天及提前1、2、4、7、15、30、60、90天等上午9点，另在截止前30分钟；当天9点晚于截止时间时改为提前1小时'
+    parts = []
+    if rule.get('times'):
+        values = rule['times']
+        parts.append('指定时间：' + '、'.join(values[:6]) + (f'等共{len(values)}次' if len(values) > 6 else ''))
+    if rule.get('every_minutes'):
+        parts.append('自' + rule['start'] + '起每' + str(rule['every_minutes']) + '分钟')
+    if rule.get('weekdays'):
+        days = '一二三四五六日'
+        parts.append('每周' + '、'.join(days[d] for d in rule['weekdays']) + ' ' + rule.get('time', '09:00'))
+    return '；'.join(parts) or '没有设置提醒'
+
+
+def owner_context(c, kb, kind, scope, owner):
+    """Expose only the current speaker's deadlines within the current conversation."""
+    if kind not in ('qq_group', 'qq_private') or not scope or not owner:
+        return []
+    init(c)
+    rows = c.execute("""SELECT id,title,due,rule FROM ddl_items
+        WHERE kb=? AND kind=? AND scope=? AND owner=? AND status='active'
+        ORDER BY due LIMIT 20""", (kb, kind, scope, owner)).fetchall()
+    return [{'id': r['id'], 'title': r['title'],
+             'due': datetime.fromtimestamp(r['due'], TZ).isoformat(),
+             'reminder_rule': describe_rule(json.loads(r['rule']))} for r in rows]
+
+
 def schedule(due, rule, now):
     if due > now + 50 * 366 * 86400:
         raise ValueError('截止时间不能超过50年')
@@ -106,13 +134,13 @@ def manage(c, kb, kind, scope, creator, mentions, request_id, action, item_id=0,
             return {'error': '时间或提醒规则无效：' + str(exc)}
         member, name = owners[owner]
         inserted = c.execute('INSERT OR IGNORE INTO ddl_items(kb,kind,scope,creator,owner,owner_name,title,due,rule,request_id) VALUES(?,?,?,?,?,?,?,?,?,?)', (kb,kind,scope,creator,member,name,title.strip(),end,json.dumps(rule,ensure_ascii=False),request_id)).rowcount
-        row = c.execute('SELECT id,title,due FROM ddl_items WHERE kb=? AND kind=? AND scope=? AND request_id=?',(kb,kind,scope,request_id)).fetchone()
+        row = c.execute('SELECT id,title,due,owner_name,rule FROM ddl_items WHERE kb=? AND kind=? AND scope=? AND request_id=?',(kb,kind,scope,request_id)).fetchone()
         if inserted:
             for t in times:
                 c.execute('INSERT OR IGNORE INTO ddl_reminders(item_id,at) VALUES(?,?)',(row['id'],t))
         else:
             times = [r[0] for r in c.execute('SELECT at FROM ddl_reminders WHERE item_id=? ORDER BY at',(row['id'],))]
-        return {'ok': True, 'id': row['id'], 'title': row['title'], 'due': datetime.fromtimestamp(row['due'], TZ).isoformat(), 'owner': name, 'reminders': [datetime.fromtimestamp(t,TZ).isoformat() for t in times]}
+        return {'ok': True, 'id': row['id'], 'title': row['title'], 'due': datetime.fromtimestamp(row['due'], TZ).isoformat(), 'owner': row['owner_name'], 'reminder_rule': describe_rule(json.loads(row['rule'])), 'reminders': [datetime.fromtimestamp(t,TZ).isoformat() for t in times]}
     if action in ('complete', 'delete', 'update'):
         row = c.execute("SELECT * FROM ddl_items WHERE id=? AND kb=? AND kind=? AND scope=? AND status='active'", (item_id,kb,kind,scope)).fetchone()
         if not row:

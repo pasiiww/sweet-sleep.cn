@@ -18,6 +18,7 @@ import memories
 import maintenance
 import mcp_server
 import server as app
+import deadlines
 
 
 class AgentServiceTests(unittest.TestCase):
@@ -32,6 +33,28 @@ class AgentServiceTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp.cleanup()
+
+    def test_deadline_create_receipt_and_owner_context(self):
+        request = {'kb_id': self.kb, 'origin': 'qq_group', 'group_id': 'g', 'user_id': 'creator',
+                   'message_id': 'ddl-message', 'query': '让小明负责提交申请',
+                   'mentioned_members': [{'openid': 'owner', 'name': '小明'}]}
+        def create(cfg, tools, messages, prompt, limit):
+            ddl = next(t for t in tools if t.name == 'manage_deadline')
+            result = json.loads(ddl.invoke({'action': 'add', 'title': '提交申请',
+                'due': '2030-01-10T18:00', 'owner': 'mentioned1'}))
+            self.assertTrue(result['ok'])
+            return {'messages': [AIMessage(content='好的。')]}
+        with patch.object(agent_service, 'run', side_effect=create):
+            result = app.api('POST', '/knowledge/api/agent/answer', request, {})
+        for expected in ('创建成功', '提交申请', '2030-01-10 18:00', '提醒周期', '小明'):
+            self.assertIn(expected, result['answer'])
+        for owner, group, expected in [('owner', 'g', True), ('creator', 'g', False), ('owner', 'other', False)]:
+            with patch.object(agent_service, 'run', return_value={'messages': [AIMessage(content='你好')]}) as runner:
+                app.api('POST', '/knowledge/api/agent/answer', request | {
+                    'user_id': owner, 'group_id': group, 'query': '你好', 'mentioned_members': [],
+                    'message_id': 'other-message'}, {})
+            context = json.loads(runner.call_args.args[2][-1]['content'])
+            self.assertEqual(bool(context['current_user_deadlines']), expected)
 
     def test_member_impression_parser_accepts_reordered_attributes_and_hides_invalid_tags(self):
         updates, visible = agent_service.extract_member_impressions(
