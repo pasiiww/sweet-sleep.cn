@@ -1024,6 +1024,24 @@ def api(method, path, data, params):
         fail(405, '不支持此操作')
     if segments == ['agent', 'answer'] and method == 'POST':
         return respond(data, lambda request, details: agent_service.answer(sys.modules[__name__], request, details))
+    if segments == ['ddl-delivery'] and method == 'POST':
+        import deadlines
+        kb = string(data, 'kb_id', 80, True)
+        action = string(data, 'action', 20, True)
+        with db() as c:
+            base(c, kb)
+            if action in ('proactive', 'fallback'):
+                kind = string(data, 'kind', 20)
+                scope = string(data, 'scope', 128)
+                if action == 'fallback' and (kind not in ('qq_group', 'qq_private') or not scope):
+                    fail(400, '缺少会话身份')
+                return deadlines.claim(c, kb, action, kind, scope)
+            if action == 'ack':
+                token = string(data, 'lease', 100, True)
+                if type(data.get('sent')) is not bool:
+                    fail(400, 'sent 必须为布尔值')
+                return deadlines.ack(c, kb, token, data['sent'])
+            fail(400, '未知操作')
     if segments == ['agent', 'creative'] and method == 'POST':
         return creative.respond(sys.modules[__name__], data)
     if segments == ['agent', 'memory'] and method == 'POST':
@@ -1434,7 +1452,7 @@ class Handler(BaseHTTPRequestHandler):
                 fail(403, '敏感词专用密钥仅可读取敏感词或提交撤回事件')
             if learner and not admin and not (parsed.path in ('/knowledge/api/private-maintenance','/knowledge/api/private-announcement','/knowledge/api/agent/private-maintenance','/knowledge/api/learning/events','/knowledge/api/owner-notifications/claim','/knowledge/api/owner-notifications/ack') and self.command == 'POST'):
                 fail(403, '学习密钥仅可提交聊天事件或受 OpenID 白名单约束的私聊维护')
-            read_paths = (parsed.path in ('/knowledge/api/retrieve', '/knowledge/api/answer', '/knowledge/api/agent/answer', '/knowledge/api/agent/creative', '/knowledge/api/agent/memory', '/knowledge/api/trace-delivery', '/knowledge/api/group-summary', '/knowledge/api/group-impressions', '/knowledge/api/group-harassment-review', '/knowledge/api/group-impression-recalls') and self.command == 'POST') or (parsed.path in ('/knowledge/api/group-welcome', '/knowledge/api/drink-menu', '/knowledge/api/drink-weather') and self.command == 'GET')
+            read_paths = (parsed.path in ('/knowledge/api/retrieve', '/knowledge/api/answer', '/knowledge/api/agent/answer', '/knowledge/api/agent/creative', '/knowledge/api/agent/memory', '/knowledge/api/trace-delivery', '/knowledge/api/group-summary', '/knowledge/api/group-impressions', '/knowledge/api/group-harassment-review', '/knowledge/api/group-impression-recalls', '/knowledge/api/ddl-delivery') and self.command == 'POST') or (parsed.path in ('/knowledge/api/group-welcome', '/knowledge/api/drink-menu', '/knowledge/api/drink-weather') and self.command == 'GET')
             if not admin and not learner and not moderator and not read_paths:
                 fail(403, '召回密钥仅可调用检索接口')
             if parsed.path in ('/knowledge/api/stickers/upload','/knowledge/api/products/upload') and self.command=='POST':

@@ -21,6 +21,7 @@ import ba_wiki
 import memories
 import tool_service
 import execution_budget
+import deadlines
 from agent_runtime import AgentExecution, ExecutionMiddleware
 
 ANSWER_TOOL_LIMIT = 8
@@ -212,6 +213,7 @@ def answer(app, data, details):
     history = entities.history(data.get('history', []))
     origin = app.string(data, 'origin', 20)
     user_id = app.string(data, 'user_id', 128)
+    request_id = app.string(data, 'message_id', 200)
     member_name = memories.clean_member_name(app.string(data, 'member_name', 100))
     try:
         group_context = validate_group_context(data.get('group_context', [])) if origin == 'qq_group' else []
@@ -446,6 +448,18 @@ def answer(app, data, details):
 
     tools = [search_knowledge, search_ba_wiki]
 
+    if origin in ('qq_group', 'qq_private') and user_id and request_id and (origin != 'qq_group' or group):
+        @tool
+        def manage_deadline(action: Literal['add', 'list', 'update', 'complete', 'delete'], item_id: int = 0,
+                            title: str = '', due: str = '', owner: str = 'current', rule_json: str = '') -> str:
+            """管理本会话DDL。add需要title、北京时间ISO截止时间due；owner仅可为current或当前消息mentioned1等。list查询；update/complete/delete使用list返回的item_id。rule_json为空使用默认提醒，或JSON对象：times为ISO时间数组；every_minutes和start表示固定间隔；weekdays为周一0至周日6的数组，time为HH:MM，可与times组合。update不传rule_json保留原规则。"""
+            reserve_tool()
+            with app.db() as c:
+                result = deadlines.manage(c, kb, origin, group if origin == 'qq_group' else user_id,
+                    user_id, mentioned_members, request_id, action, item_id, title, due, owner, rule_json)
+            return json.dumps(result, ensure_ascii=False)
+        tools.append(manage_deadline)
+
     if memory_scope and memory_enabled:
         @tool
         def get_group_memories(search_query: str) -> str:
@@ -538,6 +552,13 @@ def answer(app, data, details):
                    '个人身份/偏好使用 subject=member，群公共约定使用 subject=group；所有群友仍共享读取，两类事实分别去重。'
                    '如要保存的新信息与旧条目冲突，先忘记同一主体的旧条目再保存更新内容。')
 
+    if origin in ('qq_group', 'qq_private') and user_id and request_id:
+        system += ('\n用户要求管理DDL、截止事项或提醒时使用 manage_deadline，当前时间为北京时间 ' +
+                   __import__('datetime').datetime.now(deadlines.TZ).isoformat(timespec='minutes') +
+                   '。不得把DDL当作普通记忆。先列出再修改、完成或删除；不确定目标、日期或负责人时先询问。'
+                   '仅用户明确表示自己负责时owner=current，群内指定他人必须在当前消息中@且使用mentioned编号；不能猜测。'
+                   '只根据工具回执确认写入，创建或修改后说明截止时间和提醒时间。默认提醒规则传空字符串；用户指定时间或频率则按工具格式转换。')
+
     if origin == 'qq_group' and user_id and memory_enabled:
         system += ('\n分别维护 current_member_impression 与 quoted_member_impressions 中每位成员的印象，绝不能把引用作者的事实记到当前发言者名下，或反过来。'
                    'mentioned_member_impressions 仅供理解本轮被艾特的群友，不可据此或当前发言者对他们的描述更新其印象。'
@@ -556,6 +577,7 @@ def answer(app, data, details):
                  'current_member_impression': current_member_impression,
                  'quoted_member_impressions': quoted_member_impressions,
                  'mentioned_member_impressions': mentioned_member_impressions,
+                 'ddl_mentioned_members': [{'key': m['key'], 'name': m['name']} for m in mentioned_members],
                  'current_member_text': member_message_text,
 
                  'previous_sticker_sent': previous_sticker_sent,

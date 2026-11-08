@@ -35,6 +35,20 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(creative_request('/对联 +山色入帘青'), {'style': 'couplet', 'text': '山色入帘青'})
         self.assertTrue(is_group_command('/俳句'))
 
+    async def test_ddl_fallback_mentions_owner_and_acknowledges_delivery(self):
+        item = {'kind': 'qq_group', 'scope': 'group1', 'owner': 'member1',
+                'title': '<@everyone> 提交申请', 'due': 1790000000}
+        self.retriever.ddl_delivery = AsyncMock(side_effect=[{'lease': 'lease1', 'items': [item]}, {'ok': True}])
+        message = self.message('你好')
+        message.group_openid = 'group1'
+        await self.bot._ddl_fallback(message, 'group')
+        self.retriever.ddl_delivery.assert_any_await('fallback', kind='qq_group', scope='group1')
+        self.retriever.ddl_delivery.assert_any_await('ack', lease='lease1', sent=True)
+        content = message.reply.call_args.kwargs['content']
+        self.assertIn('<qqbot-at-user id="member1" />', content)
+        self.assertNotIn('<@everyone>', content)
+        self.assertEqual(message.reply.call_args.kwargs['msg_seq'], 2)
+
     async def test_sticker_real_sdk_routing_and_fallback(self):
         api = SimpleNamespace(post_group_file=AsyncMock(return_value={'file_info':'media'}),
             post_c2c_file=AsyncMock(return_value={'file_info':'media'}),

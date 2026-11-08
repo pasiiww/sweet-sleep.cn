@@ -563,6 +563,15 @@ class Retriever:
                     raise RuntimeError(f'Knowledge HTTP {response.status}')
                 return await response.json()
 
+    async def ddl_delivery(self, action, **kwargs):
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as session:
+            async with session.post(self.api_root + '/ddl-delivery',
+                    headers={'Authorization': 'Bearer ' + self.token},
+                    json={'kb_id': self.kb_id, 'action': action, **kwargs}) as response:
+                if response.status != 200:
+                    raise RuntimeError('DDL delivery request failed')
+                return await response.json()
+
     async def creative(self, style, query, trace_meta=None, image_data_urls=None):
         payload = {'kb_id': self.kb_id, 'style': style, 'query': query,
                    **(trace_meta or {})}
@@ -830,11 +839,14 @@ class KnowledgeBot(botpy.Client):
         self._moderation_report_task = None
         self._moderation_http_task = None
         self._moderation_http_runner = None
+        self._ddl_task = None
         if os.environ.get("KB_LEARN_TOKEN"):
             self.learner = Learner(seen.conn, retriever.api_root+"/learning/events", os.environ["KB_LEARN_TOKEN"], retriever.kb_id)
 
     async def on_ready(self):
         self.impressions.start()
+        if self._ddl_task is None or self._ddl_task.done():
+            self._ddl_task = asyncio.create_task(self._ddl_loop())
         if self.learner:
             self.learner.api=self.api
             self.learner.start()
@@ -842,6 +854,55 @@ class KnowledgeBot(botpy.Client):
             self._moderation_report_task = asyncio.create_task(self._moderation_report_loop())
             self._moderation_http_task = asyncio.create_task(self.start_moderation_control_server())
         LOG.info('QQ_CONNECTED app_id=%s knowledge_id=%s', os.environ.get('QQ_APP_ID'), self.retriever.kb_id)
+
+    @staticmethod
+    def _ddl_text(item):
+        due = datetime.fromtimestamp(item['due'], BEIJING_TIMEZONE).strftime('%Y-%m-%d %H:%M')
+        result = f"DDL 提醒：{plain(item['title'])}\n截止时间：{due}（北京时间）"
+        owner = item.get('owner', '')
+        if item['kind'] == 'qq_group' and re.fullmatch(r'[A-Za-z0-9_-]{1,128}', owner):
+            result += f'\n<qqbot-at-user id="{owner}" />'
+        return result
+
+    async def _ddl_loop(self):
+        while True:
+            try:
+                claim = await self.retriever.ddl_delivery('proactive')
+                for item in claim.get('items', []):
+                    sent = False
+                    try:
+                        content = self._ddl_text(item)
+                        if item['kind'] == 'qq_group':
+                            result = await self.api.post_group_message(group_openid=item['scope'], msg_type=0, content=content)
+                        else:
+                            result = await self.api.post_c2c_message(openid=item['scope'], msg_type=0, content=content)
+                        sent = bool(result)
+                    except Exception as exc:
+                        LOG.warning('DDL_PROACTIVE_FAILED error=%s', type(exc).__name__)
+                    await self.retriever.ddl_delivery('ack', lease=claim['lease'], sent=sent)
+            except Exception as exc:
+                LOG.warning('DDL_WORKER_FAILED error=%s', type(exc).__name__)
+            await asyncio.sleep(15)
+
+    async def _ddl_fallback(self, message, kind):
+        if not callable(getattr(self.retriever, 'ddl_delivery', None)):
+            return
+        scope = getattr(message, 'group_openid', '') if kind == 'group' else getattr(getattr(message, 'author', None), 'user_openid', '')
+        if not scope:
+            return
+        claim = None
+        try:
+            claim = await self.retriever.ddl_delivery('fallback', kind='qq_group' if kind == 'group' else 'qq_private', scope=scope)
+            if claim.get('items'):
+                result = await message.reply(content=self._ddl_text(claim['items'][0]), msg_type=0, msg_seq=2)
+                await self.retriever.ddl_delivery('ack', lease=claim['lease'], sent=bool(result))
+        except Exception as exc:
+            LOG.warning('DDL_FALLBACK_FAILED error=%s', type(exc).__name__)
+            if claim and claim.get('items'):
+                try:
+                    await self.retriever.ddl_delivery('ack', lease=claim['lease'], sent=False)
+                except Exception:
+                    pass
 
     async def on_error(self, event_method, *args, **kwargs):
         LOG.error('EVENT_ERROR event=%s', event_method)
@@ -1159,6 +1220,7 @@ class KnowledgeBot(botpy.Client):
             return
         if normalize(message.content) == '/总结':
             await self.summarize(message, kind)
+            await self._ddl_fallback(message, kind)
             return
         session = conversation_key(message, kind, self.retriever.kb_id)
         # Serialize generation AND delivery for each conversation; release unused locks.
@@ -1169,6 +1231,7 @@ class KnowledgeBot(botpy.Client):
         try:
             async with entry[0]:
                 await self._answer(message, kind, session, mentioned)
+                await self._ddl_fallback(message, kind)
         finally:
             entry[1] -= 1
             if not entry[1]:
@@ -1486,6 +1549,8 @@ class KnowledgeBot(botpy.Client):
                     author = getattr(message, 'author', None)
                     meta = {'origin': 'qq_group' if kind == 'group' else 'qq_private',
                             'user_id': getattr(author, 'member_openid' if kind == 'group' else 'user_openid', ''), 'session_id': session}
+                    if meta['user_id'] and (kind != 'group' or group_id):
+                        meta['message_id'] = str(message.id)
                     if kind == 'group':
                         display_name = self.seen.first_member_name(
                             group_id, meta['user_id']) or compat.sender_name(message)[:12]
