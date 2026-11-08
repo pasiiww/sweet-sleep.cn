@@ -32,7 +32,10 @@ def parse_date(value):
 
 def describe_rule(rule):
     if not rule:
-        return '截止当天及提前1、2、4、7、15、30、60、90天等上午9点，另在截止前30分钟；当天9点晚于截止时间时改为提前1小时'
+        return '原默认提醒规则（以已安排时间为准）'
+    if rule.get('default_policy'):
+        return {'short': '剩余时间过半及到时提醒', 'medium': '截止前30分钟及到时提醒',
+                'long': '截止当天及提前1、2、4、7、15天的上午9点，以及到时提醒'}[rule['default_policy']]
     parts = []
     if rule.get('times'):
         values = rule['times']
@@ -58,12 +61,34 @@ def owner_context(c, kb, kind, scope, owner):
              'reminder_rule': describe_rule(json.loads(r['rule']))} for r in rows]
 
 
+def default_rule(due, now):
+    remaining = due - now
+    return {'default_policy': 'short' if remaining < 3600 else 'medium' if remaining <= 86400 else 'long',
+            'created_at': now}
+
+
 def schedule(due, rule, now):
     if due > now + 50 * 366 * 86400:
         raise ValueError('截止时间不能超过50年')
+    if not isinstance(rule, dict):
+        raise ValueError('提醒规则格式无效')
     end = datetime.fromtimestamp(due, TZ)
     times = set()
-    if not rule:
+    if rule.get('default_policy'):
+        policy = rule['default_policy']
+        if policy not in ('short', 'medium', 'long') or set(rule) != {'default_policy', 'created_at'}:
+            raise ValueError('默认提醒规则无效')
+        start = float(rule['created_at'])
+        times.add(due)
+        if policy == 'short':
+            times.add(start + (due-start)/2)
+        elif policy == 'medium':
+            times.add(due - 1800)
+        else:
+            for day in (0, 1, 2, 4, 7, 15):
+                date = end.date() - timedelta(days=day)
+                times.add(datetime.combine(date, datetime.min.time(), TZ).replace(hour=9).timestamp())
+    elif not rule:
         times.add(due - 1800)
         days = [0, 1, 2, 4, 7, 15, 30, 60, 90]
         n, step = 90, 60
@@ -126,9 +151,12 @@ def manage(c, kb, kind, scope, creator, mentions, request_id, action, item_id=0,
             return {'error': '负责人无法确认，请让用户明确指定自己或在当前消息中@负责人'}
         try:
             end = parse_date(due)
-            rule = json.loads(rule_json) if rule_json else {}
-            times = schedule(end, rule, time.time())
-            if end <= time.time():
+            now = time.time()
+            rule = json.loads(rule_json) if rule_json else default_rule(end, now)
+            if rule == {}:
+                rule = default_rule(end, now)
+            times = schedule(end, rule, now)
+            if end <= now:
                 raise ValueError('截止时间必须在未来')
         except (ValueError, TypeError, KeyError, OverflowError) as exc:
             return {'error': '时间或提醒规则无效：' + str(exc)}
@@ -151,6 +179,10 @@ def manage(c, kb, kind, scope, creator, mentions, request_id, action, item_id=0,
             try:
                 end = parse_date(due) if due else row['due']
                 rule = json.loads(rule_json) if rule_json else json.loads(row['rule'])
+                if rule == {} and rule_json:
+                    rule = default_rule(end, time.time())
+                if due and not rule_json and rule.get('default_policy'):
+                    rule = default_rule(end, time.time())
                 times = schedule(end, rule, time.time())
                 if end <= time.time() or (title and len(title) > 200):
                     raise ValueError('截止时间或名称无效')

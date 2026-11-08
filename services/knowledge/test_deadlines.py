@@ -27,7 +27,7 @@ class DeadlineTests(unittest.TestCase):
 
     def test_default_schedule_and_idempotency(self):
         item = self.create()
-        self.assertEqual(item['reminders'], ['2026-01-01T09:00:00+08:00', '2026-01-02T09:00:00+08:00', '2026-01-03T09:00:00+08:00', '2026-01-03T17:30:00+08:00'])
+        self.assertEqual(item['reminders'], ['2026-01-01T09:00:00+08:00', '2026-01-02T09:00:00+08:00', '2026-01-03T09:00:00+08:00', '2026-01-03T18:00:00+08:00'])
         self.assertEqual(self.create()['id'], item['id'])
         self.assertEqual(self.db.execute('SELECT count(*) FROM ddl_items').fetchone()[0], 1)
         self.assertEqual(self.db.execute('SELECT owner FROM ddl_items').fetchone()[0], 'bob')
@@ -41,6 +41,7 @@ class DeadlineTests(unittest.TestCase):
 
     def test_backfill_existing_default_reminders_only_once(self):
         default = self.create()
+        self.db.execute("UPDATE ddl_items SET rule='{}' WHERE id=?", (default['id'],))
         custom = self.create(scope='g2', rule=json.dumps({'times': ['2026-01-02T09:00']}))
         self.db.execute('DELETE FROM ddl_reminders WHERE item_id=? AND at=?',
                         (default['id'], deadlines.parse_date('2026-01-03T17:30')))
@@ -53,7 +54,17 @@ class DeadlineTests(unittest.TestCase):
 
     def test_half_hour_skipped_when_already_past(self):
         due = deadlines.parse_date('2026-01-01T08:20')
-        self.assertNotIn(due - 1800, deadlines.schedule(due, {}, self.now))
+        self.assertEqual(deadlines.schedule(due, deadlines.default_rule(due, self.now), self.now), [self.now+600, due])
+
+    def test_new_default_boundaries(self):
+        for seconds, first in [(1200, 600), (3599, 1799.5), (3600, 1800),
+                               (86400, 84600)]:
+            due = self.now + seconds
+            rule = deadlines.default_rule(due, self.now)
+            self.assertEqual(deadlines.schedule(due, rule, self.now), [self.now + first, due])
+        due = self.now + 86401
+        times = deadlines.schedule(due, deadlines.default_rule(due, self.now), self.now)
+        self.assertEqual(times, [self.now + 3600, due])
 
     def test_owner_context_does_not_cross_user_or_conversation(self):
         self.create()
