@@ -368,6 +368,8 @@ def answer(app, data, details):
                     ('\n下一次提醒：' + item['reminders'][0].replace('T', ' ')[:16] if item['reminders'] else '\n当前没有未来的提醒时间'))
             response.update(mode='model', reason='ok', handoff=False, mention_openids=[],
                             answer=answers.plain('\n\n'.join(notices)))
+            if origin == 'qq_group':
+                response['answer'] = '请查看私聊；如果暂时没有收到，请私聊我，我会补发详情。'
         response.update(alias_context=entities.context(hints), matched_aliases=hints,
                         history_turns=len(history) // 2, search_terms=terms,
                         query_groups=[])

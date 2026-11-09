@@ -47,8 +47,8 @@ class AgentServiceTests(unittest.TestCase):
             return {'messages': [AIMessage(content='好的。')]}
         with patch.object(agent_service, 'run', side_effect=create):
             result = app.api('POST', '/knowledge/api/agent/answer', request, {})
-        for expected in ('创建成功', '提交申请', '2030-01-10 18:00', '提醒周期', '小明'):
-            self.assertIn(expected, result['answer'])
+        self.assertIn('私聊', result['answer'])
+        self.assertNotIn('提交申请', result['answer'])
         for owner, group, expected in [('owner', 'g', True), ('creator', 'g', False), ('owner', 'other', False)]:
             with patch.object(agent_service, 'run', return_value={'messages': [AIMessage(content='你好')]}) as runner:
                 app.api('POST', '/knowledge/api/agent/answer', request | {

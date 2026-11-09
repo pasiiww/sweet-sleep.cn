@@ -18,6 +18,8 @@ def init(c):
       id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER NOT NULL REFERENCES ddl_items(id),
       at REAL NOT NULL, state TEXT NOT NULL DEFAULT 'pending', lease TEXT NOT NULL DEFAULT '',
       leased_until REAL NOT NULL DEFAULT 0, UNIQUE(item_id,at))''')
+    if 'event' not in {row[1] for row in c.execute('PRAGMA table_info(ddl_reminders)')}:
+        c.execute("ALTER TABLE ddl_reminders ADD COLUMN event TEXT NOT NULL DEFAULT 'reminder'")
     c.execute('CREATE TABLE IF NOT EXISTS ddl_migrations (name TEXT PRIMARY KEY)')
     if c.execute("INSERT OR IGNORE INTO ddl_migrations(name) VALUES('default_half_hour_v1')").rowcount:
         c.execute('''INSERT OR IGNORE INTO ddl_reminders(item_id,at)
@@ -188,8 +190,10 @@ def manage(c, kb, kind, scope, creator, mentions, request_id, action, item_id=0,
         if inserted:
             for t in times:
                 c.execute('INSERT OR IGNORE INTO ddl_reminders(item_id,at) VALUES(?,?)',(row['id'],t))
+            if kind == 'qq_group':
+                c.execute("INSERT INTO ddl_reminders(item_id,at,event) VALUES(?,?,'created')", (row['id'], now))
         else:
-            times = [r[0] for r in c.execute('SELECT at FROM ddl_reminders WHERE item_id=? ORDER BY at',(row['id'],))]
+            times = [r[0] for r in c.execute("SELECT at FROM ddl_reminders WHERE item_id=? AND event='reminder' ORDER BY at",(row['id'],))]
         return {'ok': True, 'id': row['id'], 'title': row['title'], 'due': datetime.fromtimestamp(row['due'], TZ).isoformat(), 'owner': row['owner_name'], 'reminder_rule': describe_rule(json.loads(row['rule'])), 'reminders': [datetime.fromtimestamp(t,TZ).isoformat() for t in times]}
     if action in ('complete', 'delete', 'update'):
         row = c.execute("SELECT * FROM ddl_items WHERE id=? AND kb=? AND kind=? AND scope=? AND status='active'", (item_id,kb,kind,scope)).fetchone()
@@ -226,16 +230,28 @@ def claim(c, kb, mode, kind='', scope=''):
     c.execute('UPDATE ddl_reminders SET state=CASE WHEN state="sending" THEN "fallback" ELSE state END,lease="" WHERE state="sending" AND leased_until<?', (now,))
     state = 'pending' if mode == 'proactive' else 'fallback'
     c.execute('BEGIN IMMEDIATE') if not c.in_transaction else None
-    sql = '''SELECT r.id,r.at,i.kind,i.scope,i.owner,i.title,i.due FROM ddl_reminders r JOIN ddl_items i ON i.id=r.item_id WHERE i.kb=? AND i.status='active' AND r.state=? AND r.at<=?'''
+    sql = '''SELECT r.id,r.item_id,r.at,r.event,i.kind,i.scope,i.owner,i.creator,i.owner_name,i.title,i.due,i.rule FROM ddl_reminders r JOIN ddl_items i ON i.id=r.item_id WHERE i.kb=? AND i.status='active' AND r.state=? AND r.at<=?'''
     args = [kb,state,now]
     if mode == 'fallback':
-        sql += ' AND i.kind=? AND i.scope=?'
-        args += [kind,scope]
+        if kind == 'qq_group':
+            sql += " AND i.kind='qq_group' AND i.scope=? AND r.event='reminder' AND r.at>=i.due"
+            args += [scope]
+        else:
+            sql += " AND ((i.kind='qq_private' AND i.scope=?) OR (i.kind='qq_group' AND ((r.event='created' AND i.creator=?) OR (r.event='reminder' AND r.at<i.due AND i.owner=?))))"
+            args += [scope,scope,scope]
     rows = c.execute(sql+' ORDER BY r.at LIMIT 1',args).fetchall()
     token = secrets.token_urlsafe(24)
     for row in rows:
         c.execute("UPDATE ddl_reminders SET state='sending',lease=?,leased_until=? WHERE id=?",(token,now+120,row['id']))
-    return {'lease': token, 'items': [dict(r) for r in rows]}
+    items = []
+    for row in rows:
+        item = dict(row)
+        item['reminder_rule'] = describe_rule(json.loads(item.pop('rule')))
+        if item['event'] == 'created':
+            next_row = c.execute("SELECT MIN(at) FROM ddl_reminders WHERE item_id=? AND event='reminder' AND at>?", (item['item_id'], now)).fetchone()
+            item['next_reminder'] = next_row[0]
+        items.append(item)
+    return {'lease': token, 'items': items}
 
 
 def ack(c, kb, token, sent):

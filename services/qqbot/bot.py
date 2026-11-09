@@ -856,13 +856,23 @@ class KnowledgeBot(botpy.Client):
         LOG.info('QQ_CONNECTED app_id=%s knowledge_id=%s', os.environ.get('QQ_APP_ID'), self.retriever.kb_id)
 
     @staticmethod
-    def _ddl_text(item):
+    def _ddl_text(item, group_mention=False):
         due = datetime.fromtimestamp(item['due'], BEIJING_TIMEZONE).strftime('%Y-%m-%d %H:%M')
-        result = f"DDL 提醒：{plain(item['title'])}\n截止时间：{due}（北京时间）"
+        if item.get('event') == 'created':
+            result = (f"DDL 创建成功\n内容：{plain(item['title'])}\n截止时间：{due}（北京时间）"
+                      f"\n负责人：{plain(item.get('owner_name') or '你')}\n提醒周期：{plain(item.get('reminder_rule', ''))}")
+            if item.get('next_reminder'):
+                result += '\n下一次提醒：' + datetime.fromtimestamp(item['next_reminder'], BEIJING_TIMEZONE).strftime('%Y-%m-%d %H:%M')
+        else:
+            result = f"DDL 提醒：{plain(item['title'])}\n截止时间：{due}（北京时间）"
         owner = item.get('owner', '')
-        if item['kind'] == 'qq_group' and re.fullmatch(r'[A-Za-z0-9_-]{1,128}', owner):
+        if group_mention and re.fullmatch(r'[A-Za-z0-9_-]{1,128}', owner):
             result += f'\n<qqbot-at-user id="{owner}" />'
         return result
+
+    @staticmethod
+    def _ddl_is_group_delivery(item):
+        return item['kind'] == 'qq_group' and item.get('event', 'reminder') == 'reminder' and item['at'] >= item['due']
 
     async def _ddl_loop(self):
         while True:
@@ -871,11 +881,13 @@ class KnowledgeBot(botpy.Client):
                 for item in claim.get('items', []):
                     sent = False
                     try:
-                        content = self._ddl_text(item)
-                        if item['kind'] == 'qq_group':
-                            result = await self.api.post_group_message(group_openid=item['scope'], msg_type=0, content=content)
+                        group_delivery = self._ddl_is_group_delivery(item)
+                        content = self._ddl_text(item, group_mention=group_delivery)
+                        if group_delivery:
+                            result = await self.api.post_group_message(group_openid=item['scope'], msg_type=2, markdown={'content': content})
                         else:
-                            result = await self.api.post_c2c_message(openid=item['scope'], msg_type=0, content=content)
+                            target = item['scope'] if item['kind'] == 'qq_private' else item['creator'] if item.get('event') == 'created' else item['owner']
+                            result = await self.api.post_c2c_message(openid=target, msg_type=0, content=content)
                         sent = bool(result)
                     except Exception as exc:
                         LOG.warning('DDL_PROACTIVE_FAILED error=%s', type(exc).__name__)
@@ -894,7 +906,13 @@ class KnowledgeBot(botpy.Client):
         try:
             claim = await self.retriever.ddl_delivery('fallback', kind='qq_group' if kind == 'group' else 'qq_private', scope=scope)
             if claim.get('items'):
-                result = await message.reply(content=self._ddl_text(claim['items'][0]), msg_type=0, msg_seq=2)
+                item = claim['items'][0]
+                group_delivery = self._ddl_is_group_delivery(item)
+                content = self._ddl_text(item, group_mention=group_delivery)
+                if group_delivery:
+                    result = await message.reply(markdown={'content': content}, msg_type=2, msg_seq=2)
+                else:
+                    result = await message.reply(content=content, msg_type=0, msg_seq=2)
                 await self.retriever.ddl_delivery('ack', lease=claim['lease'], sent=bool(result))
         except Exception as exc:
             LOG.warning('DDL_FALLBACK_FAILED error=%s', type(exc).__name__)

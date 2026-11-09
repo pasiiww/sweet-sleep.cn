@@ -21,9 +21,11 @@ class DeadlineTests(unittest.TestCase):
         self.db.close()
 
     def create(self, scope='g1', request='msg1', rule=''):
-        return deadlines.manage(self.db, 'kb', 'qq_group', scope, 'alice',
+        result = deadlines.manage(self.db, 'kb', 'qq_group', scope, 'alice',
             [{'key': 'mentioned1', 'openid': 'bob', 'name': 'Bob'}], request,
             'add', title='提交申请', due='2026-01-03T18:00', owner='mentioned1', rule_json=rule)
+        self.db.execute("UPDATE ddl_reminders SET state='sent' WHERE item_id=? AND event='created'", (result['id'],))
+        return result
 
     def test_default_schedule_and_idempotency(self):
         item = self.create()
@@ -50,7 +52,7 @@ class DeadlineTests(unittest.TestCase):
         deadlines.init(self.db)
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM ddl_reminders WHERE item_id=? AND at=?',
                          (default['id'], deadlines.parse_date('2026-01-03T17:30'))).fetchone()[0], 1)
-        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM ddl_reminders WHERE item_id=?', (custom['id'],)).fetchone()[0], 1)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM ddl_reminders WHERE item_id=? AND event='reminder'", (custom['id'],)).fetchone()[0], 1)
 
     def test_half_hour_skipped_when_already_past(self):
         due = deadlines.parse_date('2026-01-01T08:20')
@@ -114,11 +116,12 @@ class DeadlineTests(unittest.TestCase):
             claim = deadlines.claim(self.db, 'kb', 'proactive')
             self.assertEqual(claim['items'][0]['scope'], 'g1')
             deadlines.ack(self.db, 'kb', claim['lease'], False)
-            self.assertFalse(deadlines.claim(self.db, 'kb', 'fallback', 'qq_group', 'g2')['items'])
-            retry = deadlines.claim(self.db, 'kb', 'fallback', 'qq_group', 'g1')
+            self.assertFalse(deadlines.claim(self.db, 'kb', 'fallback', 'qq_group', 'g1')['items'])
+            self.assertFalse(deadlines.claim(self.db, 'kb', 'fallback', 'qq_private', 'alice')['items'])
+            retry = deadlines.claim(self.db, 'kb', 'fallback', 'qq_private', 'bob')
             self.assertEqual(len(retry['items']), 1)
             deadlines.ack(self.db, 'kb', retry['lease'], True)
-            self.assertFalse(deadlines.claim(self.db, 'kb', 'fallback', 'qq_group', 'g1')['items'])
+            self.assertFalse(deadlines.claim(self.db, 'kb', 'fallback', 'qq_private', 'bob')['items'])
 
     def test_complete_authorization_and_cancel(self):
         item = self.create()
@@ -134,6 +137,22 @@ class DeadlineTests(unittest.TestCase):
         with patch('deadlines.time.time', return_value=self.now + 3700):
             deadlines.claim(self.db, 'kb', 'proactive')
         with patch('deadlines.time.time', return_value=self.now + 3900):
+            self.assertTrue(deadlines.claim(self.db, 'kb', 'fallback', 'qq_private', 'bob')['items'])
+
+    def test_group_created_receipt_and_deadline_route(self):
+        item = deadlines.manage(self.db, 'kb', 'qq_group', 'g1', 'alice',
+            [{'key': 'mentioned1', 'openid': 'bob', 'name': 'Bob'}], 'm-new', 'add',
+            title='提交', due='2026-01-01T09:00', owner='mentioned1')
+        created = deadlines.claim(self.db, 'kb', 'proactive')
+        self.assertEqual(created['items'][0]['event'], 'created')
+        deadlines.ack(self.db, 'kb', created['lease'], False)
+        self.assertFalse(deadlines.claim(self.db, 'kb', 'fallback', 'qq_private', 'bob')['items'])
+        self.assertEqual(deadlines.claim(self.db, 'kb', 'fallback', 'qq_private', 'alice')['items'][0]['event'], 'created')
+        with patch('deadlines.time.time', return_value=deadlines.parse_date('2026-01-01T09:00')):
+            self.db.execute("UPDATE ddl_reminders SET state='sent' WHERE item_id=? AND at<?", (item['id'], deadlines.parse_date('2026-01-01T09:00')))
+            due = deadlines.claim(self.db, 'kb', 'proactive')
+            deadlines.ack(self.db, 'kb', due['lease'], False)
+            self.assertFalse(deadlines.claim(self.db, 'kb', 'fallback', 'qq_private', 'bob')['items'])
             self.assertTrue(deadlines.claim(self.db, 'kb', 'fallback', 'qq_group', 'g1')['items'])
 
 
